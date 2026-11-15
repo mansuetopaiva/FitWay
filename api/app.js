@@ -2,10 +2,9 @@
 // Ações: criar, entrar, eu, salvar, sair, perfil, foto, treino, ranking, admin. Banco: Postgres (Neon) via DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { extractText, getDocumentProxy } from "unpdf";
 import { acaoAdmin, ehAdmin } from "./_admin.js";
 import { DIA, juntar, limpar } from "./_dados.js";
-import { lerTreino } from "./_treino.js";
+import { lerPdf } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
@@ -140,16 +139,8 @@ export default async function handler(req, res) {
         await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;
         return res.json({ dados });
       }
-      const pdf = texto(b.pdf, 100, 4200000) ? Buffer.from(b.pdf, "base64") : null;
-      if (!pdf || pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return res.status(400).json({ erro: "Envie um arquivo PDF de até 3 MB." });
-      let lido, doc;
-      try {
-        doc = await getDocumentProxy(new Uint8Array(pdf));
-        if (doc.numPages > 30) return res.status(400).json({ erro: "O PDF pode ter no máximo 30 páginas." });
-        lido = (await extractText(doc, { mergePages: true })).text;
-      } catch (e) { return res.status(422).json({ erro: "Não consegui abrir este PDF." }); }
-      const plano = lerTreino(lido.slice(0, 200000));
-      if (!plano) return res.status(422).json({ erro: "Não encontrei exercícios neste PDF. Ele precisa ter listas numeradas com séries x repetições, como “1 Supino reto 3 x 10”. PDF escaneado (foto) não funciona." });
+      const { plano, status, erro } = await lerPdf(b.pdf);
+      if (!plano) return res.status(status).json({ erro });
       dados.plano = plano;
       dados.proximo = plano.treinos[0].id;
       await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;

@@ -111,3 +111,31 @@ test("cada nome sugerido no datalist cai na própria regra de foto", () => {
   // a i-ésima sugestão cai na i-ésima regra, ou seja, nenhuma regra anterior "rouba" o nome
   assert.deepEqual(NOMES_FOTOS.map((n, i) => [n, foto(n)]).filter(([, f], i) => f !== ids[i]), []);
 });
+
+test("acesso: entradas fora da faixa são recusadas antes de gravar", async () => {
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  const dono = { email: "dono@exemplo.com" };
+  const casos = [{}, { dias: 0 }, { dias: 366 }, { dias: 1.5 }, { dias: "30" }, { ate: "2026-02-30" }, { ate: "15/11/2026" },
+    { cortar: "sim" }, { dias: 7, cortar: true }];
+  for (const extra of casos) {
+    const { sql, chamadas } = sqlFalso();
+    const r = await acaoAdmin(sql, dono, { op: "acesso", email: "aluno@x.com", ...extra });
+    assert.equal(r.status, 400, JSON.stringify(extra));
+    assert.equal(chamadas.length, 0, JSON.stringify(extra));
+  }
+  const { sql } = sqlFalso();
+  assert.equal((await acaoAdmin(sql, dono, { op: "acesso", email: "", dias: 7 })).status, 400);
+  // sql falso devolve nenhuma linha: o update não achou o usuário
+  assert.equal((await acaoAdmin(sql, dono, { op: "acesso", email: "ninguem@x.com", dias: 7 })).status, 404);
+});
+
+test("plano_salvar e plano_pdf recusam entrada inválida antes de gravar", async () => {
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  const dono = { email: "dono@exemplo.com" };
+  for (const b of [{ op: "plano_salvar", plano: { nome: "x", treinos: [] } }, { op: "plano_salvar" }, { op: "plano_pdf", pdf: "não é pdf" }, { op: "plano_pdf" }]) {
+    const { sql, chamadas } = sqlFalso();
+    const r = await acaoAdmin(sql, dono, { email: "aluno@x.com", ...b });
+    assert.equal(r.status, 400, JSON.stringify(b));
+    assert.equal(chamadas.length, 0, JSON.stringify(b));
+  }
+});

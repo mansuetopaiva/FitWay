@@ -1,3 +1,5 @@
+import { extractText, getDocumentProxy } from "unpdf";
+
 // Lê o texto de um PDF de treino com regras fixas (sem IA) e monta o plano no formato de js/data.js.
 // Espera linhas numeradas com "séries x repetições", como "1 Supino reto com halteres B 3 x 6–8 Observação".
 
@@ -144,6 +146,22 @@ const SERIES = /(?:\s([BI]))?\s(\d{1,2})\s*[xX×]\s*(\d{1,3}(?:\s*[–—-]\s*\d
 const NUMERO = /(?:^|\s)(\d{1,2})[.)º]?\s+(?=\p{Lu})/gu;
 const TITULO_TREINO = /(?:^|\n)[ \t]*((?:Treino\s+)?([A-Z])\s*[–—:-]\s+(\p{L}[^\n]{1,70}))/gu;
 const DESCANSO = { B: 150, I: 90 }; // B = básico, I = isolador; sem tipo, 60 s
+
+// PDF em base64 (vindo do navegador) -> { plano } ou { status, erro }. Usado pela ação "treino" e pelo admin.
+// Limites contra arquivo hostil: 3 MB, 30 páginas e 200 mil caracteres de texto.
+export async function lerPdf(base64) {
+  const pdf = typeof base64 === "string" && base64.length >= 100 && base64.length <= 4200000 ? Buffer.from(base64, "base64") : null;
+  if (!pdf || pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return { status: 400, erro: "Envie um arquivo PDF de até 3 MB." };
+  let lido;
+  try {
+    const doc = await getDocumentProxy(new Uint8Array(pdf));
+    if (doc.numPages > 30) return { status: 400, erro: "O PDF pode ter no máximo 30 páginas." };
+    lido = (await extractText(doc, { mergePages: true })).text;
+  } catch (e) { return { status: 422, erro: "Não consegui abrir este PDF." }; }
+  const plano = lerTreino(lido.slice(0, 200000));
+  if (!plano) return { status: 422, erro: "Não encontrei exercícios neste PDF. Ele precisa ter listas numeradas com séries x repetições, como “1 Supino reto 3 x 10”. PDF escaneado (foto) não funciona." };
+  return { plano };
+}
 
 // Tabela numerada primeiro (entende nomes quebrados em várias linhas); se não houver, lista.
 export const lerTreino = (texto) => lerTabela(texto) || lerLista(texto);
