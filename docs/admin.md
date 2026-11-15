@@ -50,7 +50,7 @@ test/admin.test.js  NOVO
 ### Banco (em `schema()`, idempotente)
 
 ```sql
-alter table usuarios add column if not exists criado timestamptz default now();
+-- criado: criada vazia (contas antigas ficam null), o dia da migração vai no comentário da coluna, e só depois entra o default now()
 alter table usuarios add column if not exists acesso_ate timestamptz;
 create table if not exists admin_log (
   id bigint generated always as identity primary key,
@@ -60,7 +60,7 @@ create table if not exists admin_log (
 create index if not exists admin_log_alvo on admin_log (alvo_email, criado desc);
 ```
 
-Usuários que já existem ficam com `criado` igual ao momento em que a coluna for criada, porque o banco não guardou a data real. Isso aparece em "novos nos últimos 7 dias" uma única vez.
+Usuários que já existem ficam com `criado` nulo, porque o banco não guardou a data real. No painel eles aparecem como "Antes de DD/MM/AAAA", com o dia em que a coluna foi criada (guardado no comentário da coluna). O "novos nos últimos 7 dias" ignora os nulos.
 
 ### Ação `admin`: `{ acao: "admin", op, ... }`
 

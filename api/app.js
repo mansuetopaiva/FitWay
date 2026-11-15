@@ -27,7 +27,15 @@ const schema = () => pronto ||= (async () => {
   )`;
   await sql`alter table usuarios add column if not exists grupo text`; // código do grupo do ranking
   await sql`alter table usuarios add column if not exists foto text`; // foto de perfil, JPEG 160x160 em data URL
-  await sql`alter table usuarios add column if not exists criado timestamptz default now()`; // contas antigas ficam com a data desta migração
+  // Data de cadastro: contas antigas ficam null (o banco não guardou a data real) e só as novas ganham now().
+  // O dia desta migração vai no comentário da coluna, para o painel mostrar "Antes de DD/MM/AAAA".
+  await sql`do $$ begin
+    if not exists (select 1 from information_schema.columns where table_name = 'usuarios' and column_name = 'criado') then
+      alter table usuarios add column criado timestamptz;
+      execute format('comment on column usuarios.criado is %L', to_char(now() at time zone 'America/Sao_Paulo', 'DD/MM/YYYY'));
+      alter table usuarios alter column criado set default now();
+    end if;
+  end $$`;
   await sql`alter table usuarios add column if not exists acesso_ate timestamptz`; // até quando o admin liberou o acesso (ainda não bloqueia nada)
   await sql`create table if not exists admin_log (
     id bigint generated always as identity primary key,
