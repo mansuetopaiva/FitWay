@@ -169,3 +169,13 @@ test("outros jeitos comuns de escrever séries", () => {
     ["B – Costas", ["Remada curvada 4x8–10"]],
   ]);
 });
+
+test("texto corrido de e-book não vira treino", () => {
+  assert.equal(lerTreino(`Volume de treino
+O volume pode ser medido de algumas formas:
+Pelo número total de repetições, por exemplo 3 x 10 = 30
+Tipos de séries
+Já as séries de 6 a 8 repetições servem para força.
+Carga (KG) 100 100 100 100 105
+Séries X Rep 3x8-10`), null);
+});

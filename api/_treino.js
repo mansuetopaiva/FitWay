@@ -172,19 +172,24 @@ export function lerLista(texto) {
     } else if (m0 && corpo.length >= 3 && corpo.length <= 60 && /^\p{Lu}/u.test(corpo) && !/[.:]$/.test(corpo)) {
       ex = [(nome = corpo), 3, "", ""]; // exercício sem séries escritas
     }
-    if (ex && nome.length >= 2 && nome.length <= 70 && /^\p{L}/u.test(nome)) {
+    // Texto corrido também tem "3 x 10" no meio de frases: sem marcador, só vale nome curto começando com maiúscula.
+    const palavras = nome.split(/\s+/).length;
+    const parece = m0 ? palavras <= 10 && /^\p{L}/u.test(nome) : palavras <= 6 && /^\p{Lu}/u.test(nome) && !/[.:;!?]/.test(nome);
+    if (ex && nome.length >= 2 && nome.length <= 70 && parece) {
       if (!atual || atual.cabecalho !== cabecalho) grupos.push((atual = { cabecalho, exercicios: [] }));
       atual.exercicios.push(ex);
-    } else if (!m0 && linha.length >= 3 && linha.length <= 70 && !/[.,;]$/.test(linha)) {
+    } else if (!m0 && linha.length >= 3 && linha.length <= 60 && /^[\p{Lu}\d]/u.test(linha) && !/[.,;?!]$/.test(linha)) {
       cabecalho = linha.replace(/\s+(?:n{1,5}|[■□▪●]+)$/, "").trim(); // "n" = quadradinhos decorativos do PDF
     }
   }
-  if (!grupos.length) return null;
+  // Grupo sem nenhum nome de exercício conhecido é texto corrido (ex.: e-book), não treino.
+  const reais = grupos.filter((g) => g.exercicios.some(([nome]) => foto(nome)));
+  if (!reais.length) return null;
   return {
     nome: titulo,
     totalSessoes: 0,
     validade: "",
-    treinos: grupos.slice(0, 12).map((g, i) => {
+    treinos: reais.slice(0, 12).map((g, i) => {
       const letra = g.cabecalho.match(/^(?:[Tt]reino\s*)?([A-Z])\s*[–—:-]\s*(.+)/u);
       const id = String.fromCharCode(65 + i);
       return {
