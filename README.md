@@ -22,15 +22,12 @@ Abrir o `index.html` direto ou por `python3 -m http.server` não funciona mais, 
 ```
 index.html          página única
 css/style.css       visual (tema escuro + verde)
-js/data.js          treinos, exercícios, cargas e nomes dos GIFs  <- edite aqui
 js/app.js           telas, check-in, gráfico, ranking e chamadas ao servidor
 api/app.js          backend: criar conta, entrar, sair, carregar e salvar dados
 api/_dados.js       validação e fusão dos dados (testado em test/)
 api/_treino.js      leitura do PDF de treino e escolha da foto de cada exercício
 img/fitway-logo.png     logo da tela de login
 img/fitway-favicon.png  ícone da aba e da tela inicial do celular
-gifs/               um GIF animado por exercício (240x240)
-gifs/thumb/         miniatura parada de cada GIF (92x92)
 ```
 
 ## Banco de dados
@@ -45,7 +42,7 @@ O treino em andamento (séries marcadas e cronômetro) continua só no aparelho 
 
 ## Treino em PDF
 
-No Perfil, **Enviar PDF do treino** troca o treino padrão pelo do PDF. A leitura é por regras, sem IA, e espera:
+Conta nova não tem treino: a aba **Treinos** só aparece depois que a pessoa envia o PDF em **Perfil → Enviar PDF do treino**. A leitura é por regras, sem IA, e espera:
 
 - títulos como `A – Superior` ou `Treino B – Pernas` antes de cada tabela (sem título, cada lista vira Treino A, B, C…);
 - linhas numeradas com séries x repetições, como `1 Supino reto com halteres B 3 x 6–8 Observação`
@@ -61,19 +58,6 @@ Para reconhecer um nome novo, adicione uma linha nessa lista.
 A aba **Ranking** cria um grupo com um código de 6 letras. Quem entra com o código vê o nome e os check-ins
 de todos do grupo na semana (a partir de domingo) e no mês. O email nunca aparece para os outros.
 
-## Editar o treino padrão
-
-Em `js/data.js`, cada exercício é uma linha:
-
-```js
-["Nome", "arquivo-do-gif", séries, repetições, carga em kg, intervalo em segundos, "Instruções"]
-```
-
-## Trocar os GIFs
-
-Substitua o arquivo em `gifs/` mantendo o mesmo nome (ex.: `gifs/leg-press-45.gif`) e,
-se quiser, a miniatura em `gifs/thumb/` (ex.: `gifs/thumb/leg-press-45.png`).
-Use apenas GIFs que você tem direito de publicar.
 
 ## Testes
 

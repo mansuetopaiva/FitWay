@@ -64,7 +64,7 @@
       plano: d.plano && Array.isArray(d.plano.treinos) && d.plano.treinos.length ? d.plano : null, // treino enviado em PDF
     };
   }
-  const plano = () => (data && data.plano) || PLANO;
+  const plano = () => data && data.plano; // só existe depois que a pessoa envia o PDF
   async function entrou(u) {
     email = u.email; nomeUser = u.nome;
     store.set("mt_session", email); // avisa as outras abas (evento "storage")
@@ -138,7 +138,7 @@
         return (err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
       }
       restoreSessao();
-      location.hash = "#/inicio";
+      location.hash = data.plano ? "#/inicio" : "#/perfil"; // conta nova começa enviando o PDF
       render();
     };
     $(criar ? "#nome" : "#email").focus();
@@ -163,7 +163,7 @@
       <main class="screen">${body}</main>
       <nav class="nav" aria-label="Principal">
         ${item("#/inicio", "home", "Início", "inicio")}
-        ${item("#/treinos", "gym", "Treinos", "treinos")}
+        ${plano() ? item("#/treinos", "gym", "Treinos", "treinos") : ""}
         ${item("#/ranking", "trophy", "Ranking", "ranking")}
         ${item("#/perfil", "user", "Perfil", "perfil")}
       </nav>`;
@@ -258,21 +258,17 @@
   }
 
   // ---------- treinos ----------
-  const treino = (id) => plano().treinos.find((t) => t.id === id);
+  const treino = (id) => plano() && plano().treinos.find((t) => t.id === id);
   // "db:Nome" = par de fotos (0.jpg e 1.jpg) do free-exercise-db, domínio público; "" = exercício sem imagem.
   // shortcut: as fotos são carregadas direto do GitHub desse projeto; copiar para cá se ele sair do ar ou ficar lento.
   const DB = "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
   const SEM_FOTO = "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -12 48 48"><path fill="#bdbdbd" d="${ICON.gym}"/></svg>`);
   const ehFoto = (nome) => nome.startsWith("db:");
-  const gif = (nome, quadro) => !nome ? SEM_FOTO
-    : ehFoto(nome) ? `${DB}${encodeURIComponent(nome.slice(3))}/${quadro ? 1 : 0}.jpg`
-    : `gifs/${encodeURIComponent(nome)}.gif`;
-  const thumb = (nome) => !nome || ehFoto(nome) ? gif(nome) : `gifs/thumb/${encodeURIComponent(nome)}.png`;
+  const gif = (nome, quadro) => ehFoto(nome) ? `${DB}${encodeURIComponent(nome.slice(3))}/${quadro ? 1 : 0}.jpg` : SEM_FOTO;
+  const thumb = gif;
   let quadroTimer = null;
   let sessao = null; // { id, inicio, feitas: {idx: n}, aberta: idx, editando: bool }
   let restTimer = null, rest = 0, restEnd = 0, tickTimer = null;
-  const feitasSessoes = () => plano().totalSessoes ? Math.min(data.sessoes, plano().totalSessoes) : data.sessoes;
-  const totalTxt = () => feitasSessoes() + (plano().totalSessoes ? "/" + plano().totalSessoes : "");
   function restoreSessao() {
     const s = store.get(sessaoKey(), null);
     sessao = s && treino(s.id) && Number.isFinite(s.inicio) && s.feitas && typeof s.feitas === "object"
@@ -292,23 +288,18 @@
         <span class="t"><b>${esc(t.nome)}</b><span class="muted">${t.exercicios.length} exercícios</span></span>
         <span class="play">${icon("play")}</span>
       </button>`).join("");
-    const total = plano().totalSessoes, pct = total ? Math.min(100, (data.sessoes / total) * 100) : 0;
     shell("Treinos", `
       <p class="label">Treinos</p>
       <section class="card">
         <div class="plan-head"><b style="font-weight:400">${esc(plano().nome)}</b></div>
         ${lista}
-        <div class="progress">
-          <span>${totalTxt()} sessões</span>
-          <div class="track"><i style="width:${pct}%"></i></div>
-          <span>${plano().validade ? "Validade: " + esc(plano().validade) : ""}</span>
-        </div>
+        <div class="progress"><span>${data.sessoes} sessões feitas</span></div>
       </section>`, "treinos");
     app.querySelectorAll(".wk").forEach((b) => b.onclick = () => (location.hash = "#/treino/" + b.dataset.id));
   }
 
   // Treino padrão: chave pelo GIF (como sempre foi). Treino do PDF: pelo nome, porque dois exercícios podem ter a mesma foto.
-  const cargaKey = (t, i) => { const [n, g] = t.exercicios[i]; return t.id + ":" + (g && !ehFoto(g) ? g : n); };
+  const cargaKey = (t, i) => t.id + ":" + t.exercicios[i][0]; // pelo nome: dois exercícios podem ter a mesma foto
   const carga = (t, i) => {
     const v = data.cargas[cargaKey(t, i)];
     return Number.isFinite(v) ? v : t.exercicios[i][4];
@@ -507,17 +498,16 @@
         ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar nome</button></div>`}
       </section>
       <section class="card">
-        <div class="row"><span>Plano</span><span>${esc(plano().nome)}</span></div>
-        <div class="row"><span>Sessões feitas</span><span>${totalTxt()}</span></div>
+        <div class="row"><span>Plano</span><span>${plano() ? esc(plano().nome) : "Nenhum"}</span></div>
+        <div class="row"><span>Sessões feitas</span><span>${data.sessoes}</span></div>
         <div class="row"><span>Check-ins</span><span>${data.checkins.length}</span></div>
       </section>
       <section class="card">
         <h2>Meu treino</h2>
-        <p class="muted" style="margin:6px 0 12px">Envie o PDF do seu treino. O site lê os exercícios, as séries e as repetições e escolhe a foto de cada exercício.</p>
+        <p class="muted" style="margin:6px 0 12px">${data.plano ? "Para trocar de treino, envie outro PDF." : "Envie o PDF do seu treino para liberar a aba Treinos."} O site lê os exercícios, as séries e as repetições e escolhe a foto de cada exercício.</p>
         <input type="file" id="pdf" accept="application/pdf,.pdf" hidden>
         <p class="err" role="alert" id="pdfErr"></p>
-        <button class="btn" id="enviarPdf">Enviar PDF do treino</button>
-        ${data.plano ? `<div class="tools"><button id="padrao">Voltar ao treino padrão</button></div>` : ""}
+        <button class="btn" id="enviarPdf">${data.plano ? "Trocar PDF do treino" : "Enviar PDF do treino"}</button>
       </section>
       <button class="btn" id="sair" style="margin-top:16px">Sair</button>`, "perfil");
     $("#sair").onclick = sair;
@@ -535,7 +525,7 @@
       }
       stopRest(); sessao = null; saveSessao();
       const ex = plano().treinos.flatMap((t) => t.exercicios), sem = ex.filter((e) => !e[1]).length;
-      toast(data.plano ? `Treino carregado: ${data.plano.treinos.length} treinos, ${ex.length} exercícios${sem ? `, ${sem} sem foto` : ""}.` : "Treino padrão de volta.");
+      toast(`Treino carregado: ${data.plano.treinos.length} treinos, ${ex.length} exercícios${sem ? `, ${sem} sem foto` : ""}.`);
       render(); // redesenha a tela em que a pessoa estiver, que pode ter mudado durante o envio
     };
     enviar.onclick = () => $("#pdf").click();
@@ -549,7 +539,6 @@
       fr.onerror = () => (pdfErr.textContent = "Não consegui ler o arquivo.");
       fr.readAsDataURL(f);
     };
-    if (data.plano) $("#padrao").onclick = () => { if (confirm("Trocar o treino enviado pelo treino padrão?")) trocarPlano({}); };
     if (!editandoPerfil) {
       $("#editar").onclick = () => { editandoPerfil = true; viewPerfil(); $("#nome").select(); };
       return;
@@ -640,6 +629,7 @@
     const [, rota, arg] = location.hash.split("/");
     editandoPerfil = false;
     if (rota !== "treino") stopRest();
+    if (!plano() && (rota === "treinos" || rota === "treino")) { location.hash = "#/perfil"; return; }
     if (rota === "treinos") viewTreinos();
     else if (rota === "treino") {
       viewTreino(arg);
