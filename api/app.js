@@ -115,8 +115,12 @@ export default async function handler(req, res) {
     if (b.acao === "admin") { const r = await acaoAdmin(sql, u, b); return res.status(r.status).json(r.corpo); }
     if (b.acao === "salvar") {
       const dados = juntar(limpar(u.dados), limpar(b.dados));
-      await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;
-      return res.json({ dados });
+      // O treino é o que estiver no banco na hora da gravação, não o lido no início: assim um salvamento
+      // de check-in que cruza com o admin trocando o treino não desfaz a troca.
+      const [x] = await sql`update usuarios set dados = (${JSON.stringify(dados)}::jsonb - 'plano')
+          || case when dados->'plano' is not null then jsonb_build_object('plano', dados->'plano') else '{}'::jsonb end
+        where email = ${u.email} returning dados`;
+      return res.json({ dados: limpar(x.dados) });
     }
     if (b.acao === "perfil") {
       const nome = texto(b.nome, 1, 40) ? b.nome.trim() : "";

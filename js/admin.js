@@ -159,7 +159,7 @@
         <h2 id="admDetTit" tabindex="-1">${esc(d.nome)}</h2>
         <p class="muted">${esc(d.email)}</p>
         <div class="row"><span>Cadastro</span><span>${esc(cadastro(d.criado))}</span></div>
-        <div class="row"><span>Check-ins</span><span>${d.checkins}${d.ultimoCheckin ? ` · último em ${diaBR(d.ultimoCheckin)}` : ""}</span></div>
+        <div class="row"><span>Check-ins</span><span>${d.checkins}${d.ultimoCheckin ? ` · último em ${esc(diaBR(d.ultimoCheckin))}` : ""}</span></div>
         <div class="row"><span>Sessões feitas</span><span>${d.sessoes}</span></div>
         <div class="row"><span>Grupo do ranking</span><span>${d.grupo ? esc(d.grupo) : "Nenhum"}</span></div>
       </div>
