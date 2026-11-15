@@ -160,6 +160,7 @@
   function shell(title, body, tab) {
     const item = (href, ic, label, id) =>
       `<a href="${href}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""}><span>${icon(ic)}</span>${label}</a>`;
+    app.classList.toggle("largo", tab === "admin"); // só o painel usa a tela larga no computador
     app.innerHTML = `
       <header class="topbar"><h1>${title}</h1></header>
       <main class="screen">${body}</main>
