@@ -26,12 +26,14 @@
 
   // ---------- estrutura ----------
   function render(arg) {
+    const antes = detEmail; // usuário aberto até agora (para devolver o foco à linha dele)
     let alvo = "";
     try { alvo = arg ? decodeURIComponent(arg) : ""; } catch (e) { alvo = ""; }
     if (sujo && alvo !== detEmail && !confirm("O treino tem alterações não salvas. Sair e descartar?")) {
       history.replaceState(null, "", "#/admin/" + encodeURIComponent(detEmail));
       alvo = detEmail;
     } else if (alvo !== detEmail) { sujo = false; }
+    if (!alvo) detEmail = ""; // antes de pintar a lista, para a linha antiga não ficar destacada
     shell("Admin", `
       <div class="adm ${alvo ? "com-detalhe" : ""}">
         <section class="adm-resumo" id="admResumo" aria-label="Resumo"></section>
@@ -55,8 +57,7 @@
     if (!resumo) carregarResumo();
     if (lista.estado === "carregando" && !lista.itens.length) carregarLista(false);
     if (alvo) { if (alvo !== detEmail || !det) carregarDetalhe(alvo); else pintarDetalhe(); return; }
-    const antes = detEmail;
-    detEmail = ""; det = null; edit = null;
+    det = null; edit = null;
     pintarDetalhe();
     // voltou do detalhe: foco na linha do usuário que estava aberto
     const linhaAntes = antes && app.querySelector(`a[href="#/admin/${CSS.escape(encodeURIComponent(antes))}"]`);
@@ -275,9 +276,11 @@
     const attr = botao && [...botao.attributes].find((a) => a.name.startsWith("data-"));
     const foco = attr ? `[${attr.name}${attr.value ? `="${attr.value}"` : ""}]` : "#admTrTit";
     if (botao) botao.disabled = true;
+    const email = detEmail;
     try {
-      const r = await api("admin", { email: detEmail, ...corpo });
+      const r = await api("admin", { email, ...corpo });
       toast(okMsg);
+      if (email !== detEmail) return r; // o admin já abriu outro usuário: não recarrega nem descarta o que está aberto
       sujo = false;
       await carregarDetalhe(detEmail, true);
       const f = $(foco); if (f && !f.disabled) f.focus(); else { const t = $("#admDetTit"); if (t) t.focus(); }
@@ -326,6 +329,8 @@
     if (ds.salvar !== undefined) {
       return escrever({ op: "plano_salvar", plano: edit }, "Treino salvo.", b);
     }
+    if (!["addTreino", "tirarTreino", "addEx", "subir", "descer", "tirar"].some((k) => k in ds)) return;
+    if (ds.tirarTreino !== undefined && !confirm(`Excluir o treino ${t.id} (${t.nome}) deste plano? Só vale depois de salvar.`)) return;
     sujo = true;
     if (ds.addTreino !== undefined) {
       const id = proximoId();
@@ -334,7 +339,6 @@
       return redesenhar("[data-treino-nome]");
     }
     if (ds.tirarTreino !== undefined) {
-      if (!confirm(`Excluir o treino ${t.id} (${t.nome}) deste plano? Só vale depois de salvar.`)) return;
       edit.treinos.splice(aba, 1);
       aba = Math.max(0, aba - 1);
       return redesenhar(`#admAba${aba}`);

@@ -30,7 +30,7 @@ const schema = () => pronto ||= (async () => {
   // O dia desta migração vai no comentário da coluna, para o painel mostrar "Antes de DD/MM/AAAA".
   await sql`do $$ begin
     if not exists (select 1 from information_schema.columns where table_name = 'usuarios' and column_name = 'criado') then
-      alter table usuarios add column criado timestamptz;
+      alter table usuarios add column if not exists criado timestamptz;
       execute format('comment on column usuarios.criado is %L', to_char(now() at time zone 'America/Sao_Paulo', 'DD/MM/YYYY'));
       alter table usuarios alter column criado set default now();
     end if;
@@ -87,6 +87,8 @@ export default async function handler(req, res) {
       if (b.acao === "criar") {
         const nome = texto(b.nome, 1, 40) ? b.nome.trim() : "";
         if (!nome) return res.status(400).json({ erro: "Digite seu nome." });
+        // Email listado em ADMIN_EMAILS sem conta: quem cadastrasse primeiro viraria admin. A conta tem de existir antes.
+        if (ehAdmin(email)) return res.status(403).json({ erro: "Este email não pode ser cadastrado por aqui." });
         [u] = await sql`insert into usuarios (email, nome, senha) values (${email}, ${nome}, ${senhaHash(b.senha)})
           on conflict do nothing returning email, nome, dados`;
         if (!u) return res.status(409).json({ erro: "Já existe uma conta com este email. Use a aba Entrar." });

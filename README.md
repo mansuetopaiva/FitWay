@@ -71,7 +71,9 @@ de todos do grupo na semana (a partir de domingo) e no mês. O email nunca apare
 ## Admin
 
 Na Vercel, em **Settings → Environment Variables**, crie `ADMIN_EMAILS` com os emails de quem administra,
-separados por vírgula (ex.: `dono@gmail.com, socio@gmail.com`), e faça um **Redeploy**. Essas pessoas entram com a
+separados por vírgula, e faça um **Redeploy**. **A conta precisa existir antes:** crie a conta no app
+e só depois coloque o email na variável. Um email listado ali não pode mais ser cadastrado pelo app (senão quem
+cadastrasse primeiro viraria admin). Essas pessoas entram com a
 conta normal e passam a ver a aba **Admin** (escudo). Sem a variável, ninguém é admin.
 
 A aba escondida é só visual. Toda chamada do painel confere no servidor, a cada vez, se o email da sessão está em

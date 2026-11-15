@@ -139,3 +139,82 @@ test("plano_salvar e plano_pdf recusam entrada inválida antes de gravar", async
     assert.equal(chamadas.length, 0, JSON.stringify(b));
   }
 });
+
+test("usuarios: página fora da faixa é recusada em vez de voltar para a primeira", async () => {
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  for (const pagina of [-1, 1.5, "2", 100001]) {
+    const { sql, chamadas } = sqlFalso();
+    assert.equal((await acaoAdmin(sql, { email: "dono@exemplo.com" }, { op: "usuarios", pagina })).status, 400, String(pagina));
+    assert.equal(chamadas.length, 0);
+  }
+});
+
+// ---- achados da revisão ----
+const dono = { email: "dono@exemplo.com" };
+
+test("acesso: data impossível dá 400, não erro 500", async () => {
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  for (const ate of ["2026-13-01", "2026-01-32", "2026-00-10"]) {
+    const { sql, chamadas } = sqlFalso();
+    assert.equal((await acaoAdmin(sql, dono, { op: "acesso", email: "a@x.com", ate })).status, 400, ate);
+    assert.equal(chamadas.length, 0);
+  }
+});
+
+test("acesso: valores na borda chegam ao banco (404 = passou da validação e não achou o usuário)", async () => {
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  for (const extra of [{ dias: 1 }, { dias: 365 }, { ate: "2028-02-29" }, { cortar: true }]) {
+    const { sql, chamadas } = sqlFalso();
+    assert.equal((await acaoAdmin(sql, dono, { op: "acesso", email: "a@x.com", ...extra })).status, 404, JSON.stringify(extra));
+    assert.ok(chamadas.length >= 1);
+  }
+});
+
+test("sem ADMIN_EMAILS ou sem usuário ninguém é admin; lista de ops fixa", async () => {
+  delete process.env.ADMIN_EMAILS;
+  for (const op of OPS) assert.equal((await acaoAdmin(sqlFalso().sql, dono, { op })).status, 403, op);
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  assert.equal((await acaoAdmin(sqlFalso().sql, null, { op: "resumo" })).status, 403);
+  // op nova precisa de ramo próprio: este teste obriga a revisar o despacho ao mudar a lista
+  assert.deepEqual(OPS, ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover"]);
+});
+
+test("usuarios: a busca chega ao banco escapada", async () => {
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  const { sql, chamadas } = sqlFalso();
+  await acaoAdmin(sql, dono, { op: "usuarios", busca: " 50%_ " });
+  assert.deepEqual(chamadas[0].valores, ["%50\\%\\_%", "%50\\%\\_%", 0]);
+  assert.equal(escaparLike("\\%"), "\\\\\\%");
+});
+
+test("email do alvo: normalizado, e inválido é recusado sem consulta", async () => {
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  { const { sql, chamadas } = sqlFalso(); assert.equal((await acaoAdmin(sql, dono, { op: "usuario", email: "  Aluno@X.com " })).status, 404); assert.deepEqual(chamadas[0].valores, ["aluno@x.com"]); }
+  for (const email of ["a".repeat(121), 42, "   ", ["a@x.com"]]) {
+    const { sql, chamadas } = sqlFalso();
+    assert.equal((await acaoAdmin(sql, dono, { op: "usuario", email })).status, 400, String(email));
+    assert.equal(chamadas.length, 0);
+  }
+});
+
+test("plano_salvar: uma única escrita com o plano limpo", async () => {
+  process.env.ADMIN_EMAILS = "dono@exemplo.com";
+  const { sql, chamadas } = sqlFalso();
+  await acaoAdmin(sql, dono, { op: "plano_salvar", email: "a@x.com", plano: planoCom() });
+  assert.equal(chamadas.length, 1);
+  assert.ok(chamadas[0].valores.includes(JSON.stringify(validarPlano(planoCom()).plano)));
+});
+
+test("validarPlano: bordas que faltavam e chaves extras descartadas", () => {
+  assert.match(erro(planoCom({ exercicios: [ex({ carga: -0.01 })] })), /carga/);
+  assert.equal(erro(planoCom({ nome: "p".repeat(80) })), undefined);
+  const t = (o) => planoCom({ treinos: [{ id: "A", nome: "A", exercicios: [ex()], ...o }] });
+  assert.equal(erro(t({ id: "A".repeat(10) })), undefined);
+  assert.match(erro(t({ id: "A".repeat(11) })), /identificador/);
+  assert.equal(erro(t({ nome: "t".repeat(80) })), undefined);
+  assert.match(erro(t({ nome: "t".repeat(81) })), /nome do treino/);
+  assert.match(erro(planoCom({ treinos: [null] })), /identificador/);
+  const r = validarPlano({ nome: "x", extra: 1, treinos: [{ id: "A", nome: "a", lixo: 2, exercicios: [ex()] }] });
+  assert.deepEqual(Object.keys(r.plano), ["nome", "treinos"]);
+  assert.deepEqual(Object.keys(r.plano.treinos[0]), ["id", "nome", "exercicios"]);
+});

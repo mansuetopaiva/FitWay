@@ -16,11 +16,9 @@ const ok = (corpo) => ({ status: 200, corpo });
 const falha = (status, erro) => ({ status, corpo: { erro } });
 const emailAlvo = (v) => (typeof v === "string" && v.length >= 3 && v.length <= 120 ? v.trim().toLowerCase() : "");
 
-// Campos de lista. shortcut: conta check-ins dentro do JSON "dados" a cada consulta; mover check-ins para uma tabela própria se passar de alguns milhares de usuários.
-const linha = (x) => {
-  const ck = Array.isArray(x.dados && x.dados.checkins) ? x.dados.checkins : [];
-  return { nome: x.nome, email: x.email, criado: x.criado, acessoAte: x.acesso_ate, checkins: ck.length, ultimoCheckin: ck.length ? ck[ck.length - 1] : null, temTreino: !!(x.dados && x.dados.plano) };
-};
+// Campos de lista, calculados no SQL para não trazer o "dados" inteiro (plano + histórico) de cada linha.
+// shortcut: conta check-ins dentro do JSON "dados"; mover check-ins para uma tabela própria se passar de alguns milhares de usuários.
+const linha = (x) => ({ nome: x.nome, email: x.email, criado: x.criado, acessoAte: x.acesso_ate, checkins: x.checkins, ultimoCheckin: x.ultimo || null, temTreino: x.tem_treino });
 
 export async function acaoAdmin(sql, u, b) {
   if (!ehAdmin(u && u.email)) return falha(403, "Acesso restrito.");
@@ -45,9 +43,10 @@ export async function acaoAdmin(sql, u, b) {
 
   if (b.op === "usuarios") {
     const busca = typeof b.busca === "string" ? b.busca.trim().slice(0, 80) : "";
-    const pagina = Number.isInteger(b.pagina) && b.pagina >= 0 && b.pagina <= 500 ? b.pagina : 0;
+    if (b.pagina !== undefined && !(Number.isInteger(b.pagina) && b.pagina >= 0 && b.pagina <= 100000)) return falha(400, "Página inválida.");
+    const pagina = b.pagina || 0;
     const q = "%" + escaparLike(busca) + "%";
-    const xs = await sql`select nome, email, criado, acesso_ate, dados from usuarios
+    const xs = await sql`select nome, email, criado, acesso_ate, coalesce(jsonb_array_length(dados->'checkins'), 0)::int as checkins, dados->'checkins'->>-1 as ultimo, dados->'plano' is not null as tem_treino from usuarios
       where nome ilike ${q} or email ilike ${q}
       order by criado desc nulls last, email limit 21 offset ${pagina * 20}`;
     return ok({ itens: xs.slice(0, 20).map(linha), temMais: xs.length > 20 });
@@ -58,7 +57,8 @@ export async function acaoAdmin(sql, u, b) {
   const naoExiste = async () => !(await sql`select 1 from usuarios where email = ${alvo}`).length;
 
   if (b.op === "usuario") {
-    const [x] = await sql`select nome, email, criado, acesso_ate, dados, grupo from usuarios where email = ${alvo}`;
+    const [x] = await sql`select nome, email, criado, acesso_ate, dados, grupo,
+      coalesce(jsonb_array_length(dados->'checkins'), 0)::int as checkins, dados->'checkins'->>-1 as ultimo, dados->'plano' is not null as tem_treino from usuarios where email = ${alvo}`;
     if (!x) return falha(404, "Usuário não encontrado.");
     const historico = await sql`select criado, admin_email, acao, detalhes from admin_log where alvo_email = ${alvo} order by criado desc limit 20`;
     const d = limpar(x.dados);
@@ -77,7 +77,8 @@ export async function acaoAdmin(sql, u, b) {
         l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, 'acesso', email, ${JSON.stringify({ dias: b.dias })}::jsonb from a)
         select acesso_ate from a`;
     } else if (b.ate !== undefined) {
-      if (typeof b.ate !== "string" || !DIA.test(b.ate) || new Date(b.ate + "T00:00:00Z").toISOString().slice(0, 10) !== b.ate)
+      const dt = typeof b.ate === "string" && DIA.test(b.ate) ? new Date(b.ate + "T00:00:00Z") : null;
+      if (!dt || isNaN(dt) || dt.getUTCFullYear() < 2000 || dt.toISOString().slice(0, 10) !== b.ate)
         return falha(400, "Data inválida.");
       // Fim do dia escolhido no horário de Brasília = início do dia seguinte lá, independente do fuso do servidor.
       [x] = await sql`with a as (update usuarios set acesso_ate = ((${b.ate}::date + 1)::timestamp at time zone 'America/Sao_Paulo')
@@ -117,11 +118,11 @@ export async function acaoAdmin(sql, u, b) {
           where email = ${alvo} returning email),
         l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, ${b.op}, email, ${JSON.stringify(det)}::jsonb from a)
         select email from a`;
-  } else {
+  } else if (b.op === "plano_remover") {
     [x] = await sql`with a as (update usuarios set dados = dados - 'plano' where email = ${alvo} returning email),
         l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, 'plano_remover', email, '{}'::jsonb from a)
         select email from a`;
-  }
+  } else return falha(400, "Operação desconhecida."); // op nova em OPS sem ramo próprio nunca cai num remover
   if (!x) return falha(404, "Usuário não encontrado.");
   return ok({ plano });
 }
