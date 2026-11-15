@@ -91,7 +91,7 @@
     const criar = loginMode === "criar";
     app.innerHTML = `
       <main class="login">
-        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1250" height="555"></h1>
+        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
         <p class="sub">${criar ? "Crie sua conta para registrar seus treinos." : "Entre para ver seus treinos e check-ins."}</p>
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected="${!criar}" class="${criar ? "" : "on"}" data-mode="entrar">Entrar</button>
