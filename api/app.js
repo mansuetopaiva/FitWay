@@ -4,7 +4,7 @@ import { neon } from "@neondatabase/serverless";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { juntar, limpar } from "./_dados.js";
 
-const sql = neon(process.env.DATABASE_URL);
+const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
 
 // Cria as tabelas na primeira chamada de cada instância; não precisa rodar SQL à mão.
