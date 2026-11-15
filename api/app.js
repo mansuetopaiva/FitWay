@@ -119,7 +119,6 @@ export default async function handler(req, res) {
         if (doc.numPages > 30) return res.status(400).json({ erro: "O PDF pode ter no máximo 30 páginas." });
         lido = (await extractText(doc, { mergePages: true })).text;
       } catch (e) { return res.status(422).json({ erro: "Não consegui abrir este PDF." }); }
-      finally { if (doc) doc.destroy(); }
       const plano = lerTreino(lido.slice(0, 200000));
       if (!plano) return res.status(422).json({ erro: "Não encontrei exercícios neste PDF. Ele precisa ter listas numeradas com séries x repetições, como “1 Supino reto 3 x 10”. PDF escaneado (foto) não funciona." });
       dados.plano = plano;
