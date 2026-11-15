@@ -45,8 +45,9 @@
 
   // ---------- conta e dados (no servidor) ----------
   async function api(acao, corpo) {
-    const r = await fetch("/api/app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ acao, ...corpo }) });
+    const r = await fetch("/api/app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ acao, conta: email || undefined, ...corpo }) });
     const j = await r.json().catch(() => ({}));
+    if (r.status === 409) { toast(j.erro); setTimeout(() => location.reload(), 1200); } // a conta do cookie mudou
     if (!r.ok) throw Object.assign(new Error(j.erro || "Erro no servidor. Tente de novo."), { status: r.status });
     return j;
   }
@@ -512,6 +513,7 @@
         <input type="file" id="pdf" accept="application/pdf,.pdf" hidden>
         <p class="err" role="alert" id="pdfErr"></p>
         <button class="btn" id="enviarPdf">${data.plano ? "Trocar PDF do treino" : "Enviar PDF do treino"}</button>
+        ${data.plano ? `<div class="tools"><button id="removerTreino">Remover treino</button></div>` : ""}
       </section>
       <button class="btn" id="sair" style="margin-top:16px">Sair</button>`, "perfil");
     $("#sair").onclick = sair;
@@ -528,11 +530,12 @@
         return (pdfErr.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
       }
       stopRest(); sessao = null; saveSessao();
-      const ex = plano().treinos.flatMap((t) => t.exercicios), sem = ex.filter((e) => !e[1]).length;
-      toast(`Treino carregado: ${data.plano.treinos.length} treinos, ${ex.length} exercícios${sem ? `, ${sem} sem foto` : ""}.`);
+      const ex = data.plano ? data.plano.treinos.flatMap((t) => t.exercicios) : [], sem = ex.filter((e) => !e[1]).length;
+      toast(data.plano ? `Treino carregado: ${data.plano.treinos.length} treinos, ${ex.length} exercícios${sem ? `, ${sem} sem foto` : ""}.` : "Treino removido.");
       render(); // redesenha a tela em que a pessoa estiver, que pode ter mudado durante o envio
     };
     enviar.onclick = () => $("#pdf").click();
+    if (data.plano) $("#removerTreino").onclick = () => { if (confirm("Remover o treino da sua conta? A aba Treinos some até você enviar outro PDF.")) trocarPlano({ remover: true }); };
     $("#pdf").onchange = (ev) => {
       const f = ev.target.files[0];
       ev.target.value = ""; // permite escolher o mesmo arquivo de novo depois de um erro

@@ -89,6 +89,9 @@ export default async function handler(req, res) {
 
     const u = await usuarioDaSessao(req);
     if (!u) return res.status(401).json({ erro: "Entre na sua conta." });
+    // O cookie é do navegador inteiro: se alguém entrou em outra conta em outra aba, esta aba ainda acha que é
+    // a conta antiga. Sem esta checagem, ela gravaria check-ins, cargas e o PDF na conta errada.
+    if (b.conta !== undefined && b.conta !== u.email) return res.status(409).json({ erro: "Outra conta entrou neste navegador. Recarregando…" });
     if (b.acao === "eu") return res.json(publico(u));
     if (b.acao === "salvar") {
       const dados = juntar(limpar(u.dados), limpar(b.dados));
@@ -111,6 +114,11 @@ export default async function handler(req, res) {
     if (b.acao === "treino") {
       // Junta o que o aparelho mandou: um check-in feito sem conexão ainda não chegou ao banco.
       const dados = juntar(limpar(u.dados), limpar(b.dados));
+      if (b.remover === true) {
+        delete dados.plano;
+        await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;
+        return res.json({ dados });
+      }
       const pdf = texto(b.pdf, 100, 4200000) ? Buffer.from(b.pdf, "base64") : null;
       if (!pdf || pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return res.status(400).json({ erro: "Envie um arquivo PDF de até 3 MB." });
       let lido, doc;
