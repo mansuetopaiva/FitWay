@@ -45,7 +45,7 @@ svg.i { width: 22px; height: 22px; fill: currentColor; }
   width: 100%; max-width: 480px; background: var(--bg); border-top: 1px solid var(--line);
   display: flex; justify-content: space-around; padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
 }
-.nav a { color: var(--text); text-decoration: none; font-size: 11px; text-align: center; width: 84px; }
+.nav a { color: var(--text); text-decoration: none; font-size: 11px; text-align: center; flex: 1; max-width: 84px; }
 .nav a span { display: grid; place-items: center; width: 52px; height: 28px; border-radius: 14px; margin: 0 auto 4px; }
 .nav a.on span { background: var(--green); color: var(--on-green); }
 .nav a:not(.on) { color: #cfcfcf; }
@@ -64,8 +64,7 @@ svg.i { width: 22px; height: 22px; fill: currentColor; }
 
 /* login */
 .login { padding: 48px 20px 32px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
-.logo { width: 64px; height: 64px; border-radius: 18px; background: var(--green); color: var(--on-green); display: grid; place-items: center; margin-bottom: 20px; }
-.logo svg { width: 34px; height: 34px; }
+.logo { display: block; width: 100%; max-width: 300px; height: auto; margin: 0 auto 12px; }
 .login h1 { font-size: 26px; font-weight: 500; }
 .login .sub { color: var(--muted); margin: 6px 0 24px; }
 .tabs { display: flex; background: var(--card); border-radius: 22px; padding: 4px; margin-bottom: 20px; }
@@ -137,7 +136,7 @@ svg.i { width: 22px; height: 22px; fill: currentColor; }
 .ex .check { color: var(--green); display: none; }
 .ex.complete .check { display: block; }
 .ex-body { padding: 4px 12px 14px; }
-.gif { display: block; width: 100%; max-width: 240px; aspect-ratio: 1; margin: 0 auto 14px; border-radius: 12px; background: #fff; }
+.gif { object-fit: contain; display: block; width: 100%; max-width: 240px; aspect-ratio: 1; margin: 0 auto 14px; border-radius: 12px; background: #fff; }
 .sets { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .sets button { height: 30px; min-width: 30px; padding: 0 8px; border-radius: 15px; background: var(--card2); font-size: 12px; }
 .sets button.cur { background: var(--green); color: var(--on-green); padding: 0 16px; font-weight: 500; }

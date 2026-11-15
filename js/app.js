@@ -1,4 +1,4 @@
-/* Firme — conta, check-ins e cargas ficam no servidor (api/app.js, Vercel + Postgres). */
+/* FitWay — conta, check-ins e cargas ficam no servidor (api/app.js, Vercel + Postgres). */
 (function () {
   "use strict";
 
@@ -29,6 +29,7 @@
     reps: "M12 5V2L8 6l4 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z",
     timer: "M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4L19 4.6 17.6 6A9 9 0 1 0 19 7.4zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z",
     edit: "M3 17.2V21h3.8L17.8 9.9l-3.7-3.7zM20.7 7a1 1 0 0 0 0-1.4l-2.3-2.3a1 1 0 0 0-1.4 0l-1.8 1.8 3.7 3.7z",
+    trophy: "M19 5h-2V3H7v2H5a2 2 0 0 0-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5 5 0 0 0 11 15.9V19H7v2h10v-2h-4v-3.1a5 5 0 0 0 3.61-2.96C19.08 12.63 21 10.55 21 8V7a2 2 0 0 0-2-2zM5 8V7h2v3.82A3 3 0 0 1 5 8zm14 0a3 3 0 0 1-2 2.82V7h2z",
     eye: "M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z",
   };
   const icon = (n, cls) => `<svg class="i ${cls || ""}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
@@ -60,8 +61,10 @@
       sessoes: Number.isFinite(d.sessoes) ? d.sessoes : 0,
       proximo: typeof d.proximo === "string" ? d.proximo : "B",
       cargas: d.cargas && typeof d.cargas === "object" ? d.cargas : {},
+      plano: d.plano && Array.isArray(d.plano.treinos) && d.plano.treinos.length ? d.plano : null, // treino enviado em PDF
     };
   }
+  const plano = () => (data && data.plano) || PLANO;
   async function entrou(u) {
     email = u.email; nomeUser = u.nome;
     store.set("mt_session", email); // avisa as outras abas (evento "storage")
@@ -88,8 +91,7 @@
     const criar = loginMode === "criar";
     app.innerHTML = `
       <main class="login">
-        <div class="logo">${icon("gym")}</div>
-        <h1>Firme</h1>
+        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1250" height="555"></h1>
         <p class="sub">${criar ? "Crie sua conta para registrar seus treinos." : "Entre para ver seus treinos e check-ins."}</p>
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected="${!criar}" class="${criar ? "" : "on"}" data-mode="entrar">Entrar</button>
@@ -147,7 +149,7 @@
     sessao = null;
     api("sair").catch(() => {});
     store.del("mt_session");
-    email = null; data = null;
+    email = null; data = null; rank = null;
     location.hash = "";
     render();
   }
@@ -162,6 +164,7 @@
       <nav class="nav" aria-label="Principal">
         ${item("#/inicio", "home", "Início", "inicio")}
         ${item("#/treinos", "gym", "Treinos", "treinos")}
+        ${item("#/ranking", "trophy", "Ranking", "ranking")}
         ${item("#/perfil", "user", "Perfil", "perfil")}
       </nav>`;
   }
@@ -255,12 +258,21 @@
   }
 
   // ---------- treinos ----------
-  const treino = (id) => PLANO.treinos.find((t) => t.id === id);
-  const gif = (nome) => `gifs/${encodeURIComponent(nome)}.gif`;
-  const thumb = (nome) => `gifs/thumb/${encodeURIComponent(nome)}.png`;
+  const treino = (id) => plano().treinos.find((t) => t.id === id);
+  // "db:Nome" = par de fotos (0.jpg e 1.jpg) do free-exercise-db, domínio público; "" = exercício sem imagem.
+  // shortcut: as fotos são carregadas direto do GitHub desse projeto; copiar para cá se ele sair do ar ou ficar lento.
+  const DB = "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
+  const SEM_FOTO = "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -12 48 48"><path fill="#bdbdbd" d="${ICON.gym}"/></svg>`);
+  const ehFoto = (nome) => nome.startsWith("db:");
+  const gif = (nome, quadro) => !nome ? SEM_FOTO
+    : ehFoto(nome) ? `${DB}${encodeURIComponent(nome.slice(3))}/${quadro ? 1 : 0}.jpg`
+    : `gifs/${encodeURIComponent(nome)}.gif`;
+  const thumb = (nome) => !nome || ehFoto(nome) ? gif(nome) : `gifs/thumb/${encodeURIComponent(nome)}.png`;
+  let quadroTimer = null;
   let sessao = null; // { id, inicio, feitas: {idx: n}, aberta: idx, editando: bool }
   let restTimer = null, rest = 0, restEnd = 0, tickTimer = null;
-  const feitasSessoes = () => Math.min(data.sessoes, PLANO.totalSessoes);
+  const feitasSessoes = () => plano().totalSessoes ? Math.min(data.sessoes, plano().totalSessoes) : data.sessoes;
+  const totalTxt = () => feitasSessoes() + (plano().totalSessoes ? "/" + plano().totalSessoes : "");
   function restoreSessao() {
     const s = store.get(sessaoKey(), null);
     sessao = s && treino(s.id) && Number.isFinite(s.inicio) && s.feitas && typeof s.feitas === "object"
@@ -268,8 +280,8 @@
   }
 
   function ordem() {
-    const i = Math.max(0, PLANO.treinos.findIndex((t) => t.id === data.proximo));
-    return PLANO.treinos.slice(i).concat(PLANO.treinos.slice(0, i));
+    const i = Math.max(0, plano().treinos.findIndex((t) => t.id === data.proximo));
+    return plano().treinos.slice(i).concat(plano().treinos.slice(0, i));
   }
 
   function viewTreinos() {
@@ -280,23 +292,25 @@
         <span class="t"><b>${esc(t.nome)}</b><span class="muted">${t.exercicios.length} exercícios</span></span>
         <span class="play">${icon("play")}</span>
       </button>`).join("");
-    const pct = Math.min(100, (data.sessoes / PLANO.totalSessoes) * 100);
+    const total = plano().totalSessoes, pct = total ? Math.min(100, (data.sessoes / total) * 100) : 0;
     shell("Treinos", `
       <p class="label">Treinos</p>
       <section class="card">
-        <div class="plan-head"><b style="font-weight:400">${esc(PLANO.nome)}</b></div>
+        <div class="plan-head"><b style="font-weight:400">${esc(plano().nome)}</b></div>
         ${lista}
         <div class="progress">
-          <span>${feitasSessoes()}/${PLANO.totalSessoes} sessões</span>
+          <span>${totalTxt()} sessões</span>
           <div class="track"><i style="width:${pct}%"></i></div>
-          <span>Validade: ${esc(PLANO.validade)}</span>
+          <span>${plano().validade ? "Validade: " + esc(plano().validade) : ""}</span>
         </div>
       </section>`, "treinos");
     app.querySelectorAll(".wk").forEach((b) => b.onclick = () => (location.hash = "#/treino/" + b.dataset.id));
   }
 
+  // Treino padrão: chave pelo GIF (como sempre foi). Treino do PDF: pelo nome, porque dois exercícios podem ter a mesma foto.
+  const cargaKey = (t, i) => { const [n, g] = t.exercicios[i]; return t.id + ":" + (g && !ehFoto(g) ? g : n); };
   const carga = (t, i) => {
-    const v = data.cargas[t.id + ":" + t.exercicios[i][1]];
+    const v = data.cargas[cargaKey(t, i)];
     return Number.isFinite(v) ? v : t.exercicios[i][4];
   };
   const fmt = (s) => `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
@@ -325,9 +339,9 @@
     if (Date.now() - sessao.inicio < 1500) return; // evita toque duplo em "Iniciar treino"
     const completo = t.exercicios.every((e, k) => (sessao.feitas[k] || 0) >= e[2]);
     if (!completo && !confirm("Ainda há exercícios sem concluir. Finalizar o treino mesmo assim?")) return;
-    const idx = PLANO.treinos.indexOf(t);
+    const idx = plano().treinos.indexOf(t);
     data.sessoes++;
-    data.proximo = PLANO.treinos[(idx + 1) % PLANO.treinos.length].id;
+    data.proximo = plano().treinos[(idx + 1) % plano().treinos.length].id;
     const novo = checkin();
     save();
     stopRest();
@@ -369,8 +383,8 @@
       stopRest(); sessao = null; saveSessao();
     }
     if (!sessao || sessao.id !== id) { stopRest(); sessao = { id, inicio: null, feitas: {}, aberta: -1 }; }
-    const idx = PLANO.treinos.indexOf(t), n = PLANO.treinos.length;
-    const ant = PLANO.treinos[(idx + n - 1) % n].id, prox = PLANO.treinos[(idx + 1) % n].id;
+    const idx = plano().treinos.indexOf(t), n = plano().treinos.length;
+    const ant = plano().treinos[(idx + n - 1) % n].id, prox = plano().treinos[(idx + 1) % n].id;
 
     const exs = t.exercicios.map((e, i) => {
       const [nome, g, series, reps, , intervalo, instr] = e;
@@ -385,10 +399,10 @@
           return `<button disabled aria-label="Série ${k + 1}">${k + 1}</button>`;
         }).join("");
         body = `<div class="ex-body" id="ex-${i}">
-          <img class="gif" src="${gif(g)}" alt="Animação do exercício ${esc(nome)}" width="240" height="240">
+          <img class="gif" src="${gif(g)}" ${ehFoto(g) ? `data-db="${esc(g)}"` : ""} alt="${g ? "Demonstração" : "Sem imagem"} do exercício ${esc(nome)}" width="240" height="240">
           <div class="sets">${pills}</div>
           <div class="tiles">
-            <div class="tile">${icon("reps")}<span>Repetições</span><b>${reps}x</b></div>
+            <div class="tile">${icon("reps")}<span>Repetições</span><b>${esc(reps)}x</b></div>
             <div class="tile">${icon("gym")}<span>Carga</span><b>${carga(t, i)}kg</b></div>
             <div class="tile">${icon("timer")}<span>Intervalo</span><b>${intervalo}″</b></div>
           </div>
@@ -423,6 +437,16 @@
       </main>
       <div class="bottom"></div>`;
     paintBottom();
+    // fotos do banco público: alterna os dois quadros para dar ideia do movimento
+    clearInterval(quadroTimer);
+    const foto = $("img[data-db]");
+    if (foto) {
+      let q = 0;
+      quadroTimer = setInterval(() => {
+        if (!foto.isConnected) return clearInterval(quadroTimer);
+        q ^= 1; foto.src = gif(foto.dataset.db, q);
+      }, 900);
+    }
 
     const rerender = (focusSel) => { viewTreino(id); const f = focusSel && $(focusSel); if (f) f.focus(); };
     app.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => {
@@ -458,7 +482,7 @@
       let v = Math.min(500, Math.max(0, parseFloat(inp.value.replace(",", ".")) || 0));
       if (b.dataset.kg !== "ok") { inp.value = Math.max(0, v + +b.dataset.kg); return; }
       v = Math.round(v * 2) / 2;
-      data.cargas[id + ":" + t.exercicios[sessao.aberta][1]] = v;
+      data.cargas[cargaKey(t, sessao.aberta)] = v;
       save();
       sessao.editando = false;
       toast("Carga salva: " + v + "kg");
@@ -483,12 +507,49 @@
         ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar nome</button></div>`}
       </section>
       <section class="card">
-        <div class="row"><span>Plano</span><span>${esc(PLANO.nome)}</span></div>
-        <div class="row"><span>Sessões feitas</span><span>${feitasSessoes()}/${PLANO.totalSessoes}</span></div>
+        <div class="row"><span>Plano</span><span>${esc(plano().nome)}</span></div>
+        <div class="row"><span>Sessões feitas</span><span>${totalTxt()}</span></div>
         <div class="row"><span>Check-ins</span><span>${data.checkins.length}</span></div>
+      </section>
+      <section class="card">
+        <h2>Meu treino</h2>
+        <p class="muted" style="margin:6px 0 12px">Envie o PDF do seu treino. O site lê os exercícios, as séries e as repetições e escolhe a foto de cada exercício.</p>
+        <input type="file" id="pdf" accept="application/pdf,.pdf" hidden>
+        <p class="err" role="alert" id="pdfErr"></p>
+        <button class="btn" id="enviarPdf">Enviar PDF do treino</button>
+        ${data.plano ? `<div class="tools"><button id="padrao">Voltar ao treino padrão</button></div>` : ""}
       </section>
       <button class="btn" id="sair" style="margin-top:16px">Sair</button>`, "perfil");
     $("#sair").onclick = sair;
+    const pdfErr = $("#pdfErr"), enviar = $("#enviarPdf");
+    const trocarPlano = async (corpo) => {
+      if (sessao && sessao.inicio && !confirm("Há um treino em andamento. Trocar de plano descarta o progresso dele. Continuar?")) return;
+      enviar.disabled = true;
+      enviar.textContent = "Aguarde…";
+      pdfErr.textContent = "";
+      try { loadData((await api("treino", { ...corpo, dados: data })).dados); store.del(dataKey()); }
+      catch (e) {
+        enviar.disabled = false;
+        enviar.textContent = "Enviar PDF do treino";
+        return (pdfErr.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
+      }
+      stopRest(); sessao = null; saveSessao();
+      const ex = plano().treinos.flatMap((t) => t.exercicios), sem = ex.filter((e) => !e[1]).length;
+      toast(data.plano ? `Treino carregado: ${data.plano.treinos.length} treinos, ${ex.length} exercícios${sem ? `, ${sem} sem foto` : ""}.` : "Treino padrão de volta.");
+      render(); // redesenha a tela em que a pessoa estiver, que pode ter mudado durante o envio
+    };
+    enviar.onclick = () => $("#pdf").click();
+    $("#pdf").onchange = (ev) => {
+      const f = ev.target.files[0];
+      ev.target.value = ""; // permite escolher o mesmo arquivo de novo depois de um erro
+      if (!f || !f.size) return;
+      if (f.size > 3e6) return (pdfErr.textContent = "O PDF precisa ter no máximo 3 MB.");
+      const fr = new FileReader();
+      fr.onload = () => trocarPlano({ pdf: String(fr.result).split(",")[1] });
+      fr.onerror = () => (pdfErr.textContent = "Não consegui ler o arquivo.");
+      fr.readAsDataURL(f);
+    };
+    if (data.plano) $("#padrao").onclick = () => { if (confirm("Trocar o treino enviado pelo treino padrão?")) trocarPlano({}); };
     if (!editandoPerfil) {
       $("#editar").onclick = () => { editandoPerfil = true; viewPerfil(); $("#nome").select(); };
       return;
@@ -511,6 +572,67 @@
     };
   }
 
+  // ---------- ranking: grupo de amigos que compara check-ins ----------
+  let rank = null, rankModo = "semana";
+  async function viewRanking(op) {
+    if (rank && !op) paintRanking();
+    else if (!rank) shell("Ranking", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "ranking");
+    const t = today();
+    let erro = "";
+    try { rank = await api("ranking", { ...op, semana: dayKey(addDays(t, -t.getDay())), mes: dayKey(t).slice(0, 8) + "01" }); }
+    catch (e) { erro = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; }
+    if (location.hash.split("/")[1] !== "ranking") return;
+    if (!rank) return shell("Ranking", `<p class="err" role="alert" style="margin-top:16px">${esc(erro)}</p>`, "ranking");
+    paintRanking();
+    if (erro) { const e = $(".err"); if (e) e.textContent = erro; else toast(erro); }
+  }
+  function paintRanking() {
+    if (!rank.codigo) {
+      shell("Ranking", `
+        <section class="card">
+          <h2>Desafio de check-ins</h2>
+          <p class="muted" style="margin:6px 0 12px">Crie um grupo e mande o código para seus amigos, ou entre no grupo de alguém. Quem está no grupo vê o nome e o número de check-ins dos outros na semana e no mês.</p>
+          <button class="btn" id="criar">Criar grupo</button>
+        </section>
+        <section class="card">
+          <form novalidate>
+            <div class="field"><label for="codigo">Código do grupo</label><input id="codigo" maxlength="6" autocomplete="off" autocapitalize="characters" required></div>
+            <p class="err" role="alert"></p>
+            <button class="btn" type="submit">Entrar no grupo</button>
+          </form>
+        </section>`, "ranking");
+      $("#criar").onclick = (ev) => { ev.currentTarget.disabled = true; viewRanking({ op: "criar" }); };
+      $("form").onsubmit = (ev) => {
+        ev.preventDefault();
+        const codigo = $("#codigo").value.trim().toUpperCase();
+        if (codigo.length !== 6) return ($(".err").textContent = "O código tem 6 letras ou números.");
+        viewRanking({ op: "entrar", codigo });
+      };
+      return;
+    }
+    const lista = rank.membros.slice().sort((a, b) => b[rankModo] - a[rankModo] || a.nome.localeCompare(b.nome));
+    shell("Ranking", `
+      <section class="card">
+        <div class="chart-head">
+          <h2>Check-ins do grupo</h2>
+          <div class="seg">
+            <button data-r="semana" class="${rankModo === "semana" ? "on" : ""}" aria-pressed="${rankModo === "semana"}">Semana</button>
+            <button data-r="mes" class="${rankModo === "mes" ? "on" : ""}" aria-pressed="${rankModo === "mes"}">Mês</button>
+          </div>
+        </div>
+        ${lista.map((m, i) => `<div class="row"><span>${i + 1}º ${i === 0 && m[rankModo] > 0 ? "🏆 " : ""}${esc(m.nome)}${m.eu ? " (você)" : ""}</span><b>${m[rankModo]}</b></div>`).join("")}
+        <p class="muted" style="margin-top:10px">${rankModo === "semana" ? "Dias com check-in nesta semana, contando a partir de domingo." : "Dias com check-in neste mês."}</p>
+      </section>
+      <section class="card">
+        <div class="row"><span>Código do grupo</span><b id="cod">${esc(rank.codigo)}</b></div>
+        <p class="muted" style="margin-top:10px">Mande este código para quem você quer no grupo.</p>
+        <div class="tools"><button id="copiar">Copiar código</button><button id="sairGrupo">Sair do grupo</button></div>
+      </section>`, "ranking");
+    app.querySelectorAll("[data-r]").forEach((b) => b.onclick = () => { rankModo = b.dataset.r; paintRanking(); $(`[data-r="${rankModo}"]`).focus(); });
+    $("#copiar").onclick = () => navigator.clipboard.writeText(rank.codigo).then(() => toast("Código copiado."), () => toast("Não consegui copiar. O código é " + rank.codigo));
+    $("#sairGrupo").onclick = () => { if (confirm("Sair do grupo? Você pode voltar com o mesmo código enquanto alguém continuar nele.")) viewRanking({ op: "sair" }); };
+  }
+
   // ---------- rotas ----------
   function render() {
     clearInterval(tickTimer);
@@ -524,6 +646,7 @@
       tickTimer = setInterval(() => { if (!document.hidden && sessao && sessao.inicio && rest === 0) paintBottom(); }, 1000);
     }
     else if (rota === "perfil") viewPerfil();
+    else if (rota === "ranking") viewRanking();
     else viewInicio();
     window.scrollTo(0, 0);
   }
@@ -533,7 +656,7 @@
     if (document.hidden || !email) return;
     tickRest();
     const rota = location.hash.split("/")[1];
-    if (rota !== "treino" && rota !== "treinos" && rota !== "perfil" && diaRender !== dayKey(today())) render();
+    if (rota !== "treino" && rota !== "treinos" && rota !== "perfil" && rota !== "ranking" && diaRender !== dayKey(today())) render();
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });

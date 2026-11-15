@@ -1,11 +1,14 @@
-// Backend do Firme: uma função Vercel, POST /api/app com { acao, ... }.
+// Backend do FitWay: uma função Vercel, POST /api/app com { acao, ... }.
 // Ações: criar, entrar, eu, salvar, sair. Banco: Postgres (Neon) via DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { juntar, limpar } from "./_dados.js";
+import { extractText, getDocumentProxy } from "unpdf";
+import { DIA, juntar, limpar } from "./_dados.js";
+import { lerTreino } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
+const LETRAS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 símbolos, sem 0/O e 1/I
 
 // Cria as tabelas na primeira chamada de cada instância; não precisa rodar SQL à mão.
 let pronto;
@@ -21,6 +24,7 @@ const schema = () => pronto ||= (async () => {
     email text not null references usuarios on delete cascade,
     expira timestamptz not null
   )`;
+  await sql`alter table usuarios add column if not exists grupo text`; // código do grupo do ranking
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
@@ -41,7 +45,7 @@ async function abrirSessao(res, email) {
 async function usuarioDaSessao(req) {
   const t = req.cookies && req.cookies.mt;
   if (!texto(t, 64, 64)) return null;
-  const [u] = await sql`select u.email, u.nome, u.dados from sessoes s join usuarios u on u.email = s.email
+  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo from sessoes s join usuarios u on u.email = s.email
     where s.token = ${sha(t)} and s.expira > now()`;
   return u || null;
 }
@@ -95,6 +99,46 @@ export default async function handler(req, res) {
       if (!nome) return res.status(400).json({ erro: "Digite seu nome." });
       await sql`update usuarios set nome = ${nome} where email = ${u.email}`;
       return res.json({ nome });
+    }
+    if (b.acao === "treino") {
+      // Junta o que o aparelho mandou: um check-in feito sem conexão ainda não chegou ao banco.
+      const dados = juntar(limpar(u.dados), limpar(b.dados));
+      delete dados.plano; // sem PDF: volta ao treino padrão
+      dados.proximo = "B";
+      if (b.pdf !== undefined) {
+        const pdf = texto(b.pdf, 100, 4200000) ? Buffer.from(b.pdf, "base64") : null;
+        if (!pdf || pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return res.status(400).json({ erro: "Envie um arquivo PDF de até 3 MB." });
+        let lido;
+        try { lido = (await extractText(await getDocumentProxy(new Uint8Array(pdf)), { mergePages: true })).text; }
+        catch (e) { return res.status(422).json({ erro: "Não consegui abrir este PDF." }); }
+        const plano = lerTreino(lido);
+        if (!plano) return res.status(422).json({ erro: "Não encontrei exercícios neste PDF. Ele precisa ter listas numeradas com séries x repetições, como “1 Supino reto 3 x 10”. PDF escaneado (foto) não funciona." });
+        dados.plano = plano;
+        dados.proximo = plano.treinos[0].id;
+      }
+      await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;
+      return res.json({ dados });
+    }
+    if (b.acao === "ranking") {
+      if (!DIA.test(b.semana) || !DIA.test(b.mes)) return res.status(400).json({ erro: "Requisição inválida." });
+      let grupo = u.grupo;
+      if (b.op === "criar") grupo = Array.from(randomBytes(6), (x) => LETRAS[x % 32]).join("");
+      else if (b.op === "sair") grupo = null;
+      else if (b.op === "entrar") {
+        const codigo = texto(b.codigo, 6, 6) ? b.codigo.toUpperCase() : "";
+        const [{ n }] = await sql`select count(*)::int as n from usuarios where grupo = ${codigo}`;
+        if (!n) return res.status(404).json({ erro: "Não encontrei um grupo com este código." });
+        if (n >= 50) return res.status(409).json({ erro: "Este grupo já está cheio." });
+        grupo = codigo;
+      }
+      if (grupo !== u.grupo) await sql`update usuarios set grupo = ${grupo} where email = ${u.email}`;
+      if (!grupo) return res.json({ codigo: null, membros: [] });
+      // Os outros membros veem só nome e contagens, nunca o email.
+      const membros = await sql`select nome, email = ${u.email} as eu,
+          (select count(*) from jsonb_array_elements_text(dados->'checkins') as d(dia) where dia >= ${b.semana})::int as semana,
+          (select count(*) from jsonb_array_elements_text(dados->'checkins') as d(dia) where dia >= ${b.mes})::int as mes
+        from usuarios where grupo = ${grupo}`;
+      return res.json({ codigo: grupo, membros });
     }
     return res.status(400).json({ erro: "Ação desconhecida." });
   } catch (e) {
