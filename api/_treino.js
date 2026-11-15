@@ -151,14 +151,14 @@ export function lerTreino(texto) {
   const tabelas = [], linhas = [];
   let atual = null, fim = 0;
   for (const m of t.matchAll(SERIES)) {
-    const antes = t.slice(fim, m.index);
+    const base = Math.max(fim, m.index - 400), antes = t.slice(base, m.index); // janela fixa: sem isso, texto hostil deixa o laço quadrático
     let ini = null;
     for (const c of antes.matchAll(NUMERO)) ini = c;
     if (!ini) continue;
     const n = +ini[1], nome = antes.slice(ini.index + ini[0].length).replace(/\s+/g, " ").trim();
     if (nome.length < 3 || nome.length > 80 || (n !== 1 && !(atual && n > atual.length && n <= atual.length + 2))) continue;
     if (n === 1) tabelas.push((atual = Object.assign([], { pos: m.index })));
-    if (linhas.length) linhas[linhas.length - 1].ateh = fim + ini.index;
+    if (linhas.length) linhas[linhas.length - 1].ateh = base + ini.index;
     fim = m.index + m[0].length;
     const linha = { nome, tipo: m[1], series: +m[2], reps: /^\d/.test(m[3]) ? m[3].replace(/\s+/g, "").replace(/[—-]/, "–") : "máx", de: fim, ateh: fim + 300 };
     atual.push(linha);

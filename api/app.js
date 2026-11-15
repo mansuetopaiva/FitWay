@@ -105,10 +105,14 @@ export default async function handler(req, res) {
       const dados = juntar(limpar(u.dados), limpar(b.dados));
       const pdf = texto(b.pdf, 100, 4200000) ? Buffer.from(b.pdf, "base64") : null;
       if (!pdf || pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return res.status(400).json({ erro: "Envie um arquivo PDF de até 3 MB." });
-      let lido;
-      try { lido = (await extractText(await getDocumentProxy(new Uint8Array(pdf)), { mergePages: true })).text; }
-      catch (e) { return res.status(422).json({ erro: "Não consegui abrir este PDF." }); }
-      const plano = lerTreino(lido);
+      let lido, doc;
+      try {
+        doc = await getDocumentProxy(new Uint8Array(pdf));
+        if (doc.numPages > 30) return res.status(400).json({ erro: "O PDF pode ter no máximo 30 páginas." });
+        lido = (await extractText(doc, { mergePages: true })).text;
+      } catch (e) { return res.status(422).json({ erro: "Não consegui abrir este PDF." }); }
+      finally { if (doc) doc.destroy(); }
+      const plano = lerTreino(lido.slice(0, 200000));
       if (!plano) return res.status(422).json({ erro: "Não encontrei exercícios neste PDF. Ele precisa ter listas numeradas com séries x repetições, como “1 Supino reto 3 x 10”. PDF escaneado (foto) não funciona." });
       dados.plano = plano;
       dados.proximo = plano.treinos[0].id;
@@ -116,7 +120,12 @@ export default async function handler(req, res) {
       return res.json({ dados });
     }
     if (b.acao === "ranking") {
-      if (!DIA.test(b.semana) || !DIA.test(b.mes)) return res.status(400).json({ erro: "Requisição inválida." });
+      // As datas vêm do aparelho (fuso da pessoa), mas só podem ser da semana e do mês atuais:
+      // datas antigas permitiriam reconstruir o histórico de check-ins dos outros membros.
+      const dias = (d) => (Date.now() - Date.parse(d)) / 864e5;
+      if (typeof b.semana !== "string" || typeof b.mes !== "string" || !DIA.test(b.semana) || !DIA.test(b.mes)
+        || !(dias(b.semana) > -2 && dias(b.semana) < 8) || !(dias(b.mes) > -2 && dias(b.mes) < 33))
+        return res.status(400).json({ erro: "Requisição inválida." });
       let grupo = u.grupo;
       if (b.op === "criar") grupo = Array.from(randomBytes(6), (x) => LETRAS[x % 32]).join("");
       else if (b.op === "sair") grupo = null;

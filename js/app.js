@@ -420,9 +420,9 @@
       </header>
       <main class="screen treino">
         <div class="switch">
-          <a class="icon-btn" href="#/treino/${ant}" aria-label="Treino anterior">${icon("back")}</a>
+          <a class="icon-btn" href="#/treino/${esc(ant)}" aria-label="Treino anterior">${icon("back")}</a>
           <b>${esc(t.nome)}</b>
-          <a class="icon-btn" href="#/treino/${prox}" aria-label="Próximo treino">${icon("next")}</a>
+          <a class="icon-btn" href="#/treino/${esc(prox)}" aria-label="Próximo treino">${icon("next")}</a>
         </div>
         ${exs}
       </main>
