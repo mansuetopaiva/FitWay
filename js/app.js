@@ -30,6 +30,7 @@
     timer: "M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4L19 4.6 17.6 6A9 9 0 1 0 19 7.4zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z",
     edit: "M3 17.2V21h3.8L17.8 9.9l-3.7-3.7zM20.7 7a1 1 0 0 0 0-1.4l-2.3-2.3a1 1 0 0 0-1.4 0l-1.8 1.8 3.7 3.7z",
     trophy: "M19 5h-2V3H7v2H5a2 2 0 0 0-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5 5 0 0 0 11 15.9V19H7v2h10v-2h-4v-3.1a5 5 0 0 0 3.61-2.96C19.08 12.63 21 10.55 21 8V7a2 2 0 0 0-2-2zM5 8V7h2v3.82A3 3 0 0 1 5 8zm14 0a3 3 0 0 1-2 2.82V7h2z",
+    shield: "M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5zm-1.2 14.4-3.5-3.5 1.4-1.4 2.1 2.1 4.9-4.9 1.4 1.4z",
     eye: "M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z",
   };
   const icon = (n, cls) => `<svg class="i ${cls || ""}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
@@ -51,7 +52,7 @@
     if (!r.ok) throw Object.assign(new Error(j.erro || "Erro no servidor. Tente de novo."), { status: r.status });
     return j;
   }
-  let email = null, nomeUser = "", fotoUser = "", data = null;
+  let email = null, nomeUser = "", fotoUser = "", adminUser = false, data = null;
   // Esta chave só existe enquanto há algo que o servidor ainda não confirmou
   // (salvamento sem conexão, ou dados da versão antiga que ficava só no navegador).
   const dataKey = () => "mt_data_" + email;
@@ -67,7 +68,7 @@
   }
   const plano = () => data && data.plano; // só existe depois que a pessoa envia o PDF
   async function entrou(u) {
-    email = u.email; nomeUser = u.nome; fotoUser = u.foto || "";
+    email = u.email; nomeUser = u.nome; fotoUser = u.foto || ""; adminUser = u.admin === true; // só visual: o servidor confere a cada chamada
     store.set("mt_session", email); // avisa as outras abas (evento "storage")
     loadData(u.dados);
     const pend = store.get(dataKey(), null);
@@ -150,7 +151,7 @@
     sessao = null;
     api("sair").catch(() => {});
     store.del("mt_session");
-    email = null; data = null; rank = null; fotoUser = "";
+    email = null; data = null; rank = null; fotoUser = ""; adminUser = false;
     location.hash = "";
     render();
   }
@@ -167,8 +168,25 @@
         ${plano() ? item("#/treinos", "gym", "Treinos", "treinos") : ""}
         ${item("#/ranking", "trophy", "Ranking", "ranking")}
         ${item("#/perfil", "user", "Perfil", "perfil")}
+        ${adminUser ? item("#/admin", "shield", "Admin", "admin") : ""}
       </nav>`;
   }
+
+  // ---------- admin: o código fica em js/admin.js e só é baixado por quem é admin ----------
+  let adminScript = null;
+  function viewAdmin(arg) {
+    shell("Admin", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "admin");
+    adminScript ||= new Promise((ok, falhou) => {
+      const s = document.createElement("script");
+      s.src = "js/admin.js"; s.onload = ok; s.onerror = () => { adminScript = null; falhou(); };
+      document.head.appendChild(s);
+    });
+    adminScript.then(
+      () => { if (location.hash.split("/")[1] === "admin") window.FitWayAdmin.render(arg); },
+      () => toast("Não consegui abrir o painel. Tente de novo."));
+  }
+  // O painel usa estas peças do app; ficam expostas só depois do login de um admin.
+  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app }; };
 
   // ---------- início: check-in + gráfico ----------
   let chartMode = "semana", diaRender = "";
@@ -664,6 +682,7 @@
     }
     else if (rota === "perfil") viewPerfil();
     else if (rota === "ranking") viewRanking();
+    else if (rota === "admin" && adminUser) { expor(); viewAdmin(arg); }
     else viewInicio();
     window.scrollTo(0, 0);
   }
@@ -673,7 +692,7 @@
     if (document.hidden || !email) return;
     tickRest();
     const rota = location.hash.split("/")[1];
-    if (rota !== "treino" && rota !== "treinos" && rota !== "perfil" && rota !== "ranking" && diaRender !== dayKey(today())) render();
+    if (rota !== "treino" && rota !== "treinos" && rota !== "perfil" && rota !== "ranking" && rota !== "admin" && diaRender !== dayKey(today())) render();
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });

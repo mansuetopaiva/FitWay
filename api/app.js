@@ -1,8 +1,9 @@
 // Backend do FitWay: uma função Vercel, POST /api/app com { acao, ... }.
-// Ações: criar, entrar, eu, salvar, sair. Banco: Postgres (Neon) via DATABASE_URL.
+// Ações: criar, entrar, eu, salvar, sair, perfil, foto, treino, ranking, admin. Banco: Postgres (Neon) via DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { extractText, getDocumentProxy } from "unpdf";
+import { acaoAdmin, ehAdmin } from "./_admin.js";
 import { DIA, juntar, limpar } from "./_dados.js";
 import { lerTreino } from "./_treino.js";
 
@@ -26,6 +27,17 @@ const schema = () => pronto ||= (async () => {
   )`;
   await sql`alter table usuarios add column if not exists grupo text`; // código do grupo do ranking
   await sql`alter table usuarios add column if not exists foto text`; // foto de perfil, JPEG 160x160 em data URL
+  await sql`alter table usuarios add column if not exists criado timestamptz default now()`; // contas antigas ficam com a data desta migração
+  await sql`alter table usuarios add column if not exists acesso_ate timestamptz`; // até quando o admin liberou o acesso (ainda não bloqueia nada)
+  await sql`create table if not exists admin_log (
+    id bigint generated always as identity primary key,
+    admin_email text not null,
+    acao text not null,
+    alvo_email text,
+    detalhes jsonb,
+    criado timestamptz not null default now()
+  )`;
+  await sql`create index if not exists admin_log_alvo on admin_log (alvo_email, criado desc)`;
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
@@ -50,7 +62,7 @@ async function usuarioDaSessao(req) {
     where s.token = ${sha(t)} and s.expira > now()`;
   return u || null;
 }
-const publico = (u) => ({ email: u.email, nome: u.nome, foto: u.foto || "", dados: limpar(u.dados) });
+const publico = (u) => ({ email: u.email, nome: u.nome, foto: u.foto || "", admin: ehAdmin(u.email), dados: limpar(u.dados) });
 
 export default async function handler(req, res) {
   try {
@@ -93,6 +105,7 @@ export default async function handler(req, res) {
     // a conta antiga. Sem esta checagem, ela gravaria check-ins, cargas e o PDF na conta errada.
     if (b.conta !== undefined && b.conta !== u.email) return res.status(409).json({ erro: "Outra conta entrou neste navegador. Recarregando…" });
     if (b.acao === "eu") return res.json(publico(u));
+    if (b.acao === "admin") { const r = await acaoAdmin(sql, u, b); return res.status(r.status).json(r.corpo); }
     if (b.acao === "salvar") {
       const dados = juntar(limpar(u.dados), limpar(b.dados));
       await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;

@@ -143,7 +143,15 @@ Cada regra de `FOTOS` ganha um terceiro item, o nome de exemplo em pt-BR (`[/sup
 6. O painel é usável com 360 px de largura e no computador; listas com carregando, vazio e erro.
 7. `npm test` verde; os quatro agentes rodados, com o que ficou de fora justificado.
 
-## Perguntas em aberto
+## Decisões
 
-1. **"Escolher data":** proponho que o acesso valha até o fim do dia escolhido no horário de Brasília. Confirma?
-2. **Onde fica o código do painel:** proponho `js/admin.js`, carregado só para quem é admin, para que os outros usuários não baixem esse código e o `app.js` não cresça. Ou prefere tudo em `js/app.js`?
+1. **"Escolher data":** o acesso vale até o fim do dia escolhido, no horário de Brasília.
+2. **Código do painel:** em `js/admin.js`, carregado só para quem é admin.
+
+## Regras do treino pago (para a etapa de pagamento, não implementadas aqui)
+
+Registradas para não se perderem. Nada disto entra nesta etapa.
+
+- O acesso ao treino pago vale 30 dias a partir do aceite do admin. No painel de hoje isso é o botão "+30 dias".
+- Quando o acesso expira e a pessoa não paga, ela perde **só o treino pago**. Continua usando o resto do site: check-in, ranking, perfil e treino por PDF.
+- Depois de 2 meses com o mesmo treino, pedir um novo custa R$ 4,99, e não R$ 9,99.
