@@ -25,6 +25,7 @@ const schema = () => pronto ||= (async () => {
     expira timestamptz not null
   )`;
   await sql`alter table usuarios add column if not exists grupo text`; // código do grupo do ranking
+  await sql`alter table usuarios add column if not exists foto text`; // foto de perfil, JPEG 160x160 em data URL
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
@@ -45,11 +46,11 @@ async function abrirSessao(res, email) {
 async function usuarioDaSessao(req) {
   const t = req.cookies && req.cookies.mt;
   if (!texto(t, 64, 64)) return null;
-  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo from sessoes s join usuarios u on u.email = s.email
+  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo, u.foto from sessoes s join usuarios u on u.email = s.email
     where s.token = ${sha(t)} and s.expira > now()`;
   return u || null;
 }
-const publico = (u) => ({ email: u.email, nome: u.nome, dados: limpar(u.dados) });
+const publico = (u) => ({ email: u.email, nome: u.nome, foto: u.foto || "", dados: limpar(u.dados) });
 
 export default async function handler(req, res) {
   try {
@@ -71,7 +72,7 @@ export default async function handler(req, res) {
           on conflict do nothing returning email, nome, dados`;
         if (!u) return res.status(409).json({ erro: "Já existe uma conta com este email. Use a aba Entrar." });
       } else {
-        [u] = await sql`select email, nome, senha, dados from usuarios where email = ${email}`;
+        [u] = await sql`select email, nome, senha, dados, foto from usuarios where email = ${email}`;
         if (!u || !confere(b.senha, u.senha)) return res.status(401).json({ erro: "Email ou senha incorretos." });
         await sql`delete from sessoes where expira < now()`;
       }
@@ -99,6 +100,13 @@ export default async function handler(req, res) {
       if (!nome) return res.status(400).json({ erro: "Digite seu nome." });
       await sql`update usuarios set nome = ${nome} where email = ${u.email}`;
       return res.json({ nome });
+    }
+    if (b.acao === "foto") {
+      // Só aceita a imagem já reduzida pelo app; "" remove a foto.
+      if (b.foto !== "" && !(texto(b.foto, 30, 60000) && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(b.foto)))
+        return res.status(400).json({ erro: "Imagem inválida. Tente outra foto." });
+      await sql`update usuarios set foto = ${b.foto || null} where email = ${u.email}`;
+      return res.json({ foto: b.foto });
     }
     if (b.acao === "treino") {
       // Junta o que o aparelho mandou: um check-in feito sem conexão ainda não chegou ao banco.

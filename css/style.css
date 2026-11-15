@@ -163,6 +163,7 @@ svg.i { width: 22px; height: 22px; fill: currentColor; }
 /* perfil */
 .profile { text-align: center; padding: 24px 14px; }
 .avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--green); color: var(--on-green); display: grid; place-items: center; font-size: 28px; font-weight: 500; margin: 0 auto 10px; }
+img.avatar { object-fit: cover; }
 .profile h2 { font-size: 20px; font-weight: 400; }
 .row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .row:last-child { border: 0; }

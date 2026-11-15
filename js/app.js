@@ -50,7 +50,7 @@
     if (!r.ok) throw Object.assign(new Error(j.erro || "Erro no servidor. Tente de novo."), { status: r.status });
     return j;
   }
-  let email = null, nomeUser = "", data = null;
+  let email = null, nomeUser = "", fotoUser = "", data = null;
   // Esta chave só existe enquanto há algo que o servidor ainda não confirmou
   // (salvamento sem conexão, ou dados da versão antiga que ficava só no navegador).
   const dataKey = () => "mt_data_" + email;
@@ -66,7 +66,7 @@
   }
   const plano = () => data && data.plano; // só existe depois que a pessoa envia o PDF
   async function entrou(u) {
-    email = u.email; nomeUser = u.nome;
+    email = u.email; nomeUser = u.nome; fotoUser = u.foto || "";
     store.set("mt_session", email); // avisa as outras abas (evento "storage")
     loadData(u.dados);
     const pend = store.get(dataKey(), null);
@@ -149,7 +149,7 @@
     sessao = null;
     api("sair").catch(() => {});
     store.del("mt_session");
-    email = null; data = null; rank = null;
+    email = null; data = null; rank = null; fotoUser = "";
     location.hash = "";
     render();
   }
@@ -487,7 +487,9 @@
     const u = { nome: nomeUser };
     shell("Perfil", `
       <section class="card profile">
-        <div class="avatar" aria-hidden="true">${esc((u.nome || "?").charAt(0).toUpperCase())}</div>
+        ${fotoUser ? `<img class="avatar" src="${esc(fotoUser)}" alt="Sua foto de perfil" width="72" height="72">`
+          : `<div class="avatar" aria-hidden="true">${esc((u.nome || "?").charAt(0).toUpperCase())}</div>`}
+        <input type="file" id="fotoArq" accept="image/*" hidden>
         ${editandoPerfil ? `<form novalidate style="text-align:left">
             <div class="field"><label for="nome">Nome</label><input id="nome" autocomplete="given-name" maxlength="40" value="${esc(u.nome)}" required></div>
             <p class="err" role="alert"></p>
@@ -495,7 +497,9 @@
             <div class="tools"><button type="button" id="cancelar">Cancelar</button></div>
           </form>` : `<h2>${esc(u.nome)}</h2>`}
         <p class="muted" ${editandoPerfil ? 'style="margin-top:10px"' : ""}>${esc(email)}</p>
-        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar nome</button></div>`}
+        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar nome</button>
+          <button id="trocarFoto">${icon("user")}${fotoUser ? "Trocar foto" : "Adicionar foto"}</button>
+          ${fotoUser ? `<button id="tirarFoto">${icon("user")}Remover foto</button>` : ""}</div>`}
       </section>
       <section class="card">
         <div class="row"><span>Plano</span><span>${plano() ? esc(plano().nome) : "Nenhum"}</span></div>
@@ -541,6 +545,26 @@
     };
     if (!editandoPerfil) {
       $("#editar").onclick = () => { editandoPerfil = true; viewPerfil(); $("#nome").select(); };
+      const salvarFoto = async (foto) => {
+        try { fotoUser = (await api("foto", { foto })).foto; }
+        catch (e) { return toast(e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }
+        toast(foto ? "Foto atualizada." : "Foto removida.");
+        if (location.hash.split("/")[1] === "perfil") { viewPerfil(); $("#trocarFoto").focus(); }
+      };
+      $("#trocarFoto").onclick = () => $("#fotoArq").click();
+      $("#fotoArq").onchange = async (ev) => {
+        const f = ev.target.files[0];
+        ev.target.value = "";
+        if (!f) return;
+        // Recorta o centro em quadrado e reduz para 160x160 no aparelho: a foto fica com ~10 KB no banco.
+        let img;
+        try { img = await createImageBitmap(f); } catch (e) { return toast("Não consegui abrir esta imagem."); }
+        const c = document.createElement("canvas"), lado = Math.min(img.width, img.height);
+        c.width = c.height = 160;
+        c.getContext("2d").drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, 160, 160);
+        salvarFoto(c.toDataURL("image/jpeg", 0.85));
+      };
+      if (fotoUser) $("#tirarFoto").onclick = () => { if (confirm("Remover sua foto de perfil?")) salvarFoto(""); };
       return;
     }
     const fechar = () => { editandoPerfil = false; viewPerfil(); $("#editar").focus(); };
