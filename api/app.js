@@ -90,6 +90,12 @@ export default async function handler(req, res) {
       await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;
       return res.json({ dados });
     }
+    if (b.acao === "perfil") {
+      const nome = texto(b.nome, 1, 40) ? b.nome.trim() : "";
+      if (!nome) return res.status(400).json({ erro: "Digite seu nome." });
+      await sql`update usuarios set nome = ${nome} where email = ${u.email}`;
+      return res.json({ nome });
+    }
     return res.status(400).json({ erro: "Ação desconhecida." });
   } catch (e) {
     console.error(e);

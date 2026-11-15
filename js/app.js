@@ -467,13 +467,20 @@
   }
 
   // ---------- perfil ----------
+  let editandoPerfil = false;
   function viewPerfil() {
     const u = { nome: nomeUser };
     shell("Perfil", `
       <section class="card profile">
         <div class="avatar" aria-hidden="true">${esc((u.nome || "?").charAt(0).toUpperCase())}</div>
-        <h2>${esc(u.nome)}</h2>
-        <p class="muted">${esc(email)}</p>
+        ${editandoPerfil ? `<form novalidate style="text-align:left">
+            <div class="field"><label for="nome">Nome</label><input id="nome" autocomplete="given-name" maxlength="40" value="${esc(u.nome)}" required></div>
+            <p class="err" role="alert"></p>
+            <button class="btn" type="submit">Salvar</button>
+            <div class="tools"><button type="button" id="cancelar">Cancelar</button></div>
+          </form>` : `<h2>${esc(u.nome)}</h2>`}
+        <p class="muted" ${editandoPerfil ? 'style="margin-top:10px"' : ""}>${esc(email)}</p>
+        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar nome</button></div>`}
       </section>
       <section class="card">
         <div class="row"><span>Plano</span><span>${esc(PLANO.nome)}</span></div>
@@ -482,6 +489,26 @@
       </section>
       <button class="btn" id="sair" style="margin-top:16px">Sair</button>`, "perfil");
     $("#sair").onclick = sair;
+    if (!editandoPerfil) {
+      $("#editar").onclick = () => { editandoPerfil = true; viewPerfil(); $("#nome").select(); };
+      return;
+    }
+    const fechar = () => { editandoPerfil = false; viewPerfil(); $("#editar").focus(); };
+    $("#cancelar").onclick = fechar;
+    $("form").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const err = $(".err"), botao = $("form .btn"), nome = $("#nome").value.trim();
+      if (!nome) return (err.textContent = "Digite seu nome.");
+      botao.disabled = true;
+      err.textContent = "";
+      try { nomeUser = (await api("perfil", { nome })).nome; }
+      catch (e) {
+        botao.disabled = false;
+        return (err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
+      }
+      toast("Nome atualizado.");
+      if (location.hash.split("/")[1] === "perfil") fechar(); else editandoPerfil = false;
+    };
   }
 
   // ---------- rotas ----------
@@ -489,6 +516,7 @@
     clearInterval(tickTimer);
     if (!email) return viewLogin();
     const [, rota, arg] = location.hash.split("/");
+    editandoPerfil = false;
     if (rota !== "treino") stopRest();
     if (rota === "treinos") viewTreinos();
     else if (rota === "treino") {
