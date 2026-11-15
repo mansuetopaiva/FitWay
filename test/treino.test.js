@@ -134,3 +134,38 @@ Treino C
   assert.deepEqual(p.treinos.map((t) => [t.id, t.nome, t.exercicios[0][0]]), [["A", "A – Peito", "Supino reto"], ["B", "B – Pernas", "Leg press"]]);
   assert.equal(p.treinos[1].exercicios[1][6], "");
 });
+
+// Texto real extraído de um PDF em lista: marcadores viram "l" e quadradinhos viram "n".
+test("lê treino em lista com marcadores, sem números", () => {
+  const p = lerTreino(`TREINO • ACADEMIA Página 1
+PLANO DE TREINO
+Divisão de exercícios por grupo muscular
+Quadríceps e posterior nn
+l Extensora — 3×10 unilateral + 3×10 normal, carga alta
+l Leg press — 3×10, carga alta
+Superiores nn
+l Puxada aberta — 3×15
+l Bíceps barra + ombro barra
+l Panturrilha sentada — 4× até a falha + ombro (elevação lateral) — 3×15
+TREINO • ACADEMIA Página 2
+l Búlgaro — 3×10
+Observação: respeite a execução correta, os intervalos e a carga adequada ao seu nível. Ajuste o treino com
+orientação do profissional responsável.`);
+  assert.equal(p.nome, "PLANO DE TREINO");
+  assert.deepEqual(p.treinos.map((t) => t.nome), ["A – Quadríceps e posterior", "B – Superiores"]);
+  assert.deepEqual(p.treinos[0].exercicios[0], ["Extensora", "db:Leg_Extensions", 3, "10", 0, 60, "unilateral + 3×10 normal, carga alta"]);
+  assert.deepEqual(p.treinos[1].exercicios.map((e) => [e[0], e[1], e[2], e[3]]), [
+    ["Puxada aberta", "db:Wide-Grip_Lat_Pulldown", 3, "15"],
+    ["Bíceps barra + ombro barra", "db:Barbell_Curl", 3, ""],
+    ["Panturrilha sentada", "db:Seated_Calf_Raise", 4, "falha"],
+    ["Búlgaro", "db:Split_Squat_with_Dumbbells", 3, "10"],
+  ]);
+});
+
+test("outros jeitos comuns de escrever séries", () => {
+  const p = lerTreino("Treino A - Peito\n- Supino reto: 4 séries de 12\n* Crucifixo 3x10-12\n• Flexão de braço 3 x máx\nTreino B - Costas\n1) Remada curvada 4x8 a 10\n");
+  assert.deepEqual(p.treinos.map((t) => [t.nome, t.exercicios.map((e) => `${e[0]} ${e[2]}x${e[3]}`)]), [
+    ["A – Peito", ["Supino reto 4x12", "Crucifixo 3x10–12", "Flexão de braço 3xmáx"]],
+    ["B – Costas", ["Remada curvada 4x8–10"]],
+  ]);
+});

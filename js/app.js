@@ -393,7 +393,7 @@
           <img class="gif" src="${gif(g)}" ${ehFoto(g) ? `data-db="${esc(g)}"` : ""} alt="${g ? "Demonstração" : "Sem imagem"} do exercício ${esc(nome)}" width="240" height="240">
           <div class="sets">${pills}</div>
           <div class="tiles">
-            <div class="tile">${icon("reps")}<span>Repetições</span><b>${esc(reps)}x</b></div>
+            <div class="tile">${icon("reps")}<span>Repetições</span><b>${/^\d/.test(reps) ? esc(reps) + "x" : esc(reps) || "—"}</b></div>
             <div class="tile">${icon("gym")}<span>Carga</span><b>${carga(t, i)}kg</b></div>
             <div class="tile">${icon("timer")}<span>Intervalo</span><b>${intervalo}″</b></div>
           </div>

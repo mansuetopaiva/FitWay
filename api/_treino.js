@@ -32,7 +32,7 @@ const FOTOS = [
   [/triceps.*frances/, "Standing_Dumbbell_Triceps_Extension"],
   [/triceps.*corda/, "Triceps_Pushdown_-_Rope_Attachment"],
   [/triceps.*testa/, "EZ-Bar_Skullcrusher"],
-  [/triceps.*(coice|kickback)/, "Tricep_Dumbbell_Kickback"],
+  [/triceps.*(coice|kickback|para tras)/, "Tricep_Dumbbell_Kickback"],
   [/triceps.*maquina/, "Machine_Triceps_Extension"],
   [/triceps.*banco/, "Bench_Dips"],
   [/triceps/, "Triceps_Pushdown"],
@@ -68,7 +68,12 @@ const FOTOS = [
   [/elevacao.*frontal.*(polia|cabo)/, "Front_Cable_Raise"],
   [/elevacao.*frontal/, "Front_Dumbbell_Raise"],
   // bíceps
-  [/rosca.*martelo/, "Hammer_Curls"],
+  [/(rosca|biceps).*martelo/, "Hammer_Curls"],
+  [/biceps.*scott/, "Preacher_Curl"],
+  [/biceps.*(polia|cabo)/, "Standing_Biceps_Cable_Curl"],
+  [/biceps.*concentrad/, "Concentration_Curls"],
+  [/biceps.*halter/, "Dumbbell_Bicep_Curl"],
+  [/biceps/, "Barbell_Curl"],
   [/rosca.*scott.*maquina/, "Machine_Preacher_Curls"],
   [/rosca.*scott/, "Preacher_Curl"],
   [/rosca.*concentrad/, "Concentration_Curls"],
@@ -100,6 +105,7 @@ const FOTOS = [
   [/panturrilha/, "Standing_Calf_Raises"],
   [/leg ?press/, "Leg_Press"],
   [/extensora/, "Leg_Extensions"],
+  [/(flexao|flexora).*posterior.*(polia|cabo)|flexora.*(polia|cabo)/, "Standing_Leg_Curl"],
   [/flexora.*sentad|cadeira flexora/, "Seated_Leg_Curl"],
   [/flexora.*em pe/, "Standing_Leg_Curl"],
   [/flexora/, "Lying_Leg_Curls"],
@@ -118,14 +124,16 @@ const FOTOS = [
   [/goblet/, "Goblet_Squat"],
   [/agachamento.*halter/, "Dumbbell_Squat"],
   [/agachamento/, "Barbell_Squat"],
-  [/gluteo.*(polia|cabo)/, "One-Legged_Cable_Kickback"],
+  [/(gluteo|coice).*(polia|cabo)/, "One-Legged_Cable_Kickback"],
+  [/good ?morning|bom dia/, "Stiff_Leg_Barbell_Good_Morning"],
+  [/\bombro/, "Dumbbell_Shoulder_Press"],
   [/gluteo|coice/, "Glute_Kickback"],
 ];
 export const IDS_FOTOS = FOTOS.map((r) => r[1]);
 
-// Em "Crucifixo na máquina ou crossover" vale a primeira opção.
+// Em "Crucifixo na máquina ou crossover" e "Bíceps na polia + ombro" vale o primeiro exercício.
 export function foto(nome) {
-  const n = semAcento(nome.split(/\s+\(?ou\s+/i)[0]);
+  const n = semAcento(nome.split(/\s+\(?ou\s+|\s*\+\s*/i)[0]);
   const r = FOTOS.find(([re]) => re.test(n));
   return r ? "db:" + r[1] : "";
 }
@@ -135,7 +143,60 @@ const NUMERO = /(?:^|\s)(\d{1,2})[.)º]?\s+(?=\p{Lu})/gu;
 const TITULO_TREINO = /(?:^|\n)[ \t]*((?:Treino\s+)?([A-Z])\s*[–—:-]\s+(\p{L}[^\n]{1,70}))/gu;
 const DESCANSO = { B: 150, I: 90 }; // B = básico, I = isolador; sem tipo, 60 s
 
-export function lerTreino(texto) {
+// Tabela numerada primeiro (entende nomes quebrados em várias linhas); se não houver, lista.
+export const lerTreino = (texto) => lerTabela(texto) || lerLista(texto);
+
+// Formato lista: uma linha por exercício, com ou sem marcador/número, e títulos de grupo entre elas.
+//   "● Extensora — 3×10 unilateral", "- Supino 4x12", "Leg press: 3 séries de 12", "Panturrilha — 4× até a falha"
+// Marcadores de PDF às vezes viram letras ("l" no lugar de ●, "n" no lugar de ■).
+const MARCADOR = /^(?:[•●▪■◦○►▶✓✔→*·]|[-–—](?=\s)|[lo](?=\s+\p{Lu})|\d{1,2}(?:[.)º°-]|\s*-)?(?=\s+\p{L}))\s*/u;
+const SERIES_LISTA = /(?:^|[\s—–:,(-])(\d{1,2})\s*(?:[xX×]\s*(\d{1,3}(?:\s*(?:[–—-]|a)\s*\d{1,3})?(?!\d)|at[ée]\s+a\s+falha|falha|m[aá]x\w*)?|s[ée]ries?\s*(?:de\s*)?(\d{1,3}(?:\s*(?:[–—-]|a)\s*\d{1,3})?)(?!\d))/iu;
+const RODAPE = /p[aá]gina\s*\d|page\s*\d/i;
+
+export function lerLista(texto) {
+  const linhas = String(texto).replace(/\u00a0/g, " ").split("\n").map((s) => s.trim()).filter(Boolean);
+  const titulo = (linhas.find((l) => !RODAPE.test(l)) || "Meu treino").slice(0, 80);
+  const grupos = [];
+  let cabecalho = "", atual = null;
+  for (const linha of linhas) {
+    if (RODAPE.test(linha)) continue;
+    const m0 = linha.match(MARCADOR), corpo = m0 ? linha.slice(m0[0].length) : linha;
+    const s = corpo.match(SERIES_LISTA);
+    let nome = "", ex = null;
+    const depois = s ? corpo.slice(s.index + s[0].length) : "";
+    if (s && s.index > 0 && !/^\s*(?:\d+\s*)?(?:min|seg|minutos|segundos|s|h|km|m)\b/i.test(depois)) { // "3 x 20 min" é cárdio, não série
+      nome = corpo.slice(0, s.index).replace(/[\s—–:,(-]+$/, "").replace(/\s[BI]$/, "").trim();
+      const reps = /falha/i.test(s[0]) ? "falha" : /m[aá]x/i.test(s[0]) ? "máx" : s[2] || s[3] ? (s[2] || s[3]).replace(/\s+/g, "").replace(/[—-]/, "–").replace(/^(\d+)a(\d+)$/, "$1–$2") : "";
+      const obs = depois.replace(/^[\s,;.)—–-]+/, "").trim();
+      ex = [nome, Math.min(20, Math.max(1, +s[1])), reps, obs];
+    } else if (m0 && corpo.length >= 3 && corpo.length <= 60 && /^\p{Lu}/u.test(corpo) && !/[.:]$/.test(corpo)) {
+      ex = [(nome = corpo), 3, "", ""]; // exercício sem séries escritas
+    }
+    if (ex && nome.length >= 2 && nome.length <= 70 && /^\p{L}/u.test(nome)) {
+      if (!atual || atual.cabecalho !== cabecalho) grupos.push((atual = { cabecalho, exercicios: [] }));
+      atual.exercicios.push(ex);
+    } else if (!m0 && linha.length >= 3 && linha.length <= 70 && !/[.,;]$/.test(linha)) {
+      cabecalho = linha.replace(/\s+(?:n{1,5}|[■□▪●]+)$/, "").trim(); // "n" = quadradinhos decorativos do PDF
+    }
+  }
+  if (!grupos.length) return null;
+  return {
+    nome: titulo,
+    totalSessoes: 0,
+    validade: "",
+    treinos: grupos.slice(0, 12).map((g, i) => {
+      const letra = g.cabecalho.match(/^(?:[Tt]reino\s*)?([A-Z])\s*[–—:-]\s*(.+)/u);
+      const id = String.fromCharCode(65 + i);
+      return {
+        id,
+        nome: (letra ? `${id} – ${letra[2]}` : g.cabecalho ? `${id} – ${g.cabecalho}` : "Treino " + id).slice(0, 80),
+        exercicios: g.exercicios.slice(0, 30).map(([nome, series, reps, obs]) => [nome.slice(0, 70), foto(nome), series, reps, 0, 60, obs.slice(0, 160)]),
+      };
+    }),
+  };
+}
+
+function lerTabela(texto) {
   const t = String(texto).replace(/ /g, " ");
   const titulo = (t.split("\n").map((s) => s.trim()).find(Boolean) || "Meu treino").slice(0, 80);
 

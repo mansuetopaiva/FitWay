@@ -42,11 +42,14 @@ O treino em andamento (séries marcadas e cronômetro) continua só no aparelho 
 
 ## Treino em PDF
 
-Conta nova não tem treino: a aba **Treinos** só aparece depois que a pessoa envia o PDF em **Perfil → Enviar PDF do treino**. A leitura é por regras, sem IA, e espera:
+Conta nova não tem treino: a aba **Treinos** só aparece depois que a pessoa envia o PDF em **Perfil → Enviar PDF do treino**. A leitura é por regras, sem IA, e entende dois formatos:
 
-- títulos como `A – Superior` ou `Treino B – Pernas` antes de cada tabela (sem título, cada lista vira Treino A, B, C…);
-- linhas numeradas com séries x repetições, como `1 Supino reto com halteres B 3 x 6–8 Observação`
-  (`B` = básico, 2min30 de descanso; `I` = isolador, 1min30; sem tipo, 1 min).
+- **Tabela numerada**: `1 Supino reto com halteres B 3 x 6–8 Observação`, com títulos como `A – Superior`
+  (`B` = básico, 2min30 de descanso; `I` = isolador, 1min30; sem tipo, 1 min). Nomes quebrados em várias linhas funcionam.
+- **Lista**: uma linha por exercício, com ou sem marcador (`●`, `-`, `*`, `1)`), como `Extensora — 3×10`,
+  `Supino reto: 4 séries de 12`, `Crucifixo 3x10-12`, `Panturrilha — 4× até a falha`. Cada título entre as listas vira um treino.
+
+Tempos como `3 x 20 min` são ignorados (cárdio).
 
 PDF escaneado (foto do papel) não funciona: o texto precisa ser selecionável.
 A foto de cada exercício vem do [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (domínio público),
