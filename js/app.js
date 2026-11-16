@@ -48,7 +48,7 @@
   async function api(acao, corpo) {
     const r = await fetch("/api/app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ acao, conta: email || undefined, ...corpo }) });
     const j = await r.json().catch(() => ({}));
-    if (r.status === 409) { toast(j.erro); setTimeout(() => location.reload(), 1200); } // a conta do cookie mudou
+    if (r.status === 409) { toast(j.erro); setTimeout(() => location.reload(), 1200); } // a conta do cookie mudou (409 é só para isso)
     if (!r.ok) throw Object.assign(new Error(j.erro || "Erro no servidor. Tente de novo."), { status: r.status });
     return j;
   }
@@ -74,12 +74,13 @@
     const pend = store.get(dataKey(), null);
     if (!pend) return;
     try { loadData((await api("salvar", { dados: pend })).dados); store.del(dataKey()); }
-    catch (e) { loadData(pend); } // sem conexão: segue com a cópia local, que sobe no próximo salvamento
+    catch (e) { loadData({ ...pend, plano: u.dados && u.dados.plano }); } // sem conexão: segue com a cópia local; o plano é sempre o do servidor
   }
   const sessaoKey = () => "mt_sessao_" + email;
   function saveSessao() { if (sessao && sessao.inicio) store.set(sessaoKey(), sessao); else store.del(sessaoKey()); }
   function save() {
-    const k = dataKey(), copia = data;
+    // Sem o plano: ele só vem do servidor (um plano de IA vencido não pode voltar por uma cópia antiga).
+    const k = dataKey(), copia = { ...data, plano: undefined };
     store.set(k, copia);
     api("salvar", { dados: copia }).then(() => store.del(k), () => {
       store.set(k, copia);
@@ -151,6 +152,8 @@
     sessao = null;
     api("sair").catch(() => {});
     store.del("mt_session");
+    // O rascunho do formulário tem dados de saúde: não fica no aparelho depois de sair.
+    try { Object.keys(localStorage).filter((k) => k.startsWith("fw_pedido_")).forEach((k) => store.del(k)); } catch (e) { /* sem armazenamento */ }
     email = null; data = null; rank = null; fotoUser = ""; adminUser = false;
     location.hash = "";
     render();
@@ -173,21 +176,27 @@
       </nav>`;
   }
 
-  // ---------- admin: o código fica em js/admin.js e só é baixado por quem é admin ----------
-  let adminScript = null;
+  // ---------- telas baixadas só quando abertas: js/admin.js (só admin) e js/pedido.js (formulário) ----------
+  const scripts = {};
+  const carregar = (src) => scripts[src] ||= new Promise((ok, falhou) => {
+    const el = document.createElement("script");
+    el.src = src; el.onload = ok; el.onerror = () => { delete scripts[src]; falhou(); };
+    document.head.appendChild(el);
+  });
   function viewAdmin(arg) {
     shell("Admin", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "admin");
-    adminScript ||= new Promise((ok, falhou) => {
-      const s = document.createElement("script");
-      s.src = "js/admin.js"; s.onload = ok; s.onerror = () => { adminScript = null; falhou(); };
-      document.head.appendChild(s);
-    });
-    adminScript.then(
+    carregar("js/admin.js").then(
       () => { if (location.hash.split("/")[1] === "admin") window.FitWayAdmin.render(arg); },
       () => toast("Não consegui abrir o painel. Tente de novo."));
   }
-  // O painel usa estas peças do app; ficam expostas só depois do login de um admin.
-  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app }; };
+  function viewPedido(tipo) {
+    shell("Treino personalizado", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
+    carregar("js/pedido.js").then(
+      () => { if (location.hash.split("/")[1] === "pedido") window.FitWayPedido.render(tipo); },
+      () => toast("Não consegui abrir o formulário. Tente de novo."));
+  }
+  // O painel e o formulário usam estas peças do app; ficam expostas só depois do login.
+  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, get email() { return email; } }; };
 
   // ---------- início: check-in + gráfico ----------
   let chartMode = "semana", diaRender = "";
@@ -308,7 +317,7 @@
         <span class="t"><b>${esc(t.nome)}</b><span class="muted">${t.exercicios.length} exercícios</span></span>
         <span class="play">${icon("play")}</span>
       </button>`).join("");
-    shell("Treinos", `
+    shell("Treinos", `${guia()}
       <p class="label">Treinos</p>
       <section class="card">
         <div class="plan-head"><b style="font-weight:400">${esc(plano().nome)}</b></div>
@@ -316,6 +325,28 @@
         <div class="progress"><span>${data.sessoes} sessões feitas</span></div>
       </section>`, "treinos");
     app.querySelectorAll(".wk").forEach((b) => b.onclick = () => (location.hash = "#/treino/" + b.dataset.id));
+  }
+
+  // Plano feito pela IA: explica as fases e destaca a da semana atual (contada desde plano.criado).
+  function guia() {
+    const g = plano().guia;
+    if (!g) return "";
+    const semana = Math.max(1, Math.floor((Date.now() - Date.parse(plano().criado)) / (7 * 864e5)) + 1);
+    const faixa = (t) => { const n = (String(t).match(/\d+/g) || []).map(Number); return n.length ? [n[0], n[n.length - 1]] : [0, -1]; };
+    const fases = (g.fases || []).map((f) => {
+      const [a, b] = faixa(f.semanas), agora = semana >= a && semana <= b;
+      return `<li class="${agora ? "agora" : ""}"><b>Semanas ${esc(f.semanas)}</b>${agora ? ' <span class="selo ok">Você está aqui</span>' : ""}<span class="muted">${esc(f.foco)}</span></li>`;
+    }).join("");
+    const parte = (t, v) => (v ? `<h3>${t}</h3><p>${esc(v)}</p>` : "");
+    return `<section class="card guia">
+      <h2>Como funciona seu plano</h2>
+      <p class="muted">Semana ${Math.min(semana, 99)} de ${plano().semanas || 8}</p>
+      <p>${esc(g.resumo)}</p>
+      <ol class="fases">${fases}</ol>
+      <details><summary>Progressão, cárdio e cuidados</summary>
+        ${parte("Progressão", g.progressao)}${parte("Cárdio", g.cardio)}${parte("Cuidados", g.cuidados)}${parte("Avaliação das fotos", g.avaliacao_fotos)}
+      </details>
+    </section>`;
   }
 
   // Treino padrão: chave pelo GIF (como sempre foi). Treino do PDF: pelo nome, porque dois exercícios podem ter a mesma foto.
@@ -526,6 +557,7 @@
         <div class="row"><span>Sessões feitas</span><span>${data.sessoes}</span></div>
         <div class="row"><span>Check-ins</span><span>${data.checkins.length}</span></div>
       </section>
+      <section class="card ia" id="ia" aria-live="polite">${pintarIA()}</section>
       <section class="card">
         <h2>Meu treino</h2>
         <p class="muted" style="margin:6px 0 12px">${data.plano ? "Para trocar de treino, envie outro PDF." : "Envie o PDF do seu treino para liberar a aba Treinos."} O site lê os exercícios, as séries e as repetições e escolhe a foto de cada exercício.</p>
@@ -536,7 +568,12 @@
       </section>
       <button class="btn" id="sair" style="margin-top:16px">Sair</button>`, "perfil");
     $("#sair").onclick = sair;
+    ligarIA();
+    atualizarIA();
     const pdfErr = $("#pdfErr"), enviar = $("#enviarPdf");
+    // O treino feito pela IA é pago: substituir por PDF ou remover pede confirmação (vale também se ele está escondido por acesso vencido).
+    const temIA = () => (ia && ia.temPlanoIA) || (data.plano && data.plano.origem === "ia");
+    const AVISO_IA = "Você tem um treino personalizado pago. Ele será apagado e substituído, e a mensalidade deixa de valer para ele. Continuar?";
     const trocarPlano = async (corpo) => {
       if (sessao && sessao.inicio && !confirm("Há um treino em andamento. Trocar de plano descarta o progresso dele. Continuar?")) return;
       enviar.disabled = true;
@@ -553,8 +590,10 @@
       toast(data.plano ? `Treino carregado: ${data.plano.treinos.length} treinos, ${ex.length} exercícios${sem ? `, ${sem} sem foto` : ""}.` : "Treino removido.");
       render(); // redesenha a tela em que a pessoa estiver, que pode ter mudado durante o envio
     };
-    enviar.onclick = () => $("#pdf").click();
-    if (data.plano) $("#removerTreino").onclick = () => { if (confirm("Remover o treino da sua conta? A aba Treinos some até você enviar outro PDF.")) trocarPlano({ remover: true }); };
+    enviar.onclick = () => { if (!temIA() || confirm(AVISO_IA)) $("#pdf").click(); };
+    if (data.plano) $("#removerTreino").onclick = () => {
+      if (confirm(temIA() ? AVISO_IA.replace(" e substituído", "") : "Remover o treino da sua conta? A aba Treinos some até você enviar outro PDF.")) trocarPlano({ remover: true });
+    };
     $("#pdf").onchange = (ev) => {
       const f = ev.target.files[0];
       ev.target.value = ""; // permite escolher o mesmo arquivo de novo depois de um erro
@@ -605,6 +644,85 @@
       toast("Nome atualizado.");
       if (location.hash.split("/")[1] === "perfil") fechar(); else editandoPerfil = false;
     };
+  }
+
+  // ---------- treino personalizado (IA): estado do acesso e do pedido no Perfil ----------
+  let ia = null, iaTimer = null;
+  const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
+  const diaMes = (iso) => new Date(new Date(iso) - 1).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" });
+  const NOME_PEDIDO = { inicial: "Treino personalizado", mensalidade: "Renovação do acesso", novo_treino: "Novo treino" };
+  function pintarIA() {
+    let h = `<h2>Treino personalizado</h2>`;
+    if (!ia) return h + `<p class="muted">Carregando…</p>`;
+    const p = ia.pedido, agora = Date.now();
+    const botao = (tipo, txt) => `<button class="btn" data-pedir="${tipo}">${txt} — ${reais(ia.precos[tipo])}</button>`;
+    if (p && p.status === "aguardando_pagamento") {
+      h += `<p class="ia-status">${NOME_PEDIDO[p.tipo]} — ${reais(p.valor)}</p>
+        <p class="muted">Aguardando pagamento. Assim que ele for confirmado, ${p.tipo === "mensalidade" ? "seu acesso é renovado" : "seu treino começa a ser montado"}.</p>`;
+    } else if (p && (p.status === "pago" || p.status === "gerando")) {
+      h += `<p class="ia-status">Gerando seu treino…</p>
+        <p class="muted">Isso leva até 1 minuto. Pode sair desta tela: o treino aparece na aba Treinos quando ficar pronto.</p>`;
+    } else if (p && p.status === "erro") {
+      // Sem botões: o pedido já foi pago, o admin gera de novo sem novo pagamento.
+      h += `<p class="ia-status erro">Não conseguimos montar seu treino.</p>
+        <p class="muted">Já estamos vendo o problema e vamos gerar de novo, sem novo pagamento.</p>`;
+    } else {
+      if (p && p.status === "pronto" && p.tipo !== "mensalidade" && ia.plano && agora - Date.parse(p.gerado_em) < 7 * 864e5)
+        h += `<p class="ia-status ok">Seu treino está pronto. <a href="#/treinos">Ver na aba Treinos</a></p>`;
+      if (!ia.temPlanoIA) {
+        h += `<p class="muted" style="margin:6px 0 12px">Um plano de 8 semanas montado para o seu objetivo, sua rotina e sua saúde, com 30 dias de acesso.</p>`;
+        if (ia.pode.inicial) h += botao("inicial", "Solicitar meu treino personalizado");
+      } else {
+        const ate = ia.acessoAte ? Date.parse(ia.acessoAte) : 0;
+        if (ate > agora) {
+          h += `<p class="ia-status ok">Treino ativo até ${diaMes(ia.acessoAte)}</p>`;
+          if (ia.pode.mensalidade && ate - agora <= 5 * 864e5) h += botao("mensalidade", "Renovar acesso");
+        } else {
+          h += `<p class="ia-status">${ate ? `Seu acesso venceu em ${diaMes(ia.acessoAte)}.` : "Seu acesso não está ativo."} Renove para voltar a ver seu treino.</p>`;
+          if (ia.pode.mensalidade) h += botao("mensalidade", "Renovar acesso");
+        }
+        if (ia.pode.novo_treino) h += `<div style="margin-top:8px">${botao("novo_treino", "Pedir um novo treino")}</div>`;
+      }
+    }
+    return h + `<p class="ia-termo"><a href="#/termo">Termo de Responsabilidade e Uso</a></p>`;
+  }
+  function ligarIA() {
+    app.querySelectorAll("[data-pedir]").forEach((b) => b.onclick = async () => {
+      const tipo = b.dataset.pedir;
+      if (tipo !== "mensalidade") return (location.hash = "#/pedido/" + tipo);
+      if (!confirm(`Pedir a renovação do acesso por ${reais(ia.precos.mensalidade)}? O pedido fica aguardando pagamento.`)) return;
+      b.disabled = true;
+      try { await api("pedido_criar", { tipo }); toast("Pedido de renovação enviado."); }
+      catch (e) { toast(e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }
+      atualizarIA();
+    });
+  }
+  // Consulta o pedido; enquanto ele está pago ou gerando, de novo a cada 4 s (só nesta tela).
+  async function atualizarIA() {
+    clearTimeout(iaTimer);
+    if (document.hidden && ia) { iaTimer = setTimeout(atualizarIA, 4000); return; } // aba escondida: não consulta
+    try { ia = await api("pedido_status"); } catch (e) { if (e.status === 401) return; }
+    if (location.hash.split("/")[1] !== "perfil" || !$("#ia")) return;
+    if (ia && JSON.stringify(data.plano) !== JSON.stringify(ia.plano)) { // treino pronto, acesso renovado ou vencido
+      if (ia.plano && (!data.plano || data.plano.pedido !== ia.plano.pedido)) data.proximo = ia.plano.treinos[0].id; // plano novo começa no 1º treino
+      data.plano = ia.plano;
+      return render();
+    }
+    if (!ia) { $("#ia").innerHTML = `<h2>Treino personalizado</h2><p class="err">Sem conexão com o servidor.</p>`; return; }
+    $("#ia").innerHTML = pintarIA();
+    ligarIA();
+    if (ia.pedido && (ia.pedido.status === "pago" || ia.pedido.status === "gerando")) iaTimer = setTimeout(atualizarIA, 4000);
+  }
+
+  // ---------- termo de responsabilidade (texto atual, vindo do servidor) ----------
+  async function viewTermo() {
+    shell("Termo", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
+    let t;
+    try { t = await api("termo"); } catch (e) { t = null; }
+    if (location.hash.split("/")[1] !== "termo") return;
+    shell("Termo", `<a class="adm-voltar" href="#/perfil">${icon("back")}Perfil</a>
+      <section class="card">${t ? `<p class="muted">Versão ${esc(t.versao)}</p><div class="termo-texto">${esc(t.texto)}</div>`
+        : `<p class="err" role="alert">Sem conexão com o servidor. Tente de novo.</p>`}</section>`, "perfil");
   }
 
   // ---------- ranking: grupo de amigos que compara check-ins ----------
@@ -671,6 +789,7 @@
   // ---------- rotas ----------
   function render() {
     clearInterval(tickTimer);
+    clearTimeout(iaTimer);
     if (!email) return viewLogin();
     const [, rota, arg] = location.hash.split("/");
     editandoPerfil = false;
@@ -684,6 +803,8 @@
     else if (rota === "perfil") viewPerfil();
     else if (rota === "ranking") viewRanking();
     else if (rota === "admin" && adminUser) { expor(); viewAdmin(arg); }
+    else if (rota === "pedido") { expor(); viewPedido(arg); }
+    else if (rota === "termo") viewTermo();
     else viewInicio();
     window.scrollTo(0, 0);
   }
@@ -693,7 +814,7 @@
     if (document.hidden || !email) return;
     tickRest();
     const rota = location.hash.split("/")[1];
-    if (rota !== "treino" && rota !== "treinos" && rota !== "perfil" && rota !== "ranking" && rota !== "admin" && diaRender !== dayKey(today())) render();
+    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "termo"].includes(rota) && diaRender !== dayKey(today())) render();
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });
