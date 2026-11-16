@@ -5,8 +5,8 @@ import { DIA, escaparLike, limpar, validarPlano } from "./_dados.js";
 import { NOMES_FOTOS, lerPdf } from "./_treino.js";
 import { PARQ, limparPedidos } from "./_pedido.js";
 import { termoFaltando } from "./_termo.js";
-import { ABERTOS, efeitoDoPagamento, tipoValido } from "./_precos.js";
-import { MSG_NAO_ENCONTRADO, aplicarPagamento, confirmarCartao, lerE2E } from "./_pagamento.js";
+import { ABERTOS, efeitoDoPagamento, precoDe, tipoValido } from "./_precos.js";
+import { MSG_NAO_ENCONTRADO, aplicarPagamento, confirmarCartao, dataDoE2E, lerE2E } from "./_pagamento.js";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
   "pedidos", "pedido", "pix_confirmar", "pix_nao_encontrado", "cartao_verificar", "pedido_gerar_de_novo", "pedido_cancelar"];
@@ -52,9 +52,14 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         coalesce(sum(valor) filter (where pago_em >= date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'), 0)::int as receita_mes,
         (select count(*) from usuarios where acesso_ate > now() and acesso_ate <= now() + interval '7 days')::int as vencendo7d
       from pedidos`;
+    // Cartão pago num pedido que já não estava aberto (cancelado, pago por Pix, link pago duas vezes): devolver o dinheiro.
+    const semPedido = await sql`select l.criado, l.alvo_email as email, l.detalhes->>'transaction_nsu' as transaction_nsu,
+        (l.detalhes->>'paid_amount')::int as valor, coalesce(p.codigo, p.id) as codigo
+      from admin_log l left join pedidos p on p.id = l.detalhes->>'pedido'
+      where l.acao = 'cartao_sem_pedido' and l.criado > now() - interval '30 days' order by l.criado desc limit 10`;
     return ok({ usuarios: r.usuarios, novos7d: r.novos7d, comTreino: r.com_treino, comAcesso: r.com_acesso,
       checkinsHoje: r.checkins_hoje, checkinsSemana: r.checkins_semana, cadastroAntes: r.cadastro_antes || "",
-      aguardando: p.aguardando, pixAguardando: p.pix_aguardando, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d,
+      aguardando: p.aguardando, pixAguardando: p.pix_aguardando, cartaoSemPedido: semPedido, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d,
       iaLigada: process.env.TREINO_IA_ATIVO === "1", termoFaltando: termoFaltando() });
   }
 
@@ -98,23 +103,28 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         modelo: x.modelo, respostas: x.respostas, fotos: x.fotos, aceite: x.aceite, plano: x.plano_gerado, parq: PARQ,
         metodo: x.metodo, codigo: x.codigo, pagadorNome: x.pagador_nome, comprovante: x.comprovante, avisoEm: x.aviso_em,
         pixE2e: x.pix_e2e, pixE2eInformado: x.pix_e2e_informado, confirmadoPor: x.confirmado_por, mensagemUsuario: x.mensagem_usuario,
-        transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref });
+        transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref, valorPix: precoDe("pix", x.tipo) ?? null });
     }
     let x;
     if (b.op === "pix_confirmar") {
       // O ID da transação, copiado do app do Nubank, identifica o Pix: o mesmo Pix nunca confirma dois pedidos (pix_e2e é unique).
       const e2e = lerE2E(b.pix_e2e);
       if (!e2e) return falha(400, "ID da transação inválido. Ele começa com E e tem 32 letras e números, sem espaços.");
-      // Também de aguardando_pagamento: o admin pode ver o Pix antes do aviso. metodo vazio: o pedido nasceu antes da escolha.
-      const [p] = await sql`select p.tipo, coalesce(u.acesso_ate > now(), false) as ativo from pedidos p join usuarios u on u.email = p.email
-        where p.id = ${id} and p.status in ('aguardando_confirmacao', 'aguardando_pagamento') and (p.metodo is null or p.metodo = 'pix')`;
+      // Também de aguardando_pagamento (o admin pode ver o Pix antes do aviso) e com qualquer meio escolhido: quem pagou o Pix
+      // e depois tocou em "Trocar" para cartão continua podendo ser confirmado. Um cartão pago depois vira "cartao_sem_pedido".
+      const [p] = await sql`select p.tipo, p.criado, coalesce(u.acesso_ate > now(), false) as ativo from pedidos p join usuarios u on u.email = p.email
+        where p.id = ${id} and p.status in ('aguardando_confirmacao', 'aguardando_pagamento')`;
       if (!p) return falha(400, "Este pedido não está aguardando o Pix.");
+      // A data do Pix está no ID. Folga de 1 dia (fuso do ID não documentado): barra um Pix antigo, de antes do pedido.
+      const quando = dataDoE2E(e2e);
+      if (!quando || quando < new Date(new Date(p.criado) - 864e5) || quando > new Date(Date.now() + 864e5))
+        return falha(400, "Este ID é de um Pix de antes do pedido (ou a data dele não confere). Copie o ID do Pix certo no app do Nubank.");
       // Novo treino não mexe no acesso: com o acesso vencido, o treino pago ficaria escondido.
       if (p.tipo === "novo_treino" && !p.ativo) return falha(400, "O acesso deste usuário venceu. Ele precisa renovar (mensalidade) antes do novo treino.");
       const ef = efeitoDoPagamento(p.tipo);
       // Sem a chave, a geração falharia e gastaria uma tentativa: avisa e não muda nada.
       if (ef.gerar && !process.env.ANTHROPIC_API_KEY) return falha(400, "Chave da IA não configurada.");
-      const usado = async () => (await sql`select coalesce(codigo, id) as codigo from pedidos where pix_e2e = ${e2e} and id <> ${id}`)[0];
+      const usado = async () => (await sql`select coalesce(codigo, id) as codigo from pedidos where upper(pix_e2e) = upper(${e2e}) and id <> ${id}`)[0];
       const ja = await usado();
       if (ja) return falha(400, `Este Pix já confirmou o pedido ${ja.codigo}.`);
       // Os dias somam a partir de greatest(now(), acesso_ate): renovar antes do vencimento não perde dias.
@@ -137,11 +147,12 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
       const [p] = await sql`select checkout_ref from pedidos where id = ${id}`;
       if (!p) return falha(404, "Pedido não encontrado.");
       if (!p.checkout_ref) return falha(400, "Não há o que verificar: o InfinitePay ainda não mandou o retorno deste pagamento.");
-      const r = await confirmarCartao(sql, { order_nsu: id, ...p.checkout_ref }, { fetch: opc.fetch });
+      const r = await confirmarCartao(sql, { ...p.checkout_ref, order_nsu: id }, { fetch: opc.fetch });
       if (r !== "pago") return falha(400, {
         ignorado: "Nada mudou: o pedido não está aguardando o cartão (ou já foi pago).",
         recusado: "O InfinitePay diz que este pagamento não foi feito ou veio com valor menor.",
-        temporario: "O InfinitePay não respondeu. Tente de novo em alguns minutos.",
+        temporario: "O InfinitePay não respondeu (ou acabou de ser consultado). Tente de novo em alguns minutos.",
+        sobra: "O InfinitePay diz que foi pago, mas o pedido já não estava aberto. O pagamento ficou no aviso do resumo: devolva o dinheiro.",
       }[r]);
       [x] = await sql`select status from pedidos where id = ${id}`;
     } else if (b.op === "pedido_gerar_de_novo") {

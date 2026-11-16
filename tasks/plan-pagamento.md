@@ -57,7 +57,7 @@ Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda 
 
 ## Fase 4: fechamento
 
-- [ ] **T10. README** (variáveis) e os 4 agentes em paralelo, com a análise de fraude pedida ao security-auditor; correções; go/no-go.
+- [x] **T10. README** (variáveis) e os 4 agentes em paralelo, com a análise de fraude pedida ao security-auditor; correções; go/no-go.
 
 ## Riscos
 

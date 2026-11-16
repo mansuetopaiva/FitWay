@@ -2,6 +2,8 @@
 // O formulário (js/pedido.js) recebe PARQ, OPCOES e TEXTOS do servidor, então o texto fica só aqui.
 import { randomBytes } from "node:crypto";
 export const LETRAS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 símbolos, sem 0/O e 1/I (grupos do ranking e código do pedido)
+// Código curto do pedido, para a pessoa anotar e o admin achar o Pix: "FW" + 6.
+export const novoCodigo = () => "FW" + Array.from(randomBytes(6), (x) => LETRAS[x % 32]).join("");
 import { ABERTOS, PRECOS, iaAtiva, podePedir } from "./_precos.js";
 import { registrarAceite, termoFaltando } from "./_termo.js";
 
@@ -81,14 +83,14 @@ export function limparFotos(f) {
 }
 
 // Rotinas de prazo, sem cron: rodam no pedido_status (email do usuário) e no resumo do admin (email null = todos).
-// - aguardando pagamento há mais de 30 dias: cancelado e sem fotos;
+// - aguardando pagamento há mais de 30 dias (contando do último aviso do Pix, se houve): cancelado e sem fotos;
 // - fotos e comprovante do Pix apagados 90 dias depois do pedido ficar pronto, cancelado ou com erro (as respostas ficam).
 //   aguardando_confirmacao nunca é cancelado aqui: a pessoa já disse que pagou e o admin ainda vai conferir.
 export async function limparPedidos(sql, email) {
   await sql`update pedidos set status = 'cancelado', fotos = null, atualizado = now()
-    where (${email}::text is null or email = ${email}) and status = 'aguardando_pagamento' and criado < now() - interval '30 days'`;
+    where (${email}::text is null or email = ${email}) and status = 'aguardando_pagamento' and greatest(criado, aviso_em) < now() - interval '30 days'`;
   // A mensalidade vira pronto sem gerado_em: conta de pago_em.
-  await sql`update pedidos set fotos = null, comprovante = null where (${email}::text is null or email = ${email}) and (fotos is not null or comprovante is not null) and (
+  await sql`update pedidos set fotos = null, comprovante = null, pagador_nome = null where (${email}::text is null or email = ${email}) and (fotos is not null or comprovante is not null) and (
     (status = 'pronto' and coalesce(gerado_em, pago_em) < now() - interval '90 days') or (status in ('cancelado', 'erro') and atualizado < now() - interval '90 days'))`;
 }
 
@@ -113,8 +115,8 @@ export async function criarPedido(sql, u, b, headers, agora, { admin = false } =
     ({ aceite } = a); ({ fotos } = f); ({ respostas } = r);
   }
   const id = randomBytes(12).toString("base64url");
-  // Código curto para a pessoa anotar e o admin achar o pedido. shortcut: colisão (1 em ~1 bilhão) cai no "já tem pedido"; tentar de novo se um dia acontecer.
-  const codigo = "FW" + Array.from(randomBytes(6), (x) => LETRAS[x % 32]).join("");
+  // shortcut: colisão do código (1 em ~1 bilhão) cai no "já tem pedido"; tentar de novo se um dia acontecer.
+  const codigo = novoCodigo();
   const js = (v) => (v ? JSON.stringify(v) : null);
   // O índice único pedidos_um_aberto recusa um 2º pedido aberto mesmo em dois cliques simultâneos.
   // metodo vazio até a pessoa escolher; o valor do Pix (o menor) é provisório, só para a lista do admin.

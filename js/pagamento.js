@@ -17,6 +17,15 @@
   let id = "", st = null, escolher = false, comp = "", nomePagador = "", e2e = "", ocupado = false, aviso = "";
   const aqui = () => location.hash.split("/")[1] === "pagamento" && location.hash.split("/")[2] === id;
   const sem = (e) => (e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
+  // 400: o pedido mudou (pago, avisado ou cancelado em outra aba). Relê para não oferecer de novo o mesmo botão.
+  async function recusado(e) {
+    ocupado = false;
+    if (!aqui()) return toast(sem(e));
+    if (e.status === 400) { try { st = await api("pagamento", { id }); escolher = false; } catch (e2) { /* fica a tela que estava */ } }
+    if (aqui()) { pintar(false); toast(sem(e)); }
+  }
+  // Voltou do checkout pelo botão Voltar (página restaurada do cache): solta o botão "Abrindo…".
+  window.addEventListener("pageshow", (ev) => { if (ev.persisted && st && aqui()) { ocupado = false; pintar(false); } });
 
   async function render(pid) {
     id = pid || ""; st = null; escolher = false; comp = ""; e2e = ""; ocupado = false; aviso = "";
@@ -108,7 +117,7 @@
       const r = await api("pedido_metodo", { id, metodo });
       st.pedido = r.pedido; if (r.pix) st.pix = r.pix;
       escolher = false; aviso = "";
-    } catch (e) { toast(sem(e)); }
+    } catch (e) { return recusado(e); }
     ocupado = false;
     if (!aqui()) return;
     if (metodo === "cartao" && st.pedido.metodo === "cartao") return abrirCartao();
@@ -121,10 +130,7 @@
     try {
       const { url } = await api("pagar_cartao", { id });
       location.href = url; // página da InfinitePay; a volta traz os parâmetros para confirmar
-    } catch (e) {
-      ocupado = false;
-      if (aqui()) { pintar(false); toast(sem(e)); }
-    }
+    } catch (e) { recusado(e); }
   }
 
   // Confere o pagamento do cartão com o último retorno guardado. auto: ao voltar do checkout.
@@ -136,8 +142,9 @@
     try {
       const r = await api("confirmar_cartao", { order_nsu: id, transaction_nsu: ret.transaction_nsu, slug: ret.slug });
       st = await api("pagamento", { id });
-      aviso = r.resultado === "temporario" ? "Não conseguimos confirmar agora. Tente verificar de novo em alguns minutos." : "";
-      if (["pago", "gerando", "pronto"].includes(st.pedido.status)) toast("Pagamento confirmado.");
+      aviso = r.resultado === "temporario" ? "Não conseguimos confirmar agora. Tente verificar de novo daqui a pouco." : "";
+      if (r.resultado === "sobra") toast("Este pedido já estava fechado. Seu pagamento ficou registrado para devolução.");
+      else if (["pago", "gerando", "pronto"].includes(st.pedido.status)) toast("Pagamento confirmado.");
     } catch (e) { toast(sem(e)); }
     ocupado = false;
     if (aqui() && st) pintar(true);
@@ -156,6 +163,7 @@
       st.pedido = r.pedido;
       toast("Aviso enviado. A confirmação é feita em até 24 horas.");
     } catch (e) {
+      if (e.status === 400 && !/nome|comprovante|ID da transação/.test(e.message)) return recusado(e); // o pedido mudou; erro do formulário fica no formulário
       ocupado = false;
       if (!aqui()) return toast(sem(e));
       pintar(false);

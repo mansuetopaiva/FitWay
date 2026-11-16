@@ -161,7 +161,7 @@ Só aparecem os meios configurados; sem nenhum, a tela diz "Pagamento indisponí
 - **Pix:** a tela mostra o valor, o botão "Pagar R$ X com Pix" (abre o link de cobrança do Nubank numa nova aba, com o valor já preenchido)
   e o código do pedido. Depois de pagar, a pessoa anexa o comprovante (obrigatório), pode colar o ID da transação e toca em **Já paguei**.
   O pedido fica **Pix a conferir**. No painel, o admin vê o valor esperado ao lado do comprovante, cola o ID da transação copiado do app
-  do Nubank e clica em **Confirmar Pix recebido** (ou **Não encontrei o Pix**, que devolve o pedido com um aviso para a pessoa).
+  do Nubank (o servidor recusa um Pix com data de antes do pedido) e clica em **Confirmar Pix recebido** (ou **Não encontrei o Pix**, que devolve o pedido com um aviso para a pessoa).
   O mesmo ID nunca confirma dois pedidos.
 - **Cartão:** a pessoa vai para o checkout do InfinitePay e volta para o app, que confirma o pagamento. O webhook `/api/infinitepay`
   também confirma. Nos dois casos o servidor pergunta ao InfinitePay (`payment_check`) se o pagamento existe e de quanto foi: o que chega
@@ -179,7 +179,11 @@ Variáveis na Vercel:
 
 - Sem o link do valor de um pedido, o Pix não aparece para aquele pedido (o nome da variável sai do preço em centavos: mudou o preço, crie um link novo).
 - Sem `INFINITEPAY_HANDLE` ou `SITE_URL`, o cartão não aparece.
-- O comprovante é apagado junto com as fotos, 90 dias depois do pedido pronto, cancelado ou com erro.
+- O comprovante e o nome de quem pagou são apagados junto com as fotos, 90 dias depois do pedido pronto, cancelado ou com erro.
+- Cartão pago num pedido que já não estava aberto (cancelado, já pago por Pix, link pago duas vezes) aparece no topo do resumo do admin
+  por 30 dias: devolva pelo InfinitePay.
+- Antes de liberar o cartão, falta conferir com um link real (criar link é grátis) o campo da URL na resposta de `/links` e se o
+  `payment_check` amarra o pedido ao pagamento (perguntas P2 e P8 da spec).
 
 ## Testes
 

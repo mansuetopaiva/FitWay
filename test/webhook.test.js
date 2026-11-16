@@ -18,7 +18,8 @@ async function chamar(body, method = "POST") {
   return status;
 }
 const corpo = { invoice_slug: "s-abc", amount: 1199, paid_amount: 1199, installments: 1, capture_method: "credit_card", transaction_nsu: "tx-1", order_nsu: "p1", receipt_url: "https://x", items: [] };
-const elegivel = (q) => (q.startsWith("update pedidos set checkout_ref") ? [{ id: "p1", tipo: "inicial" }] : q.startsWith("with p as") ? [{ status: "pago" }] : []);
+const elegivel = (q) => (q.startsWith("select id, tipo, status, email, transaction_nsu") ? [{ id: "p1", tipo: "inicial", status: "aguardando_pagamento", email: "a@x.com", transaction_nsu: null }]
+  : q.startsWith("update pedidos set checado_em") ? [{ id: "p1" }] : q.startsWith("with p as") ? [{ status: "pago" }] : []);
 
 test("webhook: usa o payment_check e nunca o amount nem o paid do corpo", async () => {
   responder = elegivel; chamadas.length = 0; pc = [];
@@ -46,8 +47,15 @@ test("webhook: pedido de Pix ou corpo inválido responde 200 sem chamar o Infini
   globalThis.fetch = resposta(200, { success: true, paid: true, paid_amount: 1199 });
   assert.equal(await chamar(corpo), 200);
   assert.equal(await chamar("isto não é json"), 200);
-  assert.equal(await chamar(JSON.stringify(corpo)), 200, "corpo em texto também é lido");
+  assert.equal(await chamar(JSON.stringify(corpo)), 200, "corpo em texto (pedido de Pix: ignorado)");
   assert.equal(await chamar(null), 200);
   assert.equal(pc.length, 0);
   assert.equal(await chamar(corpo, "GET"), 405);
+});
+
+test("webhook: corpo em texto chega ao payment_check", async () => {
+  responder = elegivel; pc = [];
+  globalThis.fetch = resposta(200, { success: true, paid: true, paid_amount: 1199 });
+  assert.equal(await chamar(JSON.stringify(corpo)), 200);
+  assert.deepEqual(pc[0], { handle: "exemplo", order_nsu: "p1", transaction_nsu: "tx-1", slug: "s-abc" });
 });

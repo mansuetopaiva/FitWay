@@ -77,10 +77,11 @@ const schema = () => pronto ||= (async () => {
     add column if not exists comprovante text, add column if not exists aviso_em timestamptz, add column if not exists confirmado_por text,
     add column if not exists transaction_nsu text, add column if not exists capture_method text, add column if not exists mensagem_usuario text,
     add column if not exists checkout_url text, add column if not exists checkout_ref jsonb, add column if not exists pix_e2e text,
-    add column if not exists pix_e2e_informado text`;
+    add column if not exists pix_e2e_informado text, add column if not exists checkout_slug text, add column if not exists checado_em timestamptz`;
   await sql`create unique index if not exists pedidos_codigo on pedidos (codigo)`;
   await sql`create unique index if not exists pedidos_transaction_nsu on pedidos (transaction_nsu)`;
-  await sql`create unique index if not exists pedidos_pix_e2e on pedidos (pix_e2e)`;
+  await sql`create unique index if not exists pedidos_pix_e2e on pedidos (upper(pix_e2e))`; // o mesmo ID com outra caixa é o mesmo Pix
+  await sql`create unique index if not exists pedidos_checkout_slug on pedidos (checkout_slug)`;
   // Status novo aguardando_confirmacao: troca a restrição antiga uma vez só.
   await sql`do $$ begin
     if not exists (select 1 from pg_constraint where conname = 'pedidos_status_check' and pg_get_constraintdef(oid) like '%aguardando_confirmacao%') then

@@ -141,3 +141,22 @@ test("aplicarPagamento: pedido, acesso e log numa instrução; UPDATE condiciona
   assert.equal(await aplicarPagamento(sql, { id: "p1", tipo: "toString" }, { quem: "x", metodo: "pix", de: [] }), null);
   assert.equal(await aplicarPagamento(sql, { id: "p1", tipo: "inicial" }, { quem: "x", metodo: "boleto", de: [] }), null);
 });
+
+test("pagamento: sem PIX_TITULAR_EXIBIDO o recebedor vem vazio; pedido antigo sem código ganha um ao abrir", async () => {
+  const antes = process.env.PIX_TITULAR_EXIBIDO;
+  delete process.env.PIX_TITULAR_EXIBIDO;
+  try {
+    const s = sqlFalso(pend({ codigo: null }), (q, v) => (q.startsWith("update pedidos set codigo") ? [{ codigo: v[0] }] : []));
+    const r = await acaoPagamento(s.sql, u, { acao: "pagamento", id: "p1" });
+    assert.deepEqual(r.corpo.pix, { link: L999, recebedor: "" });
+    assert.match(r.corpo.pedido.codigo, /^FW[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/);
+    assert.match(s.chamadas.find((c) => c.q.startsWith("update pedidos set codigo")).q, /coalesce\(codigo, \?\)/, "nunca troca um código que já existe");
+  } finally { process.env.PIX_TITULAR_EXIBIDO = antes; }
+});
+
+test("dataDoE2E: lê a data do ID e recusa datas impossíveis", async () => {
+  const { dataDoE2E } = await import("../api/_pagamento.js");
+  assert.equal(dataDoE2E("E18236120202611161430AbC123def45").toISOString(), "2026-11-16T14:30:00.000Z");
+  for (const ruim of ["E18236120202613161430AbC123def45", "E18236120202602301430AbC123def45", "E18236120202611162530AbC123def45", "E1823612X202611161430AbC123def45", "", null])
+    assert.equal(dataDoE2E(ruim), null, String(ruim));
+});

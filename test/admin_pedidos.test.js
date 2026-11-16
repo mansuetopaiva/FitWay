@@ -4,7 +4,9 @@ import { acaoAdmin } from "../api/_admin.js";
 
 process.env.ADMIN_EMAILS = "dono@x.com";
 process.env.ANTHROPIC_API_KEY = "sk-teste"; // só para passar da checagem da chave; nenhum teste chama a IA
-const E2E = "E" + "1234567890ABCDEFGHIJabcdefghij1";
+// ID de Pix de exemplo com a data de agora (E + ISPB + yyyyMMddHHmm UTC + 11).
+const e2eDe = (d, fim = "AbC123def45") => "E18236120" + d.toISOString().replace(/\D/g, "").slice(0, 12) + fim;
+const E2E = e2eDe(new Date());
 const pix = { op: "pix_confirmar", id: "p1", pix_e2e: E2E };
 const dono = { email: "dono@x.com" };
 function sqlFalso(responder = () => []) {
@@ -157,10 +159,34 @@ test("pix_confirmar: ID já usado em outro pedido é recusado com o código dele
   assert.equal(r2.corpo.erro, "Este Pix já confirmou o pedido FWOUTRO2.");
 });
 
-test("pix_confirmar: aceita aguardando_confirmacao e aguardando_pagamento, só Pix ou sem meio", async () => {
+test("pix_confirmar: aceita aguardando_confirmacao e aguardando_pagamento, com qualquer meio escolhido (quem pagou o Pix e trocou para cartão)", async () => {
   const { sql, chamadas } = sqlFalso();
   await acaoAdmin(sql, dono, pix);
-  assert.match(chamadas[0].q, /p\.status in \('aguardando_confirmacao', 'aguardando_pagamento'\) and \(p\.metodo is null or p\.metodo = 'pix'\)/);
+  assert.match(chamadas[0].q, /where p\.id = \? and p\.status in \('aguardando_confirmacao', 'aguardando_pagamento'\)`?$/);
+  assert.doesNotMatch(chamadas[0].q, /metodo/);
+});
+
+test("pix_confirmar: Pix com data de antes do pedido (mais de 1 dia) ou no futuro é recusado sem gravar", async () => {
+  const criado = new Date(Date.now() - 3 * 864e5);
+  for (const [d, ok] of [[new Date(+criado - 2 * 864e5), false], [new Date(+criado - 3600e3), true], [new Date(Date.now() + 2 * 864e5), false], [new Date(), true]]) {
+    const { sql, chamadas } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo: "mensalidade", ativo: true, criado }] : q.startsWith("with p as") ? [{ status: "pronto" }] : []));
+    const r = await acaoAdmin(sql, dono, { ...pix, pix_e2e: e2eDe(d) });
+    assert.equal(r.status, ok ? 200 : 400, d.toISOString());
+    if (!ok) { assert.match(r.corpo.erro, /de antes do pedido/); assert.ok(!chamadas.some((c) => c.q.startsWith("with p as"))); }
+  }
+  const { sql } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo: "mensalidade", ativo: true, criado }] : []));
+  assert.equal((await acaoAdmin(sql, dono, { ...pix, pix_e2e: "E18236120" + "20261340" + "1200" + "AbC123def45" })).status, 400, "mês 13");
+});
+
+test("pix_confirmar: o pedido saiu do status entre a leitura e a gravação dá 400; exigirAcesso vai na gravação", async () => {
+  const { sql, chamadas } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo: "novo_treino", ativo: true }] : []));
+  const r = await acaoAdmin(sql, dono, pix);
+  assert.equal(r.status, 400);
+  assert.equal(r.corpo.erro, "Este pedido não está aguardando o Pix.");
+  const w = chamadas.find((c) => c.q.startsWith("with p as"));
+  assert.match(w.q, /and \(not \?::boolean or tipo <> 'novo_treino' or exists/);
+  assert.equal(w.valores[w.q.split("?").findIndex((t) => t.startsWith("::boolean or tipo <> 'novo_treino'")) - 1], true, "exigirAcesso = true");
+  assert.match(chamadas[1].q, /where upper\(pix_e2e\) = upper\(\?\)/, "ID com outra caixa conta como o mesmo");
 });
 
 test("pix_nao_encontrado: volta para aguardando_pagamento com a mensagem e grava o log; fora de aguardando_confirmacao, 400", async () => {

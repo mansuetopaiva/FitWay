@@ -178,9 +178,9 @@ test("limparPedidos: fotos e comprovante de 90 dias e pedido aguardando pagament
   assert.equal(chamadas.length, 2);
   const [cancela, fotos] = chamadas;
   assert.match(cancela.q, /update pedidos set status = 'cancelado', fotos = null, atualizado = now\(\)/);
-  assert.match(cancela.q, /status = 'aguardando_pagamento' and criado < now\(\) - interval '30 days'/);
+  assert.match(cancela.q, /status = 'aguardando_pagamento' and greatest\(criado, aviso_em\) < now\(\) - interval '30 days'/, "conta do último aviso do Pix");
   assert.doesNotMatch(cancela.q, /aguardando_confirmacao/, "quem avisou o Pix nunca é cancelado pelo prazo");
-  assert.match(fotos.q, /set fotos = null, comprovante = null/);
+  assert.match(fotos.q, /set fotos = null, comprovante = null, pagador_nome = null/);
   assert.match(fotos.q, /status = 'pronto' and coalesce\(gerado_em, pago_em\) < now\(\) - interval '90 days'/, "a mensalidade fica pronta sem gerado_em");
   assert.match(fotos.q, /status in \('cancelado', 'erro'\) and atualizado < now\(\) - interval '90 days'/);
   for (const c of chamadas) assert.deepEqual(c.valores, ["a@x.com", "a@x.com"], "só os pedidos deste usuário");

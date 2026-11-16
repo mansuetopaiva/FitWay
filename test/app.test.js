@@ -153,3 +153,31 @@ test("variável do termo faltando: TREINO_IA_ATIVO=1 não liga; termo e pedido \
     delete process.env.ADMIN_EMAILS;
   }
 });
+
+test("ações de pagamento pelo handler: sem sessão dá 401 sem tocar em pedidos; com sessão, o pedido é procurado pelo email da sessão", async () => {
+  const { ACOES } = await import("../api/_pagamento.js");
+  usuario = null;
+  for (const acao of ACOES) {
+    chamadas.length = 0;
+    const r = await chamar({ acao, id: "p1", order_nsu: "p1", email: "outro@x.com" });
+    assert.equal(r.status, 401, acao);
+    assert.equal(chamadas.some((c) => /pedidos/.test(c.q) && !/^create|^alter|^do |^drop/.test(c.q)), false, acao);
+  }
+  usuario = { email: "a@x.com", nome: "Ana", dados: {}, acesso_ate: null };
+  responder = () => [];
+  chamadas.length = 0;
+  const r = await chamar({ acao: "pagamento", id: "p1", email: "outro@x.com" });
+  assert.equal(r.status, 404);
+  assert.deepEqual(chamadas.find((c) => c.q.startsWith("select id, tipo, status, metodo")).valores, ["p1", "a@x.com"]);
+});
+
+test("pedido_status: devolve meio, código e mensagem do pedido, e os preços do Pix", async () => {
+  usuario = comPlano("ia", 5, 10);
+  const pedido = { id: "p1", tipo: "mensalidade", status: "aguardando_pagamento", metodo: "pix", valor: 999, codigo: "FWABCDEF", mensagem_usuario: "Não encontramos seu Pix." };
+  responder = (q) => (q.startsWith("select id, tipo, status, metodo, valor, codigo, mensagem_usuario") ? [pedido] : []);
+  chamadas.length = 0;
+  const r = (await chamar({ acao: "pedido_status" })).corpo;
+  assert.deepEqual(r.pedido, pedido);
+  assert.deepEqual(r.precos, { inicial: 999, mensalidade: 999, novo_treino: 499 });
+  assert.match(chamadas.find((c) => c.q.startsWith("select id, tipo, status, metodo")).q, /order by status = any\(\?\) desc/, "pedido aberto (inclui aguardando_confirmacao) vem primeiro");
+});
