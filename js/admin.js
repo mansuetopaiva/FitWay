@@ -105,7 +105,7 @@
       : resumo.iaLigada ? "" : `<p class="muted adm-aviso-ia">Treino com IA desligado para os usuários (TREINO_IA_ATIVO). Você, como admin, pode pedir para testar.</p>`;
     const sp = resumo.cartaoSemPedido || [];
     const sobra = sp.length ? `<div class="adm-erro" role="note"><b>Pagamentos para devolver pelo InfinitePay (últimos 30 dias):</b>
-      <ul>${sp.map((x) => `<li>${esc(quando(x.criado))} · ${esc(x.email || "")} · pedido ${esc(x.codigo || "—")}${x.valor ? " · " + reais(x.valor) : ""} · transação ${esc(x.transaction_nsu || "—")}</li>`).join("")}</ul></div>` : "";
+      <ul>${sp.map((x) => `<li>${esc(quando(x.criado))} · ${esc(x.email || "")} · pedido ${esc(x.codigo || "—")}${x.valor ? " · " + reais(x.valor) : ""}${x.motivo === "valor_menor" ? " · valor menor que o do pedido" : x.motivo === "pedido_fechado" ? " · pedido já fechado" : ""} · transação ${esc(x.transaction_nsu || "—")}</li>`).join("")}</ul></div>` : "";
     el.innerHTML = sobra + aviso + `<div class="adm-cards">
       ${c(resumo.usuarios, "usuários")}${c(resumo.novos7d, "novos em 7 dias")}${c(resumo.comTreino, "com treino")}
       ${c(resumo.comAcesso, "com acesso liberado")}${c(resumo.checkinsHoje, "check-ins hoje")}${c(resumo.checkinsSemana, "check-ins na semana")}
@@ -553,7 +553,13 @@
     if (!(p.metodo || p.transactionNsu || p.checkoutRef)) return "";
     const linha = (k, v) => `<div class="row"><span>${k}</span><span>${esc(v)}</span></div>`;
     const ref = p.checkoutRef || {};
+    const links = p.links ? ["pix", "cartao"].filter((m) => p.links[m]).map((m) => METODOS[m]).join(" e ") : "";
+    // O checkout aceita Pix e cartão em qualquer link: o meio pago pode não ser o escolhido (aceito, só marcado).
+    const escolhido = p.meioEscolhido || p.metodo;
+    const diferente = p.captureMethod && escolhido && ({ pix: "pix", credit_card: "cartao" }[p.captureMethod] !== escolhido);
     return `<div class="card"><h2 class="adm-tit">Pagamento (InfinitePay)</h2>
+      ${diferente ? `<p class="adm-erro" role="note"><b>Pago com meio diferente do escolhido:</b> o link pago era de ${esc(METODOS[escolhido] || escolhido)}, e o pagamento foi com ${esc(FORMAS[p.captureMethod] || p.captureMethod)}.</p>` : ""}
+      ${links ? linha("Links criados", links) : ""}
       ${p.transactionNsu ? linha("Transação", p.transactionNsu) : ""}${p.captureMethod ? linha("Pago com", FORMAS[p.captureMethod] || p.captureMethod) : ""}
       ${!p.transactionNsu && ref.transaction_nsu ? linha("Último retorno (não confirmado)", ref.transaction_nsu) : ""}
       ${p.confirmadoPor ? linha("Confirmado por", p.confirmadoPor === "infinitepay" ? "InfinitePay (automático)" : p.confirmadoPor) : ""}
@@ -618,7 +624,7 @@
     if (ds.tentar === "pedido") return carregarPedido(pedId);
     if (ds.tentar === "resumo") { resumo = null; pintarResumo(); return carregarResumo(); }
     if (ds.pedMais !== undefined) return carregarPedLista(true);
-    if (ds.pedCartao !== undefined) return acaoPedido("cartao_verificar", "Pagamento confirmado pelo InfinitePay.", b);
+    if (ds.pedCartao !== undefined) return acaoPedido("pedido_verificar", "Pagamento confirmado pelo InfinitePay.", b);
     if (ds.pedGerar !== undefined) {
       if (confirm(`Gerar o treino de ${ped.nome} de novo? ${ped.status === "pronto" ? "O treino atual dele será substituído." : ""}`)) acaoPedido("pedido_gerar_de_novo", "Pedido voltou para a fila de geração.", b);
       return;

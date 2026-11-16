@@ -325,3 +325,13 @@ test("ações antigas do cartão (pagar_cartao, confirmar_cartao) e cartao_verif
   const r = await acaoAdmin(async () => [], { email: "dono@x.com" }, { op: "cartao_verificar", id: "p1" });
   assert.equal(r.corpo.erro, "Operação desconhecida.");
 });
+
+test("admin, pedido: o meio escolhido é o do link pago (pelo valor); sem pagamento, o último escolhido", async () => {
+  const base = { id: "p1", email: "a@x.com", nome: "Ana", tipo: "inicial", status: "pronto", metodo: "cartao", checkout_url: "https://c/1199", checkout_url_pix: "https://c/999" };
+  for (const [linha, meio] of [[{ valor: 999, transaction_nsu: "t", capture_method: "credit_card" }, "pix"], [{ valor: 1199, transaction_nsu: "t", capture_method: "pix" }, "cartao"],
+    [{ valor: 999, transaction_nsu: "t", checkout_url_pix: null }, "cartao"], [{ valor: 999, transaction_nsu: null, status: "aguardando_pagamento" }, "cartao"], [{ valor: 5000, transaction_nsu: "t" }, "cartao"]]) {
+    const r = await acaoAdmin(async () => [{ ...base, ...linha }], { email: "dono@x.com" }, { op: "pedido", id: "p1" });
+    assert.equal(r.corpo.meioEscolhido, meio, JSON.stringify(linha));
+    assert.equal(r.corpo.checkout_url_pix, undefined, "os links não vão para o painel, só se existem");
+  }
+});

@@ -831,12 +831,12 @@
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });
-  // Volta do checkout do cartão (InfinitePay): guarda o retorno, limpa a URL e abre o pagamento, que confere.
+  // Volta do checkout do InfinitePay (Pix ou cartão): guarda o retorno, limpa a URL e abre o pagamento, que confere.
   (() => {
     const q = new URLSearchParams(location.search), o = q.get("order_nsu"), t = q.get("transaction_nsu"), s = q.get("slug");
     if (!q.toString()) return;
     if (o && t && s && /^[A-Za-z0-9_-]{1,40}$/.test(o)) {
-      try { sessionStorage.setItem("fw_cartao_" + o, JSON.stringify({ transaction_nsu: t, slug: s, novo: true })); } catch (e) { /* sem armazenamento */ }
+      try { sessionStorage.setItem("fw_pag_" + o, JSON.stringify({ transaction_nsu: t, slug: s, novo: true })); } catch (e) { /* sem armazenamento */ }
       history.replaceState(null, "", location.pathname + "#/pagamento/" + o);
     } else history.replaceState(null, "", location.pathname + location.hash);
   })();

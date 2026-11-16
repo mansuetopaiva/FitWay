@@ -5,7 +5,7 @@ import { DIA, escaparLike, limpar, validarPlano } from "./_dados.js";
 import { NOMES_FOTOS, lerPdf } from "./_treino.js";
 import { PARQ, limparPedidos } from "./_pedido.js";
 import { termoFaltando } from "./_termo.js";
-import { ABERTOS, tipoValido } from "./_precos.js";
+import { ABERTOS, PRECOS, tipoValido } from "./_precos.js";
 import { confirmarPagamento } from "./_pagamento.js";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
@@ -26,6 +26,14 @@ const emailAlvo = (v) => (typeof v === "string" && v.length >= 3 && v.length <= 
 // shortcut: conta check-ins dentro do JSON "dados"; mover check-ins para uma tabela própria se passar de alguns milhares de usuários.
 const paginaValida = (p) => p === undefined || (Number.isInteger(p) && p >= 0 && p <= 100000);
 const linha = (x) => ({ nome: x.nome, email: x.email, criado: x.criado, acessoAte: x.acesso_ate, checkins: x.checkins, ultimoCheckin: x.ultimo || null, temTreino: x.tem_treino });
+
+// Meio escolhido = o do link que foi pago, reconhecido pelo valor (os links de Pix e de cartão têm preços diferentes);
+// sem pagamento, ou valor que não bate com nenhum link, é o último meio escolhido na tela.
+function meioEscolhido(x) {
+  if (x.transaction_nsu && x.checkout_url_pix && x.valor === PRECOS.pix[x.tipo]) return "pix";
+  if (x.transaction_nsu && x.checkout_url && x.valor === PRECOS.cartao[x.tipo]) return "cartao";
+  return x.metodo || null;
+}
 
 // opc.gerar(id): gera o treino de um pedido pago (gerarSeDevido); injetado para o teste não chamar a IA.
 // opc.fetch: chamada ao InfinitePay (pedido_verificar); injetado no teste.
@@ -102,7 +110,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         modelo: x.modelo, respostas: x.respostas, fotos: x.fotos, aceite: x.aceite, plano: x.plano_gerado, parq: PARQ,
         metodo: x.metodo, codigo: x.codigo, confirmadoPor: x.confirmado_por,
         transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref,
-        links: { pix: !!x.checkout_url_pix, cartao: !!x.checkout_url } });
+        links: { pix: !!x.checkout_url_pix, cartao: !!x.checkout_url }, meioEscolhido: meioEscolhido(x) });
     }
     let x;
     if (b.op === "pedido_verificar") {

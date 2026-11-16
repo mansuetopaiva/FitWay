@@ -13,7 +13,7 @@
     get(k) { try { return JSON.parse(sessionStorage.getItem(k)); } catch (e) { return null; } },
     set(k, v) { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sem armazenamento */ } },
   };
-  const chaveRetorno = (pid) => "fw_cartao_" + pid;
+  const chaveRetorno = (pid) => "fw_pag_" + pid;
 
   let id = "", st = null, escolher = false, ocupado = false, aviso = "";
   const aqui = () => location.hash.split("/")[1] === "pagamento" && location.hash.split("/")[2] === id;
@@ -72,7 +72,7 @@
     if (ocupado) return;
     ocupado = true; pintar(false);
     try {
-      const { url } = await api("pagar_cartao", { id, metodo });
+      const { url } = await api("pagar", { id, metodo });
       location.href = url; // página da InfinitePay; a volta traz os parâmetros para confirmar
     } catch (e) { recusado(e); }
   }
@@ -84,7 +84,7 @@
     ocupado = true;
     if (!auto) pintar(false); else shell(TIT, `<p class="muted" style="margin-top:16px" role="status">Confirmando o pagamento…</p>`, "perfil");
     try {
-      const r = await api("confirmar_cartao", { order_nsu: id, transaction_nsu: ret.transaction_nsu, slug: ret.slug });
+      const r = await api("confirmar_pagamento", { order_nsu: id, transaction_nsu: ret.transaction_nsu, slug: ret.slug });
       st = await api("pagamento", { id });
       aviso = r.resultado === "temporario" ? "Não conseguimos confirmar agora. Tente verificar de novo daqui a pouco." : "";
       escolher = false;
