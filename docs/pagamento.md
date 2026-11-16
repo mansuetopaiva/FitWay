@@ -62,7 +62,7 @@ e o valor `aguardando_confirmacao` do `check`. A limpeza de 90 dias continua apa
   - se já existe o link daquele meio, devolve o mesmo (`{ url }`) sem chamar o InfinitePay;
   - senão chama `/links` com o preço do meio e `order_nsu = id`, grava com `coalesce` (dois cliques: fica o primeiro) e devolve `{ url }`;
   - trocar de meio cria o link do outro meio **sem apagar o primeiro**;
-  - resposta sem URL `https://` válida, erro de rede ou 4xx/5xx → 502 "Pagamento indisponível no momento.".
+  - resposta sem URL `https://…infinitepay.io/` válida, erro de rede ou 4xx/5xx → 502 "Pagamento indisponível no momento.".
 - **`confirmar_pagamento { order_nsu, transaction_nsu, slug }`:** o pedido precisa ser da conta logada; roda `confirmarPagamento`.
 - **Removidas** (respondem 400 "Ação desconhecida."): `pedido_metodo`, `pix_avisei`, `pagar_cartao`, `confirmar_cartao`.
 - **Nenhuma ação do usuário grava `pago`.**
@@ -77,12 +77,15 @@ e o valor `aguardando_confirmacao` do `check`. A limpeza de 90 dias continua apa
    - rede, 5xx ou 429 → "temporário" (o webhook responde 400 e o InfinitePay reenvia);
    - `success !== true` ou `order_nsu` da resposta diferente → "recusado";
    - reconhecido: guarda o par em `checkout_ref` (para o admin verificar de novo); `paid !== true` → "recusado";
-5. pedido já fechado e pago de verdade → **"sobra"**: um `admin_log` `cartao_sem_pedido` (motivo `pedido_fechado`) por pagamento,
-   e o resumo do admin avisa para devolver;
-6. **valor mínimo** = o menor preço entre os links que o pedido tem: com link de Pix, `PRECOS.pix[tipo]`; só com link de cartão,
-   `PRECOS.cartao[tipo]`. `paid_amount` (e `amount`, se vier) abaixo do mínimo → "recusado", **e o dinheiro fica registrado** no mesmo
-   `admin_log` (motivo `valor_menor`) para devolver;
-7. aplica o pagamento (`aplicarPagamento`): `status`, `pago_em`, `valor` = `amount` do `payment_check` (ou `paid_amount` se não vier),
+5. pedido já fechado e pago de verdade → **"sobra"**: um `admin_log` `cartao_sem_pedido` (motivo `pedido_fechado`) por
+   `transaction_nsu` (um 2º pagamento no mesmo link também conta), e o resumo do admin avisa para devolver;
+6. **valor:** `base` = o menor preço entre os links que o pedido tem (com link de Pix, `PRECOS.pix[tipo]`; só com link de cartão,
+   `PRECOS.cartao[tipo]`). Exige `amount` (o valor do link pago) `≥ base` e `paid_amount ≥ max(base, amount)`. Sem `amount`, ou abaixo
+   disso → "recusado", **e o dinheiro fica registrado** no mesmo `admin_log` (motivo `valor_menor`) para devolver.
+   **Não ligue o desconto do Pix nas configurações do checkout:** com ele, `paid_amount < amount` e todo Pix seria recusado;
+7. pagamento que já está no `admin_log` para devolução → "recusado": nunca confirma outro pedido depois (o admin pode já ter
+   devolvido, e o `payment_check` pode não amarrar o `order_nsu`, P8);
+8. aplica o pagamento (`aplicarPagamento`): `status`, `pago_em`, `valor` = `amount` do `payment_check` (ou `paid_amount` se não vier),
    `transaction_nsu`, `checkout_slug`, `capture_method` real, `confirmado_por = 'infinitepay'`, dias de acesso e `admin_log`, numa
    instrução com UPDATE condicional pelo status aberto. `metodo` continua o escolhido. `transaction_nsu`/slug já usado (23505) →
    "ignorado"; fechou entre a leitura e a gravação → "sobra".
@@ -103,7 +106,8 @@ e chama `confirmarPagamento`; 200 (processado ou ignorado) ou 400 (temporário).
 - Detalhe do pedido: meio escolhido, meio pago (`capture_method`), **"Pago com meio diferente do escolhido"** quando não batem,
   transação, e os links criados (Pix e cartão).
 - Resumo: aviso dos pagamentos para devolver dos últimos 30 dias (pedido fechado ou valor menor).
-- Pedido antigo em `aguardando_confirmacao`: aparece na lista (filtro "Pix a conferir (antigo)") e no detalhe só com "Cancelar pedido".
+- Pedido antigo em `aguardando_confirmacao`: aparece na lista (filtro "Pix a conferir (antigo)") e no detalhe só com "Cancelar pedido",
+  mostrando em modo leitura o que a pessoa mandou (nome, data do aviso, ID informado e comprovante), para decidir se devolve.
 - **Removidas** (400 "Operação desconhecida."): `pix_confirmar`, `pix_nao_encontrado`, `cartao_verificar`. Sai também o aviso de Pix
   aguardando do topo do painel e do menu.
 
@@ -113,8 +117,9 @@ e chama `confirmarPagamento`; 200 (processado ou ignorado) ou 400 (temporário).
   (R$ 4,99 e R$ 5,99 no novo treino), valores vindos do servidor. Os dois chamam `pagar` e levam ao checkout (`location.href`).
 - **Volta do checkout:** o app lê `order_nsu`, `transaction_nsu` e `slug`, guarda no `sessionStorage`, limpa a URL com
   `history.replaceState` e chama `confirmar_pagamento` uma vez.
-- **Sem pagamento confirmado:** "Pagamento ainda não confirmado", com "Já paguei, verificar" (só com retorno guardado),
-  "Abrir o pagamento de novo" (o link do meio escolhido) e "Trocar meio de pagamento".
+- **Voltou do checkout com os parâmetros, sem pagamento confirmado:** "Pagamento ainda não confirmado", com "Já paguei, verificar",
+  "Abrir o pagamento de novo" (o link do meio escolhido) e "Trocar meio de pagamento". Quem volta pelo botão Voltar (sem parâmetros)
+  vê "Como quer pagar?" de novo; escolher o mesmo meio reaproveita o link.
 - Saem da tela: código do pedido, `PIX_TITULAR_EXIBIDO`, link do Nubank, "Já paguei" com comprovante e ID da transação.
 - **Perfil** com pedido antigo em `aguardando_confirmacao`: "Seu pedido está em análise." (sem prazo).
 
@@ -158,11 +163,14 @@ e chama `confirmarPagamento`; 200 (processado ou ignorado) ou 400 (temporário).
 | Ataque | Barreira |
 |---|---|
 | Webhook ou volta forjados (`paid: true` no corpo) | Só o `payment_check` com o `handle` do servidor decide |
-| Criar um link próprio de R$ 1,00 com o `order_nsu` de um pedido (o `handle` é público) e pagar | Valor mínimo (passo 6); o dinheiro fica registrado para devolver |
+| Criar um link próprio de R$ 1,00 com o `order_nsu` de um pedido (o `handle` é público) e pagar, até parcelado com juros | `amount` obrigatório e mínimo (passo 6); o dinheiro fica registrado para devolver |
+| Reusar em outro pedido um pagamento que ficou para devolução | Passo 7 |
 | Pagar o link do Pix (R$ 9,99) com cartão | Aceito por decisão (o checkout não restringe o meio); marcado no admin |
 | Reusar um pagamento em outro pedido | `transaction_nsu` e `checkout_slug` únicos; `order_nsu` da resposta conferido quando vem (P8) |
 | Pagar os dois links | O segundo vira "sobra" e é devolvido |
 | Martelar o webhook para gastar a cota do InfinitePay | Uma consulta a cada 10 s por pedido |
+| Martelar o webhook com o id de um pedido alheio para travar a confirmação dele | Risco baixo aceito: o id tem 96 bits aleatórios e só aparece na volta do checkout; o webhook verdadeiro é reenviado |
+| Encher o aviso "devolver" com pagamentos de R$ 1,00 | Risco baixo aceito: custa ao atacante; o aviso mostra os 10 mais recentes |
 | Confirmar pedido de outra conta pela volta | `confirmar_pagamento` exige o pedido da conta logada; o webhook é anônimo mas só confirma o que o `payment_check` confirma |
 
 ## Limites

@@ -42,15 +42,23 @@ test("webhook: erro temporário do payment_check responde 400 (o InfinitePay ree
   assert.equal(await chamar(corpo), 400, "banco fora também é temporário");
 });
 
-test("webhook: pedido de Pix ou corpo inválido responde 200 sem chamar o InfinitePay; GET é 405", async () => {
+test("webhook: pedido sem link do InfinitePay ou corpo inválido responde 200 sem chamar o InfinitePay; GET é 405", async () => {
   responder = () => []; pc = [];
   globalThis.fetch = resposta(200, { success: true, paid: true, paid_amount: 1199 });
   assert.equal(await chamar(corpo), 200);
   assert.equal(await chamar("isto não é json"), 200);
-  assert.equal(await chamar(JSON.stringify(corpo)), 200, "corpo em texto (pedido de Pix: ignorado)");
+  assert.equal(await chamar(JSON.stringify(corpo)), 200, "corpo em texto (pedido sem link: ignorado)");
   assert.equal(await chamar(null), 200);
   assert.equal(pc.length, 0);
   assert.equal(await chamar(corpo, "GET"), 405);
+});
+
+test("webhook: pedido fechado (devolução) ou pagamento recusado responde 200, para o InfinitePay não reenviar", async () => {
+  for (const [linha, resp] of [[{ status: "cancelado" }, { success: true, paid: true, amount: 1199, paid_amount: 1199 }], [{}, { success: true, paid: true, amount: 100, paid_amount: 100 }], [{}, { success: true, paid: false }]]) {
+    responder = (q, v) => (q.startsWith("select id, tipo, status, email, transaction_nsu") ? [{ id: "p1", tipo: "inicial", status: "aguardando_pagamento", email: "a@x.com", transaction_nsu: null, tem_pix: false, ...linha }] : elegivel(q, v));
+    globalThis.fetch = resposta(200, resp);
+    assert.equal(await chamar(corpo), 200, JSON.stringify(resp));
+  }
 });
 
 test("webhook: corpo em texto chega ao payment_check", async () => {

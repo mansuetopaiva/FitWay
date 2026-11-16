@@ -100,9 +100,14 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     if (b.op === "pedido") {
       if (b.gerar === true && opc.gerar) await opc.gerar(id); // logo depois de marcar como pago: gera sem esperar o aluno abrir o app
       // Ver dados de saúde ou fotos fica registrado.
-      const [x] = await sql`with p as (select p.*, u.nome, u.acesso_ate from pedidos p join usuarios u on u.email = p.email where p.id = ${id}),
+      const [x] = await sql`with p as (select p.id, p.email, p.tipo, p.status, p.valor, p.criado, p.pago_em, p.gerado_em, p.atualizado, p.erro, p.tentativas, p.modelo,
+          p.respostas, p.fotos, p.aceite, p.plano_gerado, p.metodo, p.codigo, p.confirmado_por, p.transaction_nsu, p.capture_method, p.checkout_ref,
+          p.checkout_url, p.checkout_url_pix, u.nome, u.acesso_ate,
+          -- Pix manual antigo ainda não conferido: o que a pessoa mandou, só para o admin decidir (cancelar e devolver, ou não).
+          case when p.status = 'aguardando_confirmacao' then jsonb_build_object('pagador', p.pagador_nome, 'aviso', p.aviso_em,
+            'e2e', p.pix_e2e_informado, 'comprovante', p.comprovante) end as pix_antigo from pedidos p join usuarios u on u.email = p.email where p.id = ${id}),
           l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
-            select ${u.email}, 'pedido_ver', email, jsonb_build_object('pedido', id) from p where respostas is not null or fotos is not null)
+            select ${u.email}, 'pedido_ver', email, jsonb_build_object('pedido', id) from p where respostas is not null or fotos is not null or pix_antigo is not null)
         select * from p`;
       if (!x) return falha(404, "Pedido não encontrado.");
       return ok({ id: x.id, email: x.email, nome: x.nome, acessoAte: x.acesso_ate, tipo: x.tipo, status: x.status, valor: x.valor,
@@ -110,7 +115,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         modelo: x.modelo, respostas: x.respostas, fotos: x.fotos, aceite: x.aceite, plano: x.plano_gerado, parq: PARQ,
         metodo: x.metodo, codigo: x.codigo, confirmadoPor: x.confirmado_por,
         transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref,
-        links: { pix: !!x.checkout_url_pix, cartao: !!x.checkout_url }, meioEscolhido: meioEscolhido(x) });
+        links: { pix: !!x.checkout_url_pix, cartao: !!x.checkout_url }, meioEscolhido: meioEscolhido(x), pixAntigo: x.pix_antigo || null });
     }
     let x;
     if (b.op === "pedido_verificar") {

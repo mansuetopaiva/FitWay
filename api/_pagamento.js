@@ -74,23 +74,29 @@ export async function confirmarPagamento(sql, ref, { fetch = globalThis.fetch } 
   const pago = typeof j.paid_amount === "number" ? Math.round(j.paid_amount) : null;
   // Dinheiro recebido sem liberar o pedido (pedido fechado ou valor menor): registra para o admin devolver, uma vez por
   // pagamento (e nunca um pagamento que já confirmou algum pedido). A ação no log continua 'cartao_sem_pedido' (nome antigo).
+  const amount = typeof j.amount === "number" ? Math.round(j.amount) : null;
+  const recebido = pago ?? amount;
   const devolver = async (motivo) => {
-    if (pago === null) return;
+    if (recebido === null) return;
     await sql`insert into admin_log (admin_email, acao, alvo_email, detalhes)
       select 'infinitepay', 'cartao_sem_pedido', ${p.email}, jsonb_build_object('pedido', ${p.id}::text, 'transaction_nsu', ${transaction_nsu}::text, 'slug', ${slug}::text,
-        'paid_amount', ${pago}::int, 'motivo', ${motivo}::text)
-      where not exists (select 1 from pedidos where transaction_nsu = ${transaction_nsu} or checkout_slug = ${slug})
+        'paid_amount', ${recebido}::int, 'motivo', ${motivo}::text)
+      where not exists (select 1 from pedidos where transaction_nsu = ${transaction_nsu})
         and not exists (select 1 from admin_log where acao = 'cartao_sem_pedido' and detalhes->>'transaction_nsu' = ${transaction_nsu})`;
   };
   const sobra = async () => { await devolver("pedido_fechado"); return "sobra"; };
   if (!ABERTO.includes(p.status)) return sobra();
   // Mínimo: o preço do link mais barato do pedido. O handle é público: alguém pode criar um link próprio de R$ 1,00 com
   // este order_nsu; o valor é o que barra. Pagar o link do Pix com cartão (ou o contrário) vale: o checkout não restringe o meio.
-  // paid_amount pode passar de amount (juros do parcelamento pagos pelo comprador).
-  const minimo = precoDe(p.tem_pix ? "pix" : "cartao", p.tipo);
-  const amount = typeof j.amount === "number" ? Math.round(j.amount) : null;
-  if (pago === null) return "recusado";
-  if (pago < minimo || (amount !== null && amount < minimo)) { await devolver("valor_menor"); return "recusado"; }
+  // O pago também não pode ser menor que o valor do próprio link (amount). paid_amount pode passar de amount (juros do
+  // parcelamento pagos pelo comprador). Desconto do Pix ligado nas configurações do checkout faria paid_amount < amount: fica recusado.
+  // Sem amount não dá para saber o valor do link pago (um link próprio barato, parcelado com juros, passaria): recusa e registra.
+  const base = precoDe(p.tem_pix ? "pix" : "cartao", p.tipo);
+  if (pago === null && amount === null) return "recusado";
+  if (amount === null || pago === null || amount < base || pago < Math.max(base, amount)) { await devolver("valor_menor"); return "recusado"; }
+  // Pagamento que já ficou para devolução (pedido fechado ou valor menor) nunca confirma outro pedido depois: o admin pode
+  // já ter devolvido, e o payment_check pode não amarrar o order_nsu (P8).
+  if ((await sql`select 1 from admin_log where acao = 'cartao_sem_pedido' and detalhes->>'transaction_nsu' = ${transaction_nsu} limit 1`).length) return "recusado";
   const cm = typeof j.capture_method === "string" ? j.capture_method.slice(0, 20) : null;
   try {
     const x = await aplicarPagamento(sql, p, { quem: "infinitepay", de: ABERTO, valor: amount ?? pago, transaction_nsu, checkout_slug: slug, capture_method: cm });
@@ -141,7 +147,7 @@ export async function acaoPagamento(sql, u, b, { fetch = globalThis.fetch } = {}
       const j = r.ok ? await r.json() : null;
       url = j && j.url; // P2: a documentação não diz o nome do campo; confirmar com um link real antes de liberar
     } catch (e) { url = null; }
-    if (typeof url !== "string" || !/^https:\/\/[^\s"'<>]+$/.test(url)) return falha(502, INDISPONIVEL);
+    if (typeof url !== "string" || !/^https:\/\/([a-z0-9-]+\.)*infinitepay\.io\/[^\s"'<>]*$/.test(url)) return falha(502, INDISPONIVEL);
     // Dois cliques ao mesmo tempo: fica o primeiro link gravado daquele meio, e os dois recebem o mesmo. O link do outro meio fica como está.
     const [g] = await sql`update pedidos set checkout_url = case when ${metodo} = 'cartao' then coalesce(checkout_url, ${url}) else checkout_url end,
         checkout_url_pix = case when ${metodo} = 'pix' then coalesce(checkout_url_pix, ${url}) else checkout_url_pix end

@@ -167,6 +167,9 @@ webhook nunca vale como prova. Não há confirmação manual.
 - Valor pago menor que o do link mais barato do pedido é recusado. Esse dinheiro, e o de um link pago depois do pedido fechado
   (os dois links pagos, ou pedido cancelado), aparece no topo do resumo do admin por 30 dias: devolva pelo InfinitePay.
 - Sem `INFINITEPAY_HANDLE` ou `SITE_URL`, a tela diz "Pagamento indisponível no momento".
+- **Não ligue o desconto do Pix** nas configurações do checkout do InfinitePay: o servidor exige que o valor pago não seja menor que o do link,
+  e todo Pix com desconto seria recusado (e registrado para devolver).
+- Pedido antigo do Pix manual (**Pix a conferir (antigo)**) mostra no painel o que a pessoa mandou, só para leitura; a única ação é cancelar.
 
 Variáveis na Vercel:
 

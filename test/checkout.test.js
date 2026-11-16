@@ -36,7 +36,7 @@ function sqlFalso({ pedido = {}, livre = true, aplicar = () => [{ status: "pago"
 const pago = (o = {}) => ({ json: { success: true, paid: true, amount: 1199, paid_amount: 1199, installments: 1, capture_method: "credit_card", ...o } });
 const aplicou = (s) => s.chamadas.some((c) => c.q.startsWith("with p as"));
 const guardouRef = (s) => s.chamadas.some((c) => c.q.startsWith("update pedidos set checkout_ref"));
-const sobrou = (s) => s.chamadas.find((c) => c.q.includes("'cartao_sem_pedido'"));
+const sobrou = (s) => s.chamadas.find((c) => c.q.startsWith("insert into admin_log") && c.q.includes("'cartao_sem_pedido'"));
 
 test("confirmarPagamento: pago de verdade grava com transaction_nsu, slug e capture_method, saindo só de status aberto", async () => {
   const s = sqlFalso(), f = fetchFalso(pago());
@@ -50,11 +50,12 @@ test("confirmarPagamento: pago de verdade grava com transaction_nsu, slug e capt
   assert.match(w.q, /\(\?::text is null or transaction_nsu is null\)/, "pedido já pago com um transaction_nsu não é pago de novo");
   assert.ok(guardouRef(s), "guarda o retorno para o admin verificar de novo");
   assert.match(s.chamadas[0].q, /\(checkout_url is not null or checkout_url_pix is not null\)/, "qualquer pedido com link do InfinitePay, Pix ou cartão");
+  assert.match(s.chamadas[0].q, /checkout_url_pix is not null as tem_pix/, "o mínimo depende de existir o link do Pix");
 });
 
 test("confirmarPagamento: corpo forjado, valor menor (pago ou do item) e order_nsu de outro pedido são recusados", async () => {
-  for (const r of [pago({ paid: false }), pago({ success: false }), pago({ paid: "true" }), pago({ paid_amount: "1199" }),
-    pago({ paid_amount: undefined }), pago({ order_nsu: "outro" }), { json: null }, { status: 404, json: {} }]) {
+  for (const r of [pago({ paid: false }), pago({ success: false }), pago({ paid: "true" }), pago({ paid_amount: "1199", amount: undefined }),
+    pago({ paid_amount: undefined, amount: undefined }), pago({ order_nsu: "outro" }), { json: null }, { status: 404, json: {} }]) {
     const s = sqlFalso(), f = fetchFalso(r);
     assert.equal(await confirmarPagamento(s.sql, ref, { fetch: f.fetch }), "recusado", JSON.stringify(r));
     assert.equal(aplicou(s), false);
@@ -69,8 +70,11 @@ test("confirmarPagamento: corpo forjado, valor menor (pago ou do item) e order_n
   assert.equal(await confirmarPagamento(s.sql, ref, { fetch: f.fetch }), "pago", "novo treino: 5,99 basta");
   const juros = sqlFalso();
   assert.equal(await confirmarPagamento(juros.sql, ref, { fetch: fetchFalso(pago({ paid_amount: 1350, installments: 12 })).fetch }), "pago", "juros do parcelamento: paid_amount maior vale");
+  const wj = juros.chamadas.find((c) => c.q.startsWith("with p as"));
+  assert.ok(wj.valores.includes(1199) && !wj.valores.includes(1350), "grava o valor do link (amount), sem os juros");
   const semAmount = sqlFalso();
-  assert.equal(await confirmarPagamento(semAmount.sql, ref, { fetch: fetchFalso(pago({ amount: undefined })).fetch }), "pago", "só paid_amount quando amount não vem");
+  assert.equal(await confirmarPagamento(semAmount.sql, ref, { fetch: fetchFalso(pago({ amount: undefined, paid_amount: 1350 })).fetch }), "recusado", "sem amount: um link próprio barato parcelado passaria");
+  assert.ok(sobrou(semAmount).valores.includes("valor_menor"), "o dinheiro fica registrado para devolver");
 });
 
 test("confirmarPagamento: erro temporário (rede, 5xx, 429, JSON quebrado) não grava nada", async () => {
@@ -102,7 +106,7 @@ test("confirmarPagamento: pago num pedido fechado (cancelado, ou o outro link j�
     assert.equal(await confirmarPagamento(s.sql, ref, { fetch: f.fetch }), "sobra", status);
     assert.equal(aplicou(s), false);
     const l = sobrou(s);
-    assert.match(l.q, /insert into admin_log .*'cartao_sem_pedido'.*where not exists \(select 1 from pedidos where transaction_nsu = \? or checkout_slug = \?\)\s*and not exists \(select 1 from admin_log where acao = 'cartao_sem_pedido'/s, "uma vez por pagamento");
+    assert.match(l.q, /insert into admin_log .*'cartao_sem_pedido'.*where not exists \(select 1 from pedidos where transaction_nsu = \?\)\s*and not exists \(select 1 from admin_log where acao = 'cartao_sem_pedido'/s, "uma vez por pagamento");
     assert.ok(l.valores.includes("tx-123") && l.valores.includes(1199) && l.valores.includes("a@x.com") && l.valores.includes("pedido_fechado"));
   }
   const s = sqlFalso({ pedido: { status: "cancelado" } });
@@ -245,6 +249,9 @@ test("confirmarPagamento: valor mínimo é o do link mais barato do pedido; pago
   const casos = [
     // [tipo, tem link de Pix?, amount, paid_amount, resultado]
     ["inicial", true, 999, 999, "pago"], ["inicial", true, 998, 998, "recusado"], ["inicial", true, 100, 999, "recusado"],
+    ["inicial", true, 999, 998, "recusado"], ["novo_treino", true, 499, 498, "recusado"], // link certo, pago um centavo abaixo
+    ["inicial", true, 1199, 999, "recusado"], ["inicial", false, 1199, 1198, "recusado"], // pago menos que o link pago (o de 11,99)
+    ["inicial", true, undefined, 998, "recusado"], ["inicial", true, undefined, 1500, "recusado"], // sem amount: não se sabe qual link foi pago
     ["inicial", false, 999, 999, "recusado"], ["inicial", false, 1199, 1199, "pago"],
     ["novo_treino", true, 499, 499, "pago"], ["novo_treino", true, 498, 498, "recusado"], ["novo_treino", false, 599, 599, "pago"], ["novo_treino", false, 499, 499, "recusado"],
   ];
@@ -266,10 +273,18 @@ test("confirmarPagamento: os dois links do mesmo pedido confirmam uma vez só; o
   const banco = () => sqlFalso({ pedido: { status, tem_pix: true }, aplicar: () => { status = "pago"; return [{ status: "pago" }]; } });
   const a = banco();
   assert.equal(await confirmarPagamento(a.sql, { order_nsu: "p1", transaction_nsu: "tx-pix", slug: "s-pix" }, { fetch: fetchFalso(pago({ amount: 999, paid_amount: 999, capture_method: "pix" })).fetch }), "pago");
+  // O segundo chega dentro dos 10 s: temporário (o webhook reenvia depois), sem registrar nada ainda.
+  const cedo = sqlFalso({ pedido: { status, tem_pix: true }, livre: false });
+  assert.equal(await confirmarPagamento(cedo.sql, { order_nsu: "p1", transaction_nsu: "tx-cartao", slug: "s-cartao" }, { fetch: fetchFalso(pago()).fetch }), "temporario");
+  assert.equal(sobrou(cedo), undefined);
   const b = banco();
   assert.equal(await confirmarPagamento(b.sql, { order_nsu: "p1", transaction_nsu: "tx-cartao", slug: "s-cartao" }, { fetch: fetchFalso(pago()).fetch }), "sobra");
   assert.equal(aplicou(b), false);
   assert.ok(sobrou(b).valores.includes("tx-cartao"));
+  // Pago num pedido fechado sem paid_amount na resposta: ainda assim fica registrado (com o amount).
+  const sem = sqlFalso({ pedido: { status: "cancelado" } });
+  assert.equal(await confirmarPagamento(sem.sql, ref, { fetch: fetchFalso(pago({ paid_amount: undefined })).fetch }), "sobra");
+  assert.ok(sobrou(sem) && sobrou(sem).valores.includes(1199));
 });
 
 // ---------- pagar { id, metodo } ----------
@@ -332,6 +347,23 @@ test("admin, pedido: o meio escolhido é o do link pago (pelo valor); sem pagame
     [{ valor: 999, transaction_nsu: "t", checkout_url_pix: null }, "cartao"], [{ valor: 999, transaction_nsu: null, status: "aguardando_pagamento" }, "cartao"], [{ valor: 5000, transaction_nsu: "t" }, "cartao"]]) {
     const r = await acaoAdmin(async () => [{ ...base, ...linha }], { email: "dono@x.com" }, { op: "pedido", id: "p1" });
     assert.equal(r.corpo.meioEscolhido, meio, JSON.stringify(linha));
+    assert.equal(r.corpo.captureMethod, linha.capture_method);
     assert.equal(r.corpo.checkout_url_pix, undefined, "os links não vão para o painel, só se existem");
+  }
+});
+
+test("confirmarPagamento: pagamento já registrado para devolução nunca confirma outro pedido (P8)", async () => {
+  const s = sqlFalso();
+  const sql = async (partes, ...v) => (partes.join("?").startsWith("select 1 from admin_log") ? [{ "?column?": 1 }] : s.sql(partes, ...v));
+  assert.equal(await confirmarPagamento(sql, ref, { fetch: fetchFalso(pago()).fetch }), "recusado");
+  assert.equal(aplicou(s), false);
+  const c = s.chamadas.find((x) => x.q.startsWith("select 1 from admin_log"));
+  assert.ok(!c, "a consulta foi respondida pelo banco de cima");
+});
+
+test("pagar: URL do checkout fora de infinitepay.io é recusada", async () => {
+  for (const url of ["https://evil.com/x", "https://infinitepay.io.evil.com/x", "https://evilinfinitepay.io/x"]) {
+    const s = sqlUsuario(pend());
+    assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "pix" }, { fetch: fetchFalso({ json: { url } }).fetch })).status, 502, url);
   }
 });

@@ -550,8 +550,14 @@
   }
   // Pagamento pelo checkout do InfinitePay (Pix ou cartão): confirmado só pelo payment_check.
   function pagamentoHtml(p) {
-    if (!(p.metodo || p.transactionNsu || p.checkoutRef)) return "";
     const linha = (k, v) => `<div class="row"><span>${k}</span><span>${esc(v)}</span></div>`;
+    const pa = p.pixAntigo, comp = pa && typeof pa.comprovante === "string" && pa.comprovante.startsWith("data:image/jpeg;base64,") ? pa.comprovante : "";
+    // Pix manual antigo (não existe mais): só leitura, para decidir entre cancelar e devolver.
+    const antigo = pa ? `<div class="card"><h2 class="adm-tit">Pix manual (antigo, não conferido)</h2>
+      <p class="muted">Este pedido é do Pix pelo link do Nubank, que saiu. Confira no app do banco; não há como confirmar por aqui, só cancelar.</p>
+      ${linha("Valor", reais(p.valor))}${linha("Quem pagou", pa.pagador || "—")}${pa.aviso ? linha("Aviso em", quando(pa.aviso)) : ""}${linha("ID da transação informado", pa.e2e || "—")}
+      ${comp ? `<img class="adm-foto-grande" src="${esc(comp)}" alt="Comprovante enviado">` : ""}</div>` : "";
+    if (!(p.metodo || p.transactionNsu || p.checkoutRef) || !(p.links && (p.links.pix || p.links.cartao)) && !p.transactionNsu) return antigo;
     const ref = p.checkoutRef || {};
     const links = p.links ? ["pix", "cartao"].filter((m) => p.links[m]).map((m) => METODOS[m]).join(" e ") : "";
     // O checkout aceita Pix e cartão em qualquer link: o meio pago pode não ser o escolhido (aceito, só marcado).
@@ -563,7 +569,7 @@
       ${p.transactionNsu ? linha("Transação", p.transactionNsu) : ""}${p.captureMethod ? linha("Pago com", FORMAS[p.captureMethod] || p.captureMethod) : ""}
       ${!p.transactionNsu && ref.transaction_nsu ? linha("Último retorno (não confirmado)", ref.transaction_nsu) : ""}
       ${p.confirmadoPor ? linha("Confirmado por", p.confirmadoPor === "infinitepay" ? "InfinitePay (automático)" : p.confirmadoPor) : ""}
-      ${p.status === "aguardando_pagamento" && p.checkoutRef ? `<div class="adm-botoes"><button class="btn-sec" data-ped-cartao>Verificar no InfinitePay</button></div>` : ""}</div>`;
+      ${p.status === "aguardando_pagamento" && p.checkoutRef ? `<div class="adm-botoes"><button class="btn-sec" data-ped-verificar>Verificar no InfinitePay</button></div>` : ""}</div>` + antigo;
   }
   function respostasHtml(p, r) {
     const linha = (k, v) => `<div class="row"><span>${k}</span><span>${esc(v === "" || v === undefined ? "—" : v)}</span></div>`;
@@ -624,7 +630,7 @@
     if (ds.tentar === "pedido") return carregarPedido(pedId);
     if (ds.tentar === "resumo") { resumo = null; pintarResumo(); return carregarResumo(); }
     if (ds.pedMais !== undefined) return carregarPedLista(true);
-    if (ds.pedCartao !== undefined) return acaoPedido("pedido_verificar", "Pagamento confirmado pelo InfinitePay.", b);
+    if (ds.pedVerificar !== undefined) return acaoPedido("pedido_verificar", "Pagamento confirmado pelo InfinitePay.", b);
     if (ds.pedGerar !== undefined) {
       if (confirm(`Gerar o treino de ${ped.nome} de novo? ${ped.status === "pronto" ? "O treino atual dele será substituído." : ""}`)) acaoPedido("pedido_gerar_de_novo", "Pedido voltou para a fila de geração.", b);
       return;
