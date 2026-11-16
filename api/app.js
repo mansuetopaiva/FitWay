@@ -1,9 +1,14 @@
 // Backend do FitWay: uma função Vercel, POST /api/app com { acao, ... }.
-// Ações: criar, entrar, eu, salvar, sair, perfil, foto, treino, ranking, admin. Banco: Postgres (Neon) via DATABASE_URL.
+// Ações: criar, entrar, eu, salvar, sair, perfil, foto, treino, ranking, admin, termo, pedido_criar, pedido_status.
+// Banco: Postgres (Neon) via DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { acaoAdmin, ehAdmin } from "./_admin.js";
 import { DIA, juntar, limpar } from "./_dados.js";
+import { gerarSeDevido } from "./_ia.js";
+import { OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_pedido.js";
+import { ABERTOS, PRECOS, planoVisivel, podePedir } from "./_precos.js";
+import { TERMO, termoDaVersao } from "./_termo.js";
 import { lerPdf } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
@@ -45,6 +50,29 @@ const schema = () => pronto ||= (async () => {
     criado timestamptz not null default now()
   )`;
   await sql`create index if not exists admin_log_alvo on admin_log (alvo_email, criado desc)`;
+  await sql`create table if not exists pedidos (
+    id text primary key,
+    email text not null references usuarios on delete cascade,
+    tipo text not null check (tipo in ('inicial', 'mensalidade', 'novo_treino')),
+    status text not null check (status in ('aguardando_pagamento', 'pago', 'gerando', 'pronto', 'erro', 'cancelado')),
+    valor int not null,
+    metodo text,
+    respostas jsonb,
+    fotos jsonb,
+    aceite jsonb,
+    plano_gerado jsonb,
+    modelo text,
+    erro text,
+    tentativas int not null default 0,
+    criado timestamptz not null default now(),
+    pago_em timestamptz,
+    gerado_em timestamptz,
+    atualizado timestamptz
+  )`;
+  await sql`create index if not exists pedidos_email_criado on pedidos (email, criado desc)`;
+  await sql`create index if not exists pedidos_status on pedidos (status)`;
+  // No máximo 1 pedido aberto por usuário, garantido pelo banco (dois cliques ao mesmo tempo).
+  await sql`create unique index if not exists pedidos_um_aberto on pedidos (email) where status in ('aguardando_pagamento', 'pago', 'gerando')`;
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
@@ -65,11 +93,18 @@ async function abrirSessao(res, email) {
 async function usuarioDaSessao(req) {
   const t = req.cookies && req.cookies.mt;
   if (!texto(t, 64, 64)) return null;
-  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo, u.foto from sessoes s join usuarios u on u.email = s.email
+  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo, u.foto, u.acesso_ate from sessoes s join usuarios u on u.email = s.email
     where s.token = ${sha(t)} and s.expira > now()`;
   return u || null;
 }
-const publico = (u) => ({ email: u.email, nome: u.nome, foto: u.foto || "", admin: ehAdmin(u.email), dados: limpar(u.dados) });
+// O plano feito pela IA só sai do servidor com acesso ativo (continua guardado no banco).
+const visivel = (u, dados) => {
+  const d = limpar(dados);
+  if (!planoVisivel({ acesso_ate: u.acesso_ate, dados: d }, new Date())) delete d.plano;
+  return d;
+};
+const publico = (u) => ({ email: u.email, nome: u.nome, foto: u.foto || "", admin: ehAdmin(u.email), dados: visivel(u, u.dados) });
+const gerar = (id) => gerarSeDevido(sql, id);
 
 export default async function handler(req, res) {
   try {
@@ -93,12 +128,17 @@ export default async function handler(req, res) {
           on conflict do nothing returning email, nome, dados`;
         if (!u) return res.status(409).json({ erro: "Já existe uma conta com este email. Use a aba Entrar." });
       } else {
-        [u] = await sql`select email, nome, senha, dados, foto from usuarios where email = ${email}`;
+        [u] = await sql`select email, nome, senha, dados, foto, acesso_ate from usuarios where email = ${email}`;
         if (!u || !confere(b.senha, u.senha)) return res.status(401).json({ erro: "Email ou senha incorretos." });
         await sql`delete from sessoes where expira < now()`;
       }
       await abrirSessao(res, u.email);
       return res.json(publico(u));
+    }
+
+    if (b.acao === "termo") { // texto público; versão antiga para o admin conferir o que foi aceito
+      const t = b.versao === undefined ? TERMO : termoDaVersao(b.versao);
+      return t ? res.json(t) : res.status(404).json({ erro: "Versão do termo não encontrada." });
     }
 
     if (b.acao === "sair") {
@@ -114,7 +154,7 @@ export default async function handler(req, res) {
     // a conta antiga. Sem esta checagem, ela gravaria check-ins, cargas e o PDF na conta errada.
     if (b.conta !== undefined && b.conta !== u.email) return res.status(409).json({ erro: "Outra conta entrou neste navegador. Recarregando…" });
     if (b.acao === "eu") return res.json(publico(u));
-    if (b.acao === "admin") { const r = await acaoAdmin(sql, u, b); return res.status(r.status).json(r.corpo); }
+    if (b.acao === "admin") { const r = await acaoAdmin(sql, u, b, { gerar }); return res.status(r.status).json(r.corpo); }
     if (b.acao === "salvar") {
       const dados = juntar(limpar(u.dados), limpar(b.dados));
       // O treino é o que estiver no banco na hora da gravação, não o lido no início: assim um salvamento
@@ -122,7 +162,7 @@ export default async function handler(req, res) {
       const [x] = await sql`update usuarios set dados = (${JSON.stringify(dados)}::jsonb - 'plano')
           || case when dados->'plano' is not null then jsonb_build_object('plano', dados->'plano') else '{}'::jsonb end
         where email = ${u.email} returning dados`;
-      return res.json({ dados: limpar(x.dados) });
+      return res.json({ dados: visivel(u, x.dados) });
     }
     if (b.acao === "perfil") {
       const nome = texto(b.nome, 1, 40) ? b.nome.trim() : "";
@@ -143,7 +183,7 @@ export default async function handler(req, res) {
       if (b.remover === true) {
         delete dados.plano;
         await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;
-        return res.json({ dados });
+        return res.json({ dados: visivel(u, dados) });
       }
       const { plano, status, erro } = await lerPdf(b.pdf);
       if (!plano) return res.status(status).json({ erro });
@@ -151,6 +191,35 @@ export default async function handler(req, res) {
       dados.proximo = plano.treinos[0].id;
       await sql`update usuarios set dados = ${JSON.stringify(dados)}::jsonb where email = ${u.email}`;
       return res.json({ dados });
+    }
+    if (b.acao === "pedido_criar") {
+      const r = await criarPedido(sql, u, b, req.headers, new Date());
+      return res.status(r.status).json(r.corpo);
+    }
+    if (b.acao === "pedido_status") {
+      await limparPedidos(sql, u.email);
+      // O pedido aberto vem primeiro: o admin pode reabrir um pedido antigo com "Gerar de novo".
+      const ultimo = async () => (await sql`select id, tipo, status, valor, criado, pago_em, gerado_em from pedidos
+        where email = ${u.email} order by status in ('aguardando_pagamento', 'pago', 'gerando') desc, criado desc limit 1`)[0] || null;
+      let pedido = await ultimo(), x = u;
+      // O formulário só lê as perguntas: não segura a tela esperando uma geração.
+      if (b.form !== true && pedido && (pedido.status === "pago" || pedido.status === "gerando") && await gerar(pedido.id)) {
+        pedido = await ultimo();
+        [x] = await sql`select acesso_ate, dados from usuarios where email = ${u.email}`;
+      }
+      const agora = new Date(), aberto = !!pedido && ABERTOS.includes(pedido.status), plano = x.dados && x.dados.plano;
+      const pode = Object.fromEntries(Object.keys(PRECOS).map((t) => [t, !podePedir(t, x, agora, aberto).erro]));
+      // novo_treino: o formulário vem com as últimas respostas; os consentimentos precisam ser marcados de novo.
+      let ultimas = null;
+      if (pode.novo_treino) {
+        const [r] = await sql`select respostas from pedidos where email = ${u.email} and respostas is not null order by criado desc limit 1`;
+        if (r) { ultimas = r.respostas; delete ultimas.consentimentos; }
+      }
+      return res.json({
+        pedido, acessoAte: x.acesso_ate, temPlanoIA: !!plano && plano.origem === "ia", planoCriado: (plano && plano.criado) || null,
+        pode, precos: PRECOS, termo: TERMO.versao, ultimas, plano: visivel(x, x.dados).plano || null,
+        ...(b.form === true ? { form: { parq: PARQ, opcoes: OPCOES, textos: TEXTOS } } : {}),
+      });
     }
     if (b.acao === "ranking") {
       // As datas vêm do aparelho (fuso da pessoa), mas só podem ser da semana e do mês atuais:

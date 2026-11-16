@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test --experimental-test-module-mocks"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.1",
