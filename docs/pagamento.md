@@ -120,7 +120,7 @@ Sem linha devolvida, não faz nada. Dois cliques ou um webhook repetido nunca so
 ### Telas
 
 - **"Como quer pagar?"** abre depois de enviar o pedido e no botão Renovar:
-  - duas opções lado a lado: "Pix — R$ 9,99" e "Cartão — R$ 11,99 (até 12x)", com os valores vindos do servidor;
+  - duas opções: "Pix — R$ 9,99" e "Cartão de crédito — R$ 11,99", com os valores vindos do servidor;
   - "Pagar" no Perfil volta para esta tela.
 - **Pix:**
   - o valor;
@@ -198,6 +198,9 @@ Os casos do item 9 do pedido:
 2. **P2. Campo da URL na resposta de `/links`:** a documentação não diz o nome.
    - O código lê `url` e, se não vier, responde "Pagamento indisponível no momento" sem gastar nada.
    - Na hora de testar, crio um link real (criar link é grátis) com o seu handle para confirmar o campo, antes de dar o cartão como pronto.
+   - **Tentativa em 2026-11-16:** `/links` respondeu `404 { success: false, error: "external_checkout_not_enabled" }`: o checkout externo
+     precisa ser habilitado nas configurações de checkout da conta InfinitePay. O código trata essa resposta como "Pagamento indisponível
+     no momento" (502). O `payment_check` com dados inexistentes respondeu `200 { success: false }`, como na documentação.
 3. **P3 (decidido, como recomendado). Trocar de cartão para Pix depois de abrir o checkout.** Se a pessoa abre o checkout de cartão, troca para Pix e mesmo assim paga o link do cartão, a regra "só aceita `metodo = 'cartao'`" deixaria o dinheiro recebido sem dar o acesso.
    - **Recomendo:** aceitar o pagamento verificado pelo `payment_check` de um pedido que já teve link de cartão (`checkout_url` não nulo) se `paid_amount >= valor do cartão` daquele tipo, voltando `metodo` para `cartao`.
    - O contrário também vale: o admin pode confirmar o Pix de um pedido aberto que está com cartão escolhido.
@@ -206,6 +209,6 @@ Os casos do item 9 do pedido:
 5. **P5. "Verificar no InfinitePay" precisa de `transaction_nsu` e `slug`,** que só chegam pela volta do checkout ou pelo webhook.
    - Se nenhum dos dois chegar, o botão avisa que não há o que verificar.
    - Por isso guardo o último par recebido em `checkout_ref`, mesmo antes da verificação.
-6. **P6 (decidido: "até 12x (pode ter juros)"):** no InfinitePay, o parcelamento pode ter juros pagos pelo comprador (`paid_amount > amount`).
+6. **P6 (decidido):** o botão é só "Cartão de crédito — R$ 11,99" (R$ 5,99 no novo treino), sem falar em parcelas. O `paid_amount` pode passar do preço (juros do parcelamento) e é aceito.
 7. **P7 (decidido: `2026-11-16-2`):** versão nova do termo, com o item 5 de pagamento.
 8. **P8. O `payment_check` amarra `order_nsu`, `transaction_nsu` e `slug`?** A documentação não diz. Se ele olhar só o slug, um pagamento poderia ser apresentado como de outro pedido; o `checkout_slug` único e a conferência do `order_nsu` da resposta (quando vier) barram isso. Junto com a P2, no link real de teste: consultar com `order_nsu` trocado (deve dar `paid: false`) e ver se o slug é do link ou de cada pagamento.

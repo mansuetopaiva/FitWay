@@ -122,8 +122,8 @@ test("termo 2026-11-16-2: só o item 5 muda, e os valores do texto batem com PRE
   assert.equal(sem5(nova), sem5(antiga), "o resto do texto é igual");
   const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
   const item5 = nova.match(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/)[0];
-  assert.match(item5, new RegExp(`primeiro treino custa ${reais(PRECOS.pix.inicial)} no Pix ou ${reais(PRECOS.cartao.inicial)} no cartão`.replace(/\$/g, "\\$")));
-  assert.match(item5, new RegExp(`a cada 30 dias ${reais(PRECOS.pix.mensalidade)} no Pix ou ${reais(PRECOS.cartao.mensalidade)} no cartão`.replace(/\$/g, "\\$")));
+  assert.match(item5, new RegExp(`primeiro treino custa ${reais(PRECOS.pix.inicial)} no Pix ou ${reais(PRECOS.cartao.inicial)} no cartão de crédito`.replace(/\$/g, "\\$")));
+  assert.match(item5, new RegExp(`mensalidade de ${reais(PRECOS.pix.mensalidade)} no Pix ou ${reais(PRECOS.cartao.mensalidade)} no cartão a cada 30 dias`.replace(/\$/g, "\\$")));
   assert.match(item5, new RegExp(`novo treino por ${reais(PRECOS.pix.novo_treino)} no Pix ou ${reais(PRECOS.cartao.novo_treino)} no cartão`.replace(/\$/g, "\\$")));
   const todos = new Set(Object.values(PRECOS).flatMap((m) => Object.values(m)).map(reais));
   for (const v of item5.match(/R\$ \d+,\d\d/g)) assert.ok(todos.has(v), `${v} está em PRECOS`);
@@ -177,7 +177,7 @@ test("limparPedidos: fotos e comprovante de 90 dias e pedido aguardando pagament
   await limparPedidos(sql, "a@x.com");
   assert.equal(chamadas.length, 2);
   const [cancela, fotos] = chamadas;
-  assert.match(cancela.q, /update pedidos set status = 'cancelado', fotos = null, atualizado = now\(\)/);
+  assert.match(cancela.q, /update pedidos set status = 'cancelado', fotos = null, comprovante = null, pagador_nome = null, atualizado = now\(\)/, "termo 5.4: fotos e comprovante apagados no cancelamento");
   assert.match(cancela.q, /status = 'aguardando_pagamento' and greatest\(criado, aviso_em\) < now\(\) - interval '30 days'/, "conta do último aviso do Pix");
   assert.doesNotMatch(cancela.q, /aguardando_confirmacao/, "quem avisou o Pix nunca é cancelado pelo prazo");
   assert.match(fotos.q, /set fotos = null, comprovante = null, pagador_nome = null/);

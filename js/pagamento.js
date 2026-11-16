@@ -51,7 +51,7 @@
     if (!st.metodos.length) return topo + msg + `<p class="ia-status">Pagamento indisponível no momento.</p><p class="muted">Tente de novo mais tarde.</p>`;
     const meio = st.metodos.find((m) => m.metodo === p.metodo);
     if (escolher || !meio) {
-      const rot = { pix: (v) => `Pix — ${reais(v)}`, cartao: (v) => `Cartão — ${reais(v)} <span class="pag-nota">até 12x (pode ter juros)</span>` };
+      const rot = { pix: (v) => `Pix — ${reais(v)}`, cartao: (v) => `Cartão de crédito — ${reais(v)}` };
       return topo + msg + `<h3 class="pag-sub">Como quer pagar?</h3><div class="pag-meios">
         ${st.metodos.map((m) => `<button type="button" class="pag-meio" data-metodo="${m.metodo}" ${ocupado ? "disabled" : ""}>${rot[m.metodo](m.valor)}</button>`).join("")}</div>`;
     }

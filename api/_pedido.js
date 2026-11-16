@@ -87,7 +87,7 @@ export function limparFotos(f) {
 // - fotos e comprovante do Pix apagados 90 dias depois do pedido ficar pronto, cancelado ou com erro (as respostas ficam).
 //   aguardando_confirmacao nunca é cancelado aqui: a pessoa já disse que pagou e o admin ainda vai conferir.
 export async function limparPedidos(sql, email) {
-  await sql`update pedidos set status = 'cancelado', fotos = null, atualizado = now()
+  await sql`update pedidos set status = 'cancelado', fotos = null, comprovante = null, pagador_nome = null, atualizado = now()
     where (${email}::text is null or email = ${email}) and status = 'aguardando_pagamento' and greatest(criado, aviso_em) < now() - interval '30 days'`;
   // A mensalidade vira pronto sem gerado_em: conta de pago_em.
   await sql`update pedidos set fotos = null, comprovante = null, pagador_nome = null where (${email}::text is null or email = ${email}) and (fotos is not null or comprovante is not null) and (
