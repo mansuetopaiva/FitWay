@@ -30,7 +30,7 @@ api/app.js          backend: criar conta, entrar, sair, carregar e salvar dados,
 api/_admin.js       ações do painel de administração, inclusive pedidos
 api/_precos.js      preços e regras de cobrança e acesso
 api/_pedido.js      validação do formulário e das fotos, criação do pedido
-api/_pagamento.js   Pix (link do Nubank), cartão (InfinitePay) e a confirmação do pagamento
+api/_pagamento.js   Pix e cartão pelo checkout do InfinitePay e a confirmação do pagamento
 api/infinitepay.js  webhook do InfinitePay (POST /api/infinitepay)
 api/_ia.js          chamada à IA, validação do plano gerado e geração do pedido
 api/_prompt.js      texto do prompt da IA
@@ -50,8 +50,8 @@ img/fitway-favicon.png  ícone da aba e da tela inicial do celular
   o dia em que a coluna foi criada fica no comentário da coluna.
 - `usuarios.acesso_ate`: até quando o acesso está pago ou liberado pelo admin. Sem acesso ativo, o treino feito pela IA não aparece (PDF e admin aparecem sempre).
 - `pedidos`: cada pedido de treino com IA ou mensalidade (tipo, status, valor, respostas, fotos, aceite do termo, plano gerado, modelo da IA, erro)
-  e o pagamento (meio, código do pedido, comprovante e ID da transação do Pix, transação do cartão).
-  Índices únicos impedem dois pedidos abertos para a mesma pessoa e o mesmo Pix ou pagamento de cartão em dois pedidos.
+  e o pagamento (meio escolhido, links do InfinitePay, meio pago e transação).
+  Índices únicos impedem dois pedidos abertos para a mesma pessoa e o mesmo pagamento em dois pedidos.
 - `admin_log`: cada alteração feita pelo admin (quem, o quê, em quem, detalhes e quando).
 - `sessoes`: hash do token de login, email e validade de 30 dias. O token fica em um cookie `HttpOnly`.
 
@@ -119,7 +119,6 @@ a IA monta um plano de 8 semanas, que aparece na aba Treinos com o cartão "Como
 Os preços ficam em `api/_precos.js`. Regras de saúde: qualquer "Sim" no PAR-Q exige a caixa de liberação médica (o servidor confere),
 e o pedido é só para maiores de 18 anos. As fotos são apagadas 90 dias depois do treino pronto; as respostas ficam.
 Pedido aguardando pagamento há mais de 30 dias é cancelado e perde as fotos (roda na consulta de status e no resumo do admin, sem cron).
-Pedido com o Pix avisado (aguardando confirmação) não é cancelado pelo prazo.
 
 Variáveis na Vercel (**Settings → Environment Variables**):
 - `TREINO_IA_ATIVO`: `1` liga os pedidos de treino com IA para todos; qualquer outro valor (ou sem a variável) deixa desligado — só o admin vê e pode pedir, para testar. Renovar e ver um treino de IA que já existe funcionam sempre. Desligado, o termo também não é público (tem dados pessoais): só o admin lê.
@@ -155,35 +154,31 @@ se falhar, o pedido tenta mais uma vez e, na segunda falha, fica como **Erro** p
 
 ## Pagamento
 
-Spec: [docs/pagamento.md](docs/pagamento.md). Depois de enviar o pedido (ou tocar em **Pagar** no Perfil), a pessoa escolhe Pix ou cartão.
-Só aparecem os meios configurados; sem nenhum, a tela diz "Pagamento indisponível no momento".
+Spec: [docs/pagamento.md](docs/pagamento.md). Depois de enviar o pedido (ou tocar em **Pagar** no Perfil), a pessoa escolhe
+**Pix** ou **Cartão de crédito**. Os dois levam ao checkout do InfinitePay, com o preço do meio escolhido, e são confirmados
+automaticamente: na volta para o app, pelo webhook `/api/infinitepay` ou pelo **Verificar no InfinitePay** do painel. Em todos os
+casos o servidor pergunta ao InfinitePay (`payment_check`) se o pagamento existe e de quanto foi: o que chega no navegador ou no
+webhook nunca vale como prova. Não há confirmação manual.
 
-- **Pix:** a tela mostra o valor, o botão "Pagar R$ X com Pix" (abre o link de cobrança do Nubank numa nova aba, com o valor já preenchido)
-  e o código do pedido. Depois de pagar, a pessoa anexa o comprovante (obrigatório), pode colar o ID da transação e toca em **Já paguei**.
-  O pedido fica **Pix a conferir**. No painel, o admin vê o valor esperado ao lado do comprovante, cola o ID da transação copiado do app
-  do Nubank (o servidor recusa um Pix com data de antes do pedido) e clica em **Confirmar Pix recebido** (ou **Não encontrei o Pix**, que devolve o pedido com um aviso para a pessoa).
-  O mesmo ID nunca confirma dois pedidos.
-- **Cartão:** a pessoa vai para o checkout do InfinitePay e volta para o app, que confirma o pagamento. O webhook `/api/infinitepay`
-  também confirma. Nos dois casos o servidor pergunta ao InfinitePay (`payment_check`) se o pagamento existe e de quanto foi: o que chega
-  no navegador ou no webhook nunca vale como prova. **Verificar no InfinitePay** no painel repete a pergunta.
+- Cada pedido tem no máximo um link por meio. "Abrir o pagamento de novo" reaproveita o link; trocar de meio cria o do outro sem
+  apagar o primeiro. Qualquer um dos dois pago confirma o pedido, uma vez só.
+- O checkout do InfinitePay não deixa restringir o meio (o cartão fica sempre ligado), então a pessoa pode pagar o link do Pix com
+  cartão. Isso é aceito, desde que o valor bata; o painel marca **Pago com meio diferente do escolhido**.
+- Valor pago menor que o do link mais barato do pedido é recusado. Esse dinheiro, e o de um link pago depois do pedido fechado
+  (os dois links pagos, ou pedido cancelado), aparece no topo do resumo do admin por 30 dias: devolva pelo InfinitePay.
+- Sem `INFINITEPAY_HANDLE` ou `SITE_URL`, a tela diz "Pagamento indisponível no momento".
 
 Variáveis na Vercel:
 
 | Variável | Para quê |
 |---|---|
-| `PIX_LINK_999` | link de cobrança do Nubank de R$ 9,99 (treino inicial e mensalidade). Precisa começar com `https://nubank.com.br/cobrar/` |
-| `PIX_LINK_499` | link de cobrança do Nubank de R$ 4,99 (novo treino). Mesma regra |
-| `PIX_TITULAR_EXIBIDO` | nome mostrado na tela do Pix como recebedor (opcional). O app do banco mostra o titular da conta de qualquer jeito |
 | `INFINITEPAY_HANDLE` | InfiniteTag sem o `$` |
 | `SITE_URL` | endereço do site, sem barra no fim (ex.: `https://fitway.vercel.app`); usado na volta do checkout e no webhook |
 
-- Sem o link do valor de um pedido, o Pix não aparece para aquele pedido (o nome da variável sai do preço em centavos: mudou o preço, crie um link novo).
-- Sem `INFINITEPAY_HANDLE` ou `SITE_URL`, o cartão não aparece.
-- O comprovante e o nome de quem pagou são apagados junto com as fotos, 90 dias depois do pedido pronto, cancelado ou com erro.
-- Cartão pago num pedido que já não estava aberto (cancelado, já pago por Pix, link pago duas vezes) aparece no topo do resumo do admin
-  por 30 dias: devolva pelo InfinitePay.
-- Antes de liberar o cartão, falta conferir com um link real (criar link é grátis) o campo da URL na resposta de `/links` e se o
-  `payment_check` amarra o pedido ao pagamento (perguntas P2 e P8 da spec).
+`PIX_LINK_999`, `PIX_LINK_499` e `PIX_TITULAR_EXIBIDO` (do Pix manual, que saiu) não são mais lidas e podem ser apagadas.
+
+Antes de liberar: habilitar o checkout externo nas configurações de checkout do InfinitePay e conferir, com um link real (criar link
+é grátis), o campo da URL na resposta de `/links` (pergunta P2 da spec).
 
 ## Testes
 
