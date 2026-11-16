@@ -192,6 +192,22 @@ Variáveis na Vercel:
 Antes de liberar: habilitar o checkout externo nas configurações de checkout do InfinitePay e conferir, com um link real (criar link
 é grátis), o campo da URL na resposta de `/links` (pergunta P2 da spec).
 
+## Suporte
+
+Spec: [docs/suporte.md](docs/suporte.md). Vale para o app inteiro, mesmo com `TREINO_IA_ATIVO` desligado.
+
+- **Aluno:** Perfil → **Ajuda e suporte**. Abre um chamado com assunto (Pagamento, Meu treino, Conta e dados, Problema no app),
+  mensagem e, se quiser, uma imagem (reduzida no aparelho). Um ponto vermelho no Perfil e no ícone da aba avisa quando há resposta.
+  Limites: 3 chamados em andamento e 10 mensagens por hora.
+- **Admin:** aba **Suporte** do painel, com a contagem dos que aguardam resposta. Os mais antigos esperando vêm primeiro. A conversa
+  mostra o contexto (acesso, plano e o pedido ligado) e tem **Responder**, **Encerrar** e **Reabrir**. Tudo vai para o histórico,
+  inclusive abrir uma imagem anexada.
+- **Prazos** (sem cron, junto dos prazos dos pedidos): chamado respondido sem retorno do aluno em 7 dias é encerrado; imagens são
+  apagadas 90 dias depois do encerramento. As mensagens ficam enquanto a conta existir.
+- **Excluir conta** (detalhe do usuário, para pedidos de "Conta e dados"): digite o email da pessoa para confirmar. Recusa se houver
+  pedido pago ou gerando, e nunca exclui conta de admin. Apaga a conta, sessões, pedidos, chamados e mensagens; no histórico fica só
+  a ação, a data, quem excluiu e o SHA-256 do email.
+
 ## Testes
 
 `npm test`

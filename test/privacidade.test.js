@@ -42,3 +42,18 @@ test("termo 2026-11-16-2 aponta para a Política de privacidade no item 4; a ver
   assert.match(nova, /\n4\.5\. .*Política de privacidade/);
   assert.doesNotMatch(antiga, /Política de privacidade/);
 });
+
+test("política 2026-11-16-2 (suporte): é a atual e só acrescenta o 2.6, os anexos no 6 e o suporte no 7", () => {
+  const [nova, antiga] = PRIVACIDADES;
+  assert.equal(nova.versao, "2026-11-16-2"); assert.equal(PRIVACIDADE_VERSAO, "2026-11-16-2");
+  assert.equal(antiga.versao, "2026-11-16");
+  const L26 = "2.6. Suporte: as mensagens e imagens que você enviar nos chamados.";
+  const L6 = "- Imagens anexadas aos chamados: apagadas 90 dias depois que o chamado é encerrado. As mensagens ficam enquanto você tiver conta.";
+  const L7 = " Pedidos sobre seus dados também podem ser feitos pelo suporte do app, no assunto Conta e dados.";
+  assert.ok(nova.modelo.includes("\n2.5. ") && nova.modelo.includes("\n" + L26 + "\n\n3. "));
+  assert.match(nova.modelo, new RegExp("\\n6\\. Por quanto tempo guardamos\\n[\\s\\S]*" + L6.replace(/[.()]/g, "\\$&") + "\\n[\\s\\S]*\\n\\n7\\. "));
+  assert.ok(nova.modelo.includes("Respondemos em até 15 dias." + L7 + "\n"));
+  assert.equal(nova.modelo.replace("\n" + L26, "").replace("\n" + L6, "").replace(L7, ""), antiga.modelo, "o resto é igual");
+  comTermo();
+  assert.ok(montarPrivacidade().texto.includes(L26));
+});

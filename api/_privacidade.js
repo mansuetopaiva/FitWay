@@ -56,7 +56,13 @@ O treino personalizado é só para maiores de 18 anos.
 11. Mudanças
 Esta política pode ser atualizada. A versão em vigor fica sempre neste endereço, com a data da última atualização.`;
 
-export const PRIVACIDADES = [{ versao: "2026-11-16", modelo: V_2026_11_16 }];
+// 2026-11-16-2: suporte por chamados (2.6, os anexos no item 6 e os pedidos pelo suporte no 7).
+const V_2026_11_16_2 = V_2026_11_16
+  .replace(/^(2\.5\. .*)$/m, (m) => m + "\n2.6. Suporte: as mensagens e imagens que você enviar nos chamados.")
+  .replace(/^(- Pedidos não pagos: .*)$/m, (m) => m + "\n- Imagens anexadas aos chamados: apagadas 90 dias depois que o chamado é encerrado. As mensagens ficam enquanto você tiver conta.")
+  .replace("Respondemos em até 15 dias.", "Respondemos em até 15 dias. Pedidos sobre seus dados também podem ser feitos pelo suporte do app, no assunto Conta e dados.");
+
+export const PRIVACIDADES = [{ versao: "2026-11-16-2", modelo: V_2026_11_16_2 }, { versao: "2026-11-16", modelo: V_2026_11_16 }];
 export const PRIVACIDADE_VERSAO = PRIVACIDADES[0].versao;
 
 const env = (k) => (process.env[k] || "").trim();

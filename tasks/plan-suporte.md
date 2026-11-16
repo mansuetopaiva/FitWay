@@ -8,6 +8,6 @@
 - [x] S5. Exclusão de conta (TDD): `usuario_excluir`.
 - [x] S6. Tela do aluno (`js/suporte.js`, lazy): lista, abrir, conversa; card no Perfil e ponto na aba.
 - [x] S7. Painel: aba Suporte, conversa com contexto, botões; "Excluir conta" no detalhe do usuário.
-- [ ] S8. Política de privacidade `2026-11-16-2`.
-- [ ] S9. README "Suporte"; PGlite + jsdom fora do repositório.
+- [x] S8. Política de privacidade `2026-11-16-2`.
+- [x] S9. README "Suporte"; PGlite + jsdom fora do repositório.
 - [ ] S10. 4 agentes (código, segurança, testes, UI), correções, push.
