@@ -6,10 +6,10 @@ import { NOMES_FOTOS, lerPdf } from "./_treino.js";
 import { PARQ, limparPedidos } from "./_pedido.js";
 import { termoFaltando } from "./_termo.js";
 import { ABERTOS, tipoValido } from "./_precos.js";
-import { confirmarCartao } from "./_pagamento.js";
+import { confirmarPagamento } from "./_pagamento.js";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
-  "pedidos", "pedido", "cartao_verificar", "pedido_gerar_de_novo", "pedido_cancelar"];
+  "pedidos", "pedido", "pedido_verificar", "pedido_gerar_de_novo", "pedido_cancelar"];
 const STATUS = ["aguardando_pagamento", "aguardando_confirmacao", "pago", "gerando", "pronto", "erro", "cancelado"];
 
 // Lido a cada chamada: tirar alguém da variável na Vercel vale sem depender do navegador.
@@ -28,7 +28,7 @@ const paginaValida = (p) => p === undefined || (Number.isInteger(p) && p >= 0 &&
 const linha = (x) => ({ nome: x.nome, email: x.email, criado: x.criado, acessoAte: x.acesso_ate, checkins: x.checkins, ultimoCheckin: x.ultimo || null, temTreino: x.tem_treino });
 
 // opc.gerar(id): gera o treino de um pedido pago (gerarSeDevido); injetado para o teste não chamar a IA.
-// opc.fetch: chamada ao InfinitePay (cartao_verificar); injetado no teste.
+// opc.fetch: chamada ao InfinitePay (pedido_verificar); injetado no teste.
 export async function acaoAdmin(sql, u, b, opc = {}) {
   if (!ehAdmin(u && u.email)) return falha(403, "Acesso restrito.");
   if (!OPS.includes(b.op)) return falha(400, "Operação desconhecida.");
@@ -51,9 +51,9 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         coalesce(sum(valor) filter (where pago_em >= date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'), 0)::int as receita_mes,
         (select count(*) from usuarios where acesso_ate > now() and acesso_ate <= now() + interval '7 days')::int as vencendo7d
       from pedidos`;
-    // Pago num pedido que já não estava aberto (cancelado, link pago duas vezes): devolver o dinheiro.
+    // Pago sem liberar o pedido (pedido já fechado, os dois links pagos, ou valor menor): devolver o dinheiro.
     const semPedido = await sql`select l.criado, l.alvo_email as email, l.detalhes->>'transaction_nsu' as transaction_nsu,
-        (l.detalhes->>'paid_amount')::int as valor, coalesce(p.codigo, p.id) as codigo
+        (l.detalhes->>'paid_amount')::int as valor, l.detalhes->>'motivo' as motivo, coalesce(p.codigo, p.id) as codigo
       from admin_log l left join pedidos p on p.id = l.detalhes->>'pedido'
       where l.acao = 'cartao_sem_pedido' and l.criado > now() - interval '30 days' order by l.criado desc limit 10`;
     return ok({ usuarios: r.usuarios, novos7d: r.novos7d, comTreino: r.com_treino, comAcesso: r.com_acesso,
@@ -84,7 +84,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     return ok({ itens: xs.slice(0, 20), temMais: xs.length > 20 });
   }
 
-  if (b.op.startsWith("pedido") || b.op.startsWith("cartao_")) {
+  if (b.op.startsWith("pedido")) {
     const id = typeof b.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(b.id) ? b.id : "";
     if (!id) return falha(400, "Informe o pedido.");
     // Cada escrita e o seu registro no admin_log vão numa única instrução.
@@ -101,18 +101,19 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         criado: x.criado, pagoEm: x.pago_em, geradoEm: x.gerado_em, atualizado: x.atualizado, erro: x.erro, tentativas: x.tentativas,
         modelo: x.modelo, respostas: x.respostas, fotos: x.fotos, aceite: x.aceite, plano: x.plano_gerado, parq: PARQ,
         metodo: x.metodo, codigo: x.codigo, confirmadoPor: x.confirmado_por,
-        transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref });
+        transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref,
+        links: { pix: !!x.checkout_url_pix, cartao: !!x.checkout_url } });
     }
     let x;
-    if (b.op === "cartao_verificar") {
+    if (b.op === "pedido_verificar") {
       // Roda o payment_check de novo com o último retorno recebido (volta do checkout ou webhook), guardado em checkout_ref.
       const [p] = await sql`select checkout_ref from pedidos where id = ${id}`;
       if (!p) return falha(404, "Pedido não encontrado.");
       if (!p.checkout_ref) return falha(400, "Não há o que verificar: o InfinitePay ainda não mandou o retorno deste pagamento.");
-      const r = await confirmarCartao(sql, { ...p.checkout_ref, order_nsu: id }, { fetch: opc.fetch });
+      const r = await confirmarPagamento(sql, { ...p.checkout_ref, order_nsu: id }, { fetch: opc.fetch });
       if (r !== "pago") return falha(400, {
-        ignorado: "Nada mudou: o pedido não está aguardando o cartão (ou já foi pago).",
-        recusado: "O InfinitePay diz que este pagamento não foi feito ou veio com valor menor.",
+        ignorado: "Nada mudou: o pedido não tem link do InfinitePay (ou já foi pago).",
+        recusado: "O InfinitePay diz que este pagamento não foi feito ou veio com valor menor (valor menor fica no aviso do resumo para devolver).",
         temporario: "O InfinitePay não respondeu (ou acabou de ser consultado). Tente de novo em alguns minutos.",
         sobra: "O InfinitePay diz que foi pago, mas o pedido já não estava aberto. O pagamento ficou no aviso do resumo: devolva o dinheiro.",
       }[r]);

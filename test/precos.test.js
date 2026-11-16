@@ -32,12 +32,12 @@ const comEnv = (vars, fn) => {
   try { fn(); } finally { poe(antes); }
 };
 
-test("metodosDisponiveis: precisa de INFINITEPAY_HANDLE e SITE_URL; os links do Nubank não contam mais; tipo desconhecido não tem meio", () => {
+test("metodosDisponiveis: Pix e cartão pelo InfinitePay, com INFINITEPAY_HANDLE e SITE_URL; os links do Nubank não contam; tipo desconhecido não tem meio", () => {
   comEnv({ PIX_LINK_999: "https://nubank.com.br/cobrar/x", PIX_LINK_499: "https://nubank.com.br/cobrar/y", INFINITEPAY_HANDLE: undefined, SITE_URL: undefined }, () => {
     assert.deepEqual(metodosDisponiveis("inicial"), []);
   });
   comEnv({ INFINITEPAY_HANDLE: "exemplo", SITE_URL: "https://exemplo.app" }, () => {
-    assert.deepEqual(metodosDisponiveis("inicial"), ["cartao"]);
+    assert.deepEqual(metodosDisponiveis("inicial"), ["pix", "cartao"]);
     assert.deepEqual(metodosDisponiveis("toString"), []);
   });
   comEnv({ INFINITEPAY_HANDLE: "exemplo", SITE_URL: undefined }, () => assert.deepEqual(metodosDisponiveis("inicial"), []));

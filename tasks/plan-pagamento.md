@@ -69,7 +69,7 @@ Nenhuma migração destrutiva. Commits de remoção separados; histórico intact
   - Saem `linkPix`, `PIX_LINK_*`, `PIX_TITULAR_EXIBIDO`, `pedido_metodo`, `pix_avisei`, `lerE2E`/`dataDoE2E`, `pix_confirmar`,
     `pix_nao_encontrado`, `pixAguardando`, `mensagem_usuario` na resposta.
   - Aceite: ações e ops removidas respondem "Ação desconhecida." / "Operação desconhecida."; pedido em `aguardando_confirmacao` ainda cancela.
-- [ ] **T13. Link por meio e confirmação genérica** (`api/_pagamento.js`, `api/_admin.js`, `api/app.js`, `api/infinitepay.js`, testes antes)
+- [x] **T13. Link por meio e confirmação genérica** (`api/_pagamento.js`, `api/_admin.js`, `api/app.js`, `api/infinitepay.js`, testes antes)
   - `checkout_url_pix`; `pagar { id, metodo }`; `confirmar_pagamento`; `confirmarPagamento` com mínimo pelo link mais barato,
     `valor` do `payment_check`, `capture_method` real, valor menor registrado; `pedido_verificar`; detalhe com meio diferente.
   - Aceite: os testes da spec (preço por meio, reaproveitar link, meio diferente aceito e marcado, valor menor recusado e registrado,

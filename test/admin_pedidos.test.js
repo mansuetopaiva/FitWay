@@ -12,7 +12,7 @@ function sqlFalso(responder = () => []) {
 }
 
 test("pedido ops: não-admin recebe 403 sem consultar o banco", async () => {
-  for (const op of ["pedidos", "pedido", "cartao_verificar", "pedido_gerar_de_novo", "pedido_cancelar"]) {
+  for (const op of ["pedidos", "pedido", "pedido_verificar", "pedido_gerar_de_novo", "pedido_cancelar"]) {
     const { sql, chamadas } = sqlFalso();
     let gerou = false;
     const r = await acaoAdmin(sql, { email: "aluno@x.com" }, { op, id: "abc", gerar: true }, { gerar: async () => { gerou = true; } });
@@ -24,7 +24,7 @@ test("pedido ops: não-admin recebe 403 sem consultar o banco", async () => {
 
 test("pedido ops: id inválido dá 400 sem consulta", async () => {
   for (const id of [undefined, "a b", "x".repeat(41), 5, "x'; drop table pedidos; --", ""]) {
-    for (const op of ["pedido", "cartao_verificar", "pedido_gerar_de_novo", "pedido_cancelar"]) {
+    for (const op of ["pedido", "pedido_verificar", "pedido_gerar_de_novo", "pedido_cancelar"]) {
       const { sql, chamadas } = sqlFalso();
       const r = await acaoAdmin(sql, dono, { op, id });
       assert.equal(r.status, 400, `${op} ${id}`);
@@ -87,8 +87,8 @@ test("sem ANTHROPIC_API_KEY: gerar de novo avisa e não muda nada", async () => 
   }
 });
 
-test("Pix manual removido: pix_confirmar e pix_nao_encontrado são operação desconhecida, sem consultar o banco", async () => {
-  for (const op of ["pix_confirmar", "pix_nao_encontrado"]) {
+test("removidas: pix_confirmar, pix_nao_encontrado e cartao_verificar são operação desconhecida, sem consultar o banco", async () => {
+  for (const op of ["pix_confirmar", "pix_nao_encontrado", "cartao_verificar"]) {
     const { sql, chamadas } = sqlFalso(() => [{ tipo: "inicial", ativo: true, status: "pago" }]);
     const r = await acaoAdmin(sql, dono, { op, id: "p1", pix_e2e: "E" + "1".repeat(31) });
     assert.equal(r.status, 400, op);

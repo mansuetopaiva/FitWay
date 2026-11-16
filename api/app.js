@@ -77,7 +77,8 @@ const schema = () => pronto ||= (async () => {
     add column if not exists comprovante text, add column if not exists aviso_em timestamptz, add column if not exists confirmado_por text,
     add column if not exists transaction_nsu text, add column if not exists capture_method text, add column if not exists mensagem_usuario text,
     add column if not exists checkout_url text, add column if not exists checkout_ref jsonb, add column if not exists pix_e2e text,
-    add column if not exists pix_e2e_informado text, add column if not exists checkout_slug text, add column if not exists checado_em timestamptz`;
+    add column if not exists pix_e2e_informado text, add column if not exists checkout_slug text, add column if not exists checado_em timestamptz,
+    add column if not exists checkout_url_pix text`;
   await sql`create unique index if not exists pedidos_codigo on pedidos (codigo)`;
   await sql`create unique index if not exists pedidos_transaction_nsu on pedidos (transaction_nsu)`;
   await sql`create unique index if not exists pedidos_pix_e2e on pedidos (upper(pix_e2e))`; // o mesmo ID com outra caixa é o mesmo Pix
