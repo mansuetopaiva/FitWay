@@ -9,7 +9,7 @@
   // ---------- estado (sobrevive à troca entre lista e detalhe) ----------
   let resumo = null;
   const lista = { busca: "", pagina: 0, itens: [], temMais: false, estado: "carregando", erro: "" };
-  let det = null, detEmail = "", detEstado = "", detErro = "";
+  let det = null, detEmail = "", detEstado = "", detErro = "", excluindo = false;
   let edit = null, aba = 0, sujo = false;
   let buscaTimer = null, versaoLista = 0, versaoDet = 0;
 
@@ -27,25 +27,32 @@
     : `<p class="adm-estado muted" role="status">${esc(msg)}</p>`;
 
   // ---------- estrutura ----------
-  // Rotas: #/admin (usuários), #/admin/<email>, #/admin/pedidos e #/admin/pedido.<id> (email sempre tem @, então não colide).
+  // Rotas: #/admin (usuários), #/admin/<email>, #/admin/pedidos, #/admin/pedido.<id>, #/admin/suporte e #/admin/chamado.<id>
+  // (email sempre tem @, então não colide).
   function render(arg) {
     let a = "";
     try { a = arg ? decodeURIComponent(arg) : ""; } catch (e) { a = ""; }
-    if (a === "pedidos" || a.startsWith("pedido.")) {
+    const ped_ = a === "pedidos" || a.startsWith("pedido."), sup_ = a === "suporte" || a.startsWith("chamado.");
+    if (ped_ || sup_) {
       if (sujo && !confirm("O treino tem alterações não salvas. Sair e descartar?")) {
         history.replaceState(null, "", "#/admin/" + encodeURIComponent(detEmail));
         return renderUsuarios(encodeURIComponent(detEmail));
       }
       sujo = false; det = null; edit = null; detEmail = "";
+      if (sup_) { pedId = ""; return renderSuporte(a === "suporte" ? "" : a.slice(8)); }
+      chId = "";
       return renderPedidos(a === "pedidos" ? "" : a.slice(7));
     }
-    pedId = "";
+    pedId = ""; chId = "";
     renderUsuarios(arg);
   }
   const secoes = (qual) => `<nav class="adm-secoes" aria-label="Seções do painel">
     <a href="#/admin" ${qual === "usuarios" ? 'aria-current="page" class="on"' : ""}>Usuários</a>
     <a href="#/admin/pedidos" ${qual === "pedidos" ? 'aria-current="page" class="on"' : ""}>Pedidos</a>
+    <a href="#/admin/suporte" ${qual === "suporte" ? 'aria-current="page" class="on"' : ""}>Suporte${resumo && resumo.suporteAguardando
+      ? ` <span class="adm-conta" aria-label="${resumo.suporteAguardando} aguardando resposta">${resumo.suporteAguardando}</span>` : ""}</a>
   </nav>`;
+  const secaoAtual = () => (/\/(pedidos|pedido\.)/.test(location.hash) ? "pedidos" : /\/(suporte|chamado\.)/.test(location.hash) ? "suporte" : "usuarios");
   function renderUsuarios(arg) {
     const antes = detEmail; // usuário aberto até agora (para devolver o foco à linha dele)
     let alvo = "";
@@ -91,7 +98,7 @@
     try { resumo = await api("admin", { op: "resumo" }); } catch (e) { resumo = { erro: e.message }; }
     pintarResumo();
     const sec = app.querySelector(".adm-secoes");
-    if (sec) sec.outerHTML = secoes(pedId !== "" || location.hash.includes("/pedido") ? "pedidos" : "usuarios");
+    if (sec) sec.outerHTML = secoes(secaoAtual());
   }
   function pintarResumo() {
     const el = $("#admResumo");
@@ -110,7 +117,7 @@
     el.innerHTML = sobra + aviso + `<div class="adm-cards">
       ${c(resumo.usuarios, "usuários")}${c(resumo.novos7d, "novos em 7 dias")}${c(resumo.comTreino, "com treino")}
       ${c(resumo.comAcesso, "com acesso liberado")}${c(resumo.checkinsHoje, "check-ins hoje")}${c(resumo.checkinsSemana, "check-ins na semana")}
-      ${c(resumo.aguardando, "pedidos aguardando pagamento")}${c(reais(resumo.receitaMes), "receita do mês")}${c(resumo.vencendo7d, "acessos vencem em 7 dias")}
+      ${c(resumo.suporteAguardando || 0, "chamados aguardando resposta")}${c(resumo.aguardando, "pedidos aguardando pagamento")}${c(reais(resumo.receitaMes), "receita do mês")}${c(resumo.vencendo7d, "acessos vencem em 7 dias")}
     </div>`;
     el.onclick = async (ev) => {
       const b = ev.target.closest("[data-devolvido]");
@@ -171,6 +178,7 @@
   // ---------- detalhe ----------
   async function carregarDetalhe(email, manterAba) {
     const v = ++versaoDet;
+    if (email !== detEmail) excluindo = false;
     detEmail = email;
     if (!manterAba) { det = null; detEstado = "carregando"; pintarDetalhe(); }
     try {
@@ -229,6 +237,17 @@
         ${d.historico.length ? `<ul class="adm-hist">${d.historico.map((h) => `<li><b>${esc(acaoTxt(h))}</b>
           <span class="muted">${esc(new Date(h.criado).toLocaleString("pt-BR", { timeZone: TZ, dateStyle: "short", timeStyle: "short" }))} · ${esc(h.admin_email)}</span></li>`).join("")}</ul>`
           : estado("Nenhuma ação do admin com este usuário ainda.")}
+      </div>
+      <div class="card" aria-labelledby="admExTit">
+        <h2 id="admExTit" class="adm-tit">Excluir conta</h2>
+        ${excluindo ? `<form id="admExcluir" novalidate>
+            <p class="adm-erro" role="note">Isto apaga para sempre a conta de ${esc(d.nome)}: check-ins, treino, pedidos, chamados e mensagens.
+              No histórico fica só que uma conta foi excluída, quando e por quem (com um código do email, não o email). Não dá para desfazer.</p>
+            <div class="field"><label for="admExEmail">Para confirmar, digite o email da conta (${esc(d.email)})</label>
+              <input id="admExEmail" type="email" autocomplete="off" maxlength="120" required></div>
+            <div class="adm-botoes"><button class="btn-perigo" type="submit">Excluir definitivamente</button><button class="btn-sec" type="button" data-excluir-voltar>Voltar</button></div>
+          </form>` : `<p class="muted">Use para atender um pedido de exclusão (LGPD). Não é possível com pedido pago ou gerando o treino.</p>
+          <button class="btn-perigo" data-excluir>Excluir conta</button>`}
       </div>
       <datalist id="admNomes">${d.nomes.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>`;
     if (focar) { const t = $("#admDetTit"); if (t) t.focus(); }
@@ -352,6 +371,8 @@
       return;
     }
     if (ds.mais !== undefined) return carregarLista(true);
+    if (ds.excluir !== undefined) { excluindo = true; pintarDetalhe(); $("#admExEmail").focus(); return; }
+    if (ds.excluirVoltar !== undefined) { excluindo = false; pintarDetalhe(); $("[data-excluir]").focus(); return; }
     if (ds.dias) return escrever({ op: "acesso", dias: +ds.dias }, `Acesso liberado por mais ${ds.dias} dias.`, b);
     if (ds.cortar !== undefined) {
       if (confirm(`Cortar o acesso de ${det.nome} agora?`)) escrever({ op: "acesso", cortar: true }, "Acesso cortado.", b);
@@ -406,7 +427,21 @@
     }
   }
   // formulário de data e arquivo PDF ficam fora do clique
-  app.addEventListener("submit", (ev) => {
+  app.addEventListener("submit", async (ev) => {
+    if (ev.target.id === "admExcluir") {
+      ev.preventDefault();
+      const alvo = det.email, conf = $("#admExEmail").value.trim().toLowerCase(), b = ev.target.querySelector("[type=submit]");
+      if (conf !== alvo.toLowerCase()) return toast("O email digitado não é o desta conta.");
+      if (!confirm(`Excluir a conta de ${det.nome} para sempre?`)) return;
+      b.disabled = true;
+      try { await api("admin", { op: "usuario_excluir", email: alvo, confirmacao: conf }); }
+      catch (e) { toast(e.message); b.disabled = false; return; }
+      toast("Conta excluída.");
+      excluindo = false; det = null; detEmail = ""; resumo = null;
+      lista.itens = lista.itens.filter((x) => x.email !== alvo);
+      location.hash = "#/admin";
+      return;
+    }
     if (ev.target.id !== "admData") return;
     ev.preventDefault();
     const v = $("#admAte").value;
@@ -686,6 +721,174 @@
       b.disabled = true;
       api("termo", { versao: ds.pedTermo }).then((t) => { termoVisto = t; pintarPedido(); const r = app.querySelector(".adm-det .ped-termo"); if (r) r.focus(); },
         (e) => { toast(e.message); b.disabled = false; });
+    }
+  }
+
+  // ---------- suporte ----------
+  const ASSUNTOS = { pagamento: "Pagamento", treino: "Meu treino", conta: "Conta e dados", app: "Problema no app" };
+  const ST_CH = { aberto: ["Aguardando resposta", "aviso"], respondido: ["Respondido", "ok"], fechado: ["Encerrado", ""] };
+  const supLista = { status: "aberto", assunto: "", pagina: 0, itens: [], temMais: false, estado: "carregando", erro: "" };
+  let ch = null, chId = "", chEstado = "", chErro = "", versaoCh = 0, versaoSupLista = 0;
+  const seloCh = (st) => `<span class="selo ${ST_CH[st][1]}">${ST_CH[st][0]}</span>`;
+  // "há 3 h", "há 2 dias": quanto tempo o chamado está parado.
+  const ha = (iso) => {
+    const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+    return m < 60 ? `há ${m} min` : m < 1440 ? `há ${Math.round(m / 60)} h` : `há ${Math.round(m / 1440)} dia${Math.round(m / 1440) > 1 ? "s" : ""}`;
+  };
+
+  function renderSuporte(id) {
+    const antes = chId;
+    const opts = (obj, atual, todos) => `<option value="">${todos}</option>` + Object.entries(obj).map(([k, v]) =>
+      `<option value="${k}" ${k === atual ? "selected" : ""}>${Array.isArray(v) ? v[0] : v}</option>`).join("");
+    shell("Admin", `
+      <div class="adm ${id ? "com-detalhe" : ""}">
+        ${secoes("suporte")}
+        <section class="adm-resumo" id="admResumo" aria-label="Resumo"></section>
+        <section class="adm-lista" aria-labelledby="admListaTit">
+          <h2 id="admListaTit" class="adm-tit" tabindex="-1">Chamados</h2>
+          <div class="adm-filtros">
+            <label>Status<select id="chStatus">${opts(ST_CH, supLista.status, "Todos")}</select></label>
+            <label>Assunto<select id="chAssunto">${opts(ASSUNTOS, supLista.assunto, "Todos")}</select></label>
+          </div>
+          <div id="admLista"></div>
+        </section>
+        <section class="adm-det" id="admDetalhe" aria-live="polite"></section>
+      </div>`, "admin");
+    pintarResumo();
+    pintarSupLista();
+    const filtro = () => { supLista.status = $("#chStatus").value; supLista.assunto = $("#chAssunto").value; carregarSupLista(false); };
+    $("#chStatus").onchange = filtro; $("#chAssunto").onchange = filtro;
+    app.querySelector(".adm").addEventListener("click", cliqueSuporte);
+    if (!resumo) carregarResumo();
+    if (supLista.estado === "carregando" && !supLista.itens.length) carregarSupLista(false);
+    if (id) { if (id !== chId || !ch) carregarChamado(id); else pintarChamado(); return; }
+    chId = ""; ch = null;
+    pintarChamado();
+    const linha = antes && app.querySelector(`a[href="#/admin/chamado.${CSS.escape(antes)}"]`);
+    if (linha) linha.focus(); else if (antes) $("#admListaTit").focus();
+  }
+  async function carregarSupLista(mais) {
+    const v = ++versaoSupLista;
+    supLista.pagina = mais ? supLista.pagina + 1 : 0;
+    supLista.estado = "carregando";
+    if (!mais) supLista.itens = [];
+    pintarSupLista();
+    try {
+      const r = await api("admin", { op: "suporte_lista", status: supLista.status, assunto: supLista.assunto, pagina: supLista.pagina });
+      if (v !== versaoSupLista) return;
+      supLista.itens = mais ? supLista.itens.concat(r.itens) : r.itens;
+      supLista.temMais = r.temMais; supLista.estado = "ok";
+    } catch (e) {
+      if (v !== versaoSupLista) return;
+      supLista.estado = "erro"; supLista.erro = e.message;
+      if (mais) supLista.pagina--;
+    }
+    pintarSupLista();
+  }
+  function pintarSupLista() {
+    const el = $("#admLista");
+    if (!el || !$("#chStatus")) return;
+    const itens = supLista.itens.map((x) => `
+      <li><a class="adm-item ${x.id === chId ? "on" : ""}" href="#/admin/chamado.${encodeURIComponent(x.id)}" ${x.id === chId ? 'aria-current="true"' : ""}>
+        <span class="t"><b>${esc(x.nome)}${x.nao_lido ? ' <span class="selo aviso">Nova</span>' : ""}</b>
+          <span class="muted">${esc(ASSUNTOS[x.assunto])} · ${esc(x.resumo || "")}</span>
+          <span class="muted">${x.status === "aberto" ? "esperando " : "atualizado "}${esc(ha(x.atualizado))}</span></span>
+        <span class="adm-selos">${seloCh(x.status)}</span>
+      </a></li>`).join("");
+    let rodape = "";
+    if (supLista.estado === "carregando") rodape = estado(supLista.itens.length ? "Carregando mais…" : "Carregando chamados…");
+    else if (supLista.estado === "erro") rodape = estado(supLista.erro, "supLista");
+    else if (!supLista.itens.length) rodape = estado("Nenhum chamado com estes filtros.");
+    else if (supLista.temMais) rodape = `<button class="btn-sec adm-mais" data-sup-mais>Carregar mais</button>`;
+    el.innerHTML = (itens ? `<ul class="adm-itens">${itens}</ul>` : "") + rodape;
+  }
+  async function carregarChamado(id) {
+    const v = ++versaoCh;
+    chId = id; chEstado = "carregando"; ch = null;
+    pintarChamado();
+    try {
+      const r = await api("admin", { op: "suporte_chamado", id });
+      if (v !== versaoCh) return;
+      ch = r; chEstado = "ok";
+      const item = supLista.itens.find((x) => x.id === id);
+      if (item) item.nao_lido = false;
+    } catch (e) {
+      if (v !== versaoCh) return;
+      chEstado = "erro"; chErro = e.message;
+    }
+    pintarChamado(true);
+    pintarSupLista();
+  }
+  function pintarChamado(focar) {
+    const el = $("#admDetalhe");
+    if (!el) return;
+    const voltar = `<a class="adm-voltar" href="#/admin/suporte">${icon("back")}Voltar para os chamados</a>`;
+    if (!chId) { el.innerHTML = estado("Escolha um chamado na lista."); return; }
+    if (chEstado === "carregando") { el.innerHTML = voltar + estado("Carregando chamado…"); return; }
+    if (chEstado === "erro") { el.innerHTML = voltar + estado(chErro, "chamado"); return; }
+    const c = ch.chamado, fechado = c.status === "fechado";
+    const linha = (k, v) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
+    const plano = c.plano_nome ? esc(c.plano_nome) + (c.plano_origem === "ia" ? " (IA)" : "") : "Nenhum";
+    const pedido = c.pedido_id ? `<a href="#/admin/pedido.${encodeURIComponent(c.pedido_id)}">${esc(c.pedido_codigo || c.pedido_id.slice(0, 8))} · ${esc(TIPOS[c.pedido_tipo] || "")} · ${
+      c.pedido_valor ? reais(c.pedido_valor) : ""} · ${esc(c.pedido_status ? STATUS[c.pedido_status][0] : "")}</a>` : "Nenhum";
+    const msgs = ch.mensagens.map((m) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
+        <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte" + (m.admin_email ? " (" + esc(m.admin_email) + ")" : "") : esc(c.nome)}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
+        <div class="sup-texto">${esc(m.texto)}</div>
+        ${m.anexo ? `<div class="sup-img"><button type="button" class="btn-sec" data-ch-anexo="${esc(String(m.id))}">Ver imagem (fica registrado)</button></div>` : ""}</li>`).join("");
+    el.innerHTML = `${voltar}
+      <div class="sup-det">
+        <aside class="card sup-ctx" aria-labelledby="chCtxTit">
+          <h2 id="chCtxTit" class="adm-tit">Contexto</h2>
+          ${linha("Nome", `<a href="#/admin/${encodeURIComponent(c.email)}">${esc(c.nome)}</a>`)}
+          ${linha("Email", esc(c.email))}
+          ${linha("Acesso", esc(acessoTxt(c.acesso_ate)))}
+          ${linha("Plano atual", plano)}
+          ${linha("Pedido", pedido)}
+        </aside>
+        <div class="card sup-conv">
+          <h2 id="admDetTit" tabindex="-1">${esc(ASSUNTOS[c.assunto])} ${seloCh(c.status)}</h2>
+          <p class="muted">Aberto em ${esc(quando(c.criado))}${c.fechado_em ? " · encerrado em " + esc(quando(c.fechado_em)) : ""}</p>
+          <ol class="sup-conversa" aria-label="Mensagens">${msgs}</ol>
+          ${fechado ? `<p class="muted">Chamado encerrado. Reabra para responder.</p>`
+            : `<form id="chResp" novalidate><div class="field"><label for="chTexto">Responder</label><textarea id="chTexto" rows="4" maxlength="2000"></textarea></div>
+              <button class="btn" type="submit">Enviar resposta</button></form>`}
+          <div class="adm-botoes">${fechado ? `<button class="btn-sec" data-ch-reabrir>Reabrir</button>` : `<button class="btn-perigo" data-ch-encerrar>Encerrar</button>`}</div>
+        </div>
+      </div>`;
+    if (focar) { const t = $("#admDetTit"); if (t) t.focus(); }
+    const f = $("#chResp");
+    if (f) f.onsubmit = (ev) => {
+      ev.preventDefault();
+      const texto = $("#chTexto").value.trim();
+      if (!texto) { toast("Escreva a resposta."); return $("#chTexto").focus(); }
+      acaoChamado({ op: "suporte_responder", texto }, "Resposta enviada.", f.querySelector("[type=submit]"));
+    };
+  }
+  async function acaoChamado(corpo, msg, botao) {
+    const id = chId;
+    botao.disabled = true;
+    try { await api("admin", { ...corpo, id }); toast(msg); }
+    catch (e) { toast(e.message); if (botao.isConnected) botao.disabled = false; return; }
+    carregarResumo();
+    carregarSupLista(false);
+    if (id === chId) carregarChamado(id);
+  }
+  function cliqueSuporte(ev) {
+    const b = ev.target.closest("button");
+    if (!b || !app.contains(b)) return;
+    const ds = b.dataset;
+    if (ds.tentar === "supLista") return carregarSupLista(supLista.pagina > 0 && supLista.itens.length > 0);
+    if (ds.tentar === "chamado") return carregarChamado(chId);
+    if (ds.tentar === "resumo") { resumo = null; pintarResumo(); return carregarResumo(); }
+    if (ds.supMais !== undefined) return carregarSupLista(true);
+    if (ds.chEncerrar !== undefined) { if (confirm("Encerrar este chamado?")) acaoChamado({ op: "suporte_encerrar" }, "Chamado encerrado.", b); return; }
+    if (ds.chReabrir !== undefined) return acaoChamado({ op: "suporte_reabrir" }, "Chamado reaberto.", b);
+    if (ds.chAnexo) {
+      b.disabled = true;
+      api("admin", { op: "suporte_anexo", id: chId, msg: Number(ds.chAnexo) }).then((r) => {
+        if (typeof r.anexo !== "string" || !r.anexo.startsWith("data:image/jpeg;base64,")) throw new Error("Imagem inválida.");
+        b.parentNode.innerHTML = `<img class="sup-previa" src="${esc(r.anexo)}" alt="Imagem anexada pelo aluno">`;
+      }).catch((e) => { toast(e.message); b.disabled = false; });
     }
   }
 

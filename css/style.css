@@ -399,3 +399,14 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 .sup-quem { font-size: 12px; margin-bottom: 4px; }
 .sup-texto { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.45; }
 .sup-img { margin-top: 8px; }
+
+/* suporte (admin) */
+.adm-conta { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--danger); color: #fff; font-size: 12px; font-weight: 500; }
+.sup-det { display: flex; flex-direction: column; gap: 0; }
+.sup-ctx .row span:last-child { text-align: right; overflow-wrap: anywhere; }
+.sup-ctx a, .sup-conv a { color: var(--green); }
+.sup-conv h2 .selo { vertical-align: middle; margin-left: 6px; }
+@media (min-width: 1200px) {
+  .sup-det { display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
+  .sup-ctx { order: 2; position: sticky; top: 64px; }
+}
