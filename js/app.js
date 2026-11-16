@@ -92,6 +92,7 @@
   // ---------- login ----------
   let loginMode = "entrar";
   function viewLogin() {
+    if (loginMode === "esqueci") return viewEsqueci();
     const criar = loginMode === "criar";
     app.innerHTML = `
       <main class="login">
@@ -113,8 +114,10 @@
           <button class="btn" type="submit" ${criar ? 'aria-describedby="loginAceite"' : ""}>${criar ? "Criar conta" : "Entrar"}</button>
         </form>
         <p class="muted" style="margin-top:16px;text-align:center">Seus dados ficam salvos na sua conta e aparecem em qualquer aparelho.</p>
+        ${criar ? "" : `<p class="login-links"><button type="button" class="link" id="esqueci">Esqueci a senha</button></p>`}
         <p class="muted login-links"><a href="#/privacidade">Política de privacidade</a></p>
       </main>`;
+    if (!criar) $("#esqueci").onclick = () => { loginMode = "esqueci"; esqueciEmail = $("#email").value.trim(); viewLogin(); };
     app.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
       const em = $("#email").value, pw = $("#senha").value;
       loginMode = b.dataset.mode; viewLogin();
@@ -148,6 +151,84 @@
       render();
     };
     $(criar ? "#nome" : "#email").focus();
+  }
+
+  // ---------- esqueci a senha (docs/senha.md) ----------
+  let esqueciEmail = "", tokenSenha = "";
+  const campoSenha = (id, rot, auto) => `<div class="field"><label for="${id}">${rot}</label>
+    <input id="${id}" type="password" autocomplete="${auto}" minlength="6" maxlength="100" required></div>`;
+  async function viewEsqueci() {
+    app.innerHTML = `
+      <main class="login">
+        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
+        <h2 class="esq-tit" id="esqTit" tabindex="-1">Esqueci a senha</h2>
+        <div id="esqCorpo"><p class="muted" role="status">Carregando…</p></div>
+        <p class="login-links"><button type="button" class="link" id="voltarLogin">Voltar para Entrar</button></p>
+      </main>`;
+    $("#voltarLogin").onclick = () => { loginMode = "entrar"; viewLogin(); };
+    $("#esqTit").focus();
+    let d;
+    try { d = await api("senha_disponivel"); } catch (e) { d = { disponivel: true }; } // sem conexão: o envio mostra o erro
+    if (loginMode !== "esqueci" || email || !$("#esqCorpo")) return;
+    if (!d.disponivel) { $("#esqCorpo").innerHTML = `<p class="ia-status" role="alert">${esc(d.mensagem)}</p>`; return; }
+    $("#esqCorpo").innerHTML = `<form novalidate id="esqForm">
+        <p class="muted" style="margin-bottom:12px">Digite o email da sua conta. Vamos mandar um link para você criar uma senha nova.</p>
+        <div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="email" inputmode="email" maxlength="120" required value="${esc(esqueciEmail)}"></div>
+        <p class="err" role="alert"></p>
+        <button class="btn" type="submit">Enviar link</button>
+      </form>`;
+    $("#esqForm").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const err = $("#esqForm .err"), em = $("#email").value.trim().toLowerCase(), botao = $("#esqForm .btn");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { err.textContent = "Digite um email válido, como nome@exemplo.com."; return $("#email").focus(); }
+      botao.disabled = true; botao.textContent = "Enviando…"; err.textContent = "";
+      let r;
+      try { r = await api("senha_pedir", { email: em }); }
+      catch (e) { botao.disabled = false; botao.textContent = "Enviar link"; err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return; }
+      if (!$("#esqCorpo")) return;
+      $("#esqCorpo").innerHTML = `<p class="ia-status ${r.indisponivel ? "" : "ok"}" role="status" tabindex="-1" id="esqOk">${esc(r.mensagem)}</p>`;
+      $("#esqOk").focus();
+    };
+  }
+  // #/nova-senha/<token>: o token já saiu do endereço (veja o início do app) e fica só na memória.
+  function viewNovaSenha() {
+    const fora = !email;
+    const corpo = tokenSenha ? `<form novalidate id="novaForm">
+        ${campoSenha("nova1", "Nova senha", "new-password")}${campoSenha("nova2", "Repetir a nova senha", "new-password")}
+        <p class="muted" style="margin:-6px 0 10px">Pelo menos 6 caracteres.</p>
+        <p class="err" role="alert"></p>
+        <button class="btn" type="submit">Trocar a senha</button></form>`
+      : `<p class="ia-status" role="alert">Este link não vale mais. Peça um novo em Esqueci a senha.</p>
+        <button type="button" class="btn" id="pedirNovo" style="margin-top:12px">Esqueci a senha</button>`;
+    app.innerHTML = `<main class="login">
+        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
+        <h2 class="esq-tit" id="esqTit" tabindex="-1">Criar uma senha nova</h2>${corpo}
+        ${fora ? "" : `<p class="login-links"><a href="#/perfil">Voltar ao app</a></p>`}</main>`;
+    $("#esqTit").focus();
+    if (!tokenSenha) {
+      $("#pedirNovo").onclick = () => { if (email) return toast("Saia da conta para usar Esqueci a senha, ou troque a senha no Perfil."); loginMode = "esqueci"; location.hash = ""; render(); };
+      return;
+    }
+    $("#novaForm").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const err = $("#novaForm .err"), a = $("#nova1").value, b = $("#nova2").value, botao = $("#novaForm .btn");
+      if (a.length < 6) { err.textContent = "A senha precisa ter pelo menos 6 caracteres."; return $("#nova1").focus(); }
+      if (a !== b) { err.textContent = "As duas senhas não são iguais."; return $("#nova2").focus(); }
+      botao.disabled = true; err.textContent = "";
+      let u;
+      try { u = await api("senha_nova", { token: tokenSenha, senha: a }); }
+      catch (e) {
+        botao.disabled = false;
+        if (e.status === 400 && /link/.test(e.message)) { tokenSenha = ""; viewNovaSenha(); return toast(e.message); }
+        err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return;
+      }
+      tokenSenha = "";
+      await entrou(u);
+      restoreSessao();
+      toast("Senha trocada. Você entrou na sua conta.");
+      location.hash = data.plano ? "#/inicio" : "#/perfil";
+      render();
+    };
   }
 
   function sair() {
@@ -564,7 +645,7 @@
   }
 
   // ---------- perfil ----------
-  let editandoPerfil = false;
+  let editandoPerfil = false, trocandoSenha = false;
   function viewPerfil() {
     const u = { nome: nomeUser };
     shell("Perfil", `
@@ -581,8 +662,16 @@
             <div class="tools"><button type="button" id="cancelar">Cancelar</button></div>
           </form>` : `<h2>${esc(u.nome)}</h2>`}
         <p class="muted" ${editandoPerfil ? 'style="margin-top:10px"' : ""}>${esc(email)}</p>
-        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar perfil</button></div>`}
+        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar perfil</button><button id="trocarSenha" aria-expanded="${trocandoSenha}">${icon("shield")}Trocar senha</button></div>`}
       </section>
+      ${trocandoSenha && !editandoPerfil ? `<form class="card" id="senhaForm" novalidate aria-labelledby="senhaTit">
+        <h2 id="senhaTit" tabindex="-1">Trocar senha</h2>
+        ${campoSenha("senhaAtual", "Senha atual", "current-password")}${campoSenha("senhaNova1", "Nova senha", "new-password")}${campoSenha("senhaNova2", "Repetir a nova senha", "new-password")}
+        <p class="muted" style="margin:-6px 0 10px">Pelo menos 6 caracteres. Os outros aparelhos conectados nesta conta serão desconectados.</p>
+        <p class="err" role="alert"></p>
+        <button class="btn" type="submit">Trocar senha</button>
+        <div class="tools"><button type="button" id="senhaCancelar">Cancelar</button></div>
+      </form>` : ""}
       <section class="card">
         <div class="row"><span>Plano</span><span>${plano() ? esc(plano().nome) : "Nenhum"}</span></div>
         <div class="row"><span>Sessões feitas</span><span>${data.sessoes}</span></div>
@@ -640,7 +729,25 @@
       fr.readAsDataURL(f);
     };
     if (!editandoPerfil) {
-      $("#editar").onclick = () => { editandoPerfil = true; viewPerfil(); $("#nome").focus(); };
+      $("#editar").onclick = () => { editandoPerfil = true; trocandoSenha = false; viewPerfil(); $("#nome").focus(); };
+      $("#trocarSenha").onclick = () => { trocandoSenha = !trocandoSenha; viewPerfil(); (trocandoSenha ? $("#senhaAtual") : $("#trocarSenha")).focus(); };
+      const sf = $("#senhaForm");
+      if (sf) {
+        $("#senhaCancelar").onclick = () => { trocandoSenha = false; viewPerfil(); $("#trocarSenha").focus(); };
+        sf.onsubmit = async (ev) => {
+          ev.preventDefault();
+          const err = sf.querySelector(".err"), atual = $("#senhaAtual").value, a = $("#senhaNova1").value, b = $("#senhaNova2").value, botao = sf.querySelector(".btn");
+          if (!atual) { err.textContent = "Digite a senha atual."; return $("#senhaAtual").focus(); }
+          if (a.length < 6) { err.textContent = "A senha precisa ter pelo menos 6 caracteres."; return $("#senhaNova1").focus(); }
+          if (a !== b) { err.textContent = "As duas senhas não são iguais."; return $("#senhaNova2").focus(); }
+          botao.disabled = true; err.textContent = "";
+          try { await api("senha_alterar", { atual, nova: a }); }
+          catch (e) { botao.disabled = false; err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return; }
+          trocandoSenha = false;
+          toast("Senha trocada. Os outros aparelhos foram desconectados.");
+          if (location.hash.split("/")[1] === "perfil") { viewPerfil(); $("#trocarSenha").focus(); }
+        };
+      }
       return;
     }
     const salvarFoto = async (foto) => {
@@ -855,9 +962,10 @@
     clearInterval(tickTimer);
     clearTimeout(iaTimer);
     const [, rota, arg] = location.hash.split("/");
-    editandoPerfil = false;
+    editandoPerfil = false; trocandoSenha = false;
     if (rota !== "treino") stopRest();
     if (rota === "privacidade") { window.scrollTo(0, 0); return viewPrivacidade(); } // pública
+    if (rota === "nova-senha") { window.scrollTo(0, 0); return viewNovaSenha(); } // pública
     if (!email) return viewLogin();
     if (!plano() && (rota === "treinos" || rota === "treino")) { location.hash = "#/perfil"; return; }
     if (rota === "treinos") viewTreinos();
@@ -881,10 +989,17 @@
     if (document.hidden || !email) return;
     tickRest();
     const rota = location.hash.split("/")[1];
-    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "pagamento", "termo", "privacidade", "suporte"].includes(rota) && diaRender !== dayKey(today())) render();
+    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "pagamento", "termo", "privacidade", "suporte", "nova-senha"].includes(rota) && diaRender !== dayKey(today())) render();
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });
+  // Link de troca de senha: o token sai do endereço antes de qualquer requisição e fica só na memória.
+  (() => {
+    const m = /^#\/nova-senha\/([A-Za-z0-9_-]{1,100})$/.exec(location.hash);
+    if (!m) return;
+    tokenSenha = m[1];
+    history.replaceState(null, "", location.pathname + location.search + "#/nova-senha");
+  })();
   // Volta do checkout do InfinitePay (Pix ou cartão): guarda o retorno, limpa a URL e abre o pagamento, que confere.
   (() => {
     const q = new URLSearchParams(location.search), o = q.get("order_nsu"), t = q.get("transaction_nsu"), s = q.get("slug");
