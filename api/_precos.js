@@ -12,16 +12,7 @@ const OITO_SEMANAS = 56 * 864e5;
 
 export const tipoValido = (t) => typeof t === "string" && Object.hasOwn(PRECOS.pix, t);
 export const precoDe = (metodo, tipo) => (typeof metodo === "string" && Object.hasOwn(PRECOS, metodo) && tipoValido(tipo) ? PRECOS[metodo][tipo] : undefined);
-// Um link de cobrança do Nubank por valor (PIX_LINK_999, PIX_LINK_499): o valor já vem preenchido no link.
-const LINK_NUBANK = /^https:\/\/nubank\.com\.br\/cobrar\/\S+$/;
-export function linkPix(tipo) {
-  const v = tipoValido(tipo) && process.env[`PIX_LINK_${PRECOS.pix[tipo]}`];
-  return v && LINK_NUBANK.test(v) ? v : undefined;
-}
-export const metodosDisponiveis = (tipo) => [
-  ...(linkPix(tipo) ? ["pix"] : []),
-  ...(tipoValido(tipo) && process.env.INFINITEPAY_HANDLE && process.env.SITE_URL ? ["cartao"] : []),
-];
+export const metodosDisponiveis = (tipo) => (tipoValido(tipo) && process.env.INFINITEPAY_HANDLE && process.env.SITE_URL ? ["cartao"] : []);
 const planoIA = (u) => (u && u.dados && u.dados.plano && u.dados.plano.origem === "ia" ? u.dados.plano : null);
 
 export const acessoAtivo = (u, agora) => !!(u && u.acesso_ate) && new Date(u.acesso_ate) > agora;

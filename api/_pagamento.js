@@ -1,48 +1,33 @@
-// Pagamento dos pedidos: Pix por link de cobrança do Nubank (conferido pelo admin) e cartão pelo InfinitePay.
-// O "_" impede a Vercel de expor como rota. Recebe sql (e fetch) por parâmetro para o teste.
-// Nenhuma ação do usuário grava "pago": só aplicarPagamento, chamado pelo admin (Pix) ou por confirmarCartao.
-import { efeitoDoPagamento, linkPix, metodosDisponiveis, precoDe } from "./_precos.js";
-import { jpegValido, limparTexto, novoCodigo } from "./_pedido.js";
+// Pagamento dos pedidos pelo checkout do InfinitePay. O "_" impede a Vercel de expor como rota.
+// Recebe sql (e fetch) por parâmetro para o teste. Nenhuma ação do usuário grava "pago": só aplicarPagamento, chamado por confirmarCartao.
+import { efeitoDoPagamento, metodosDisponiveis, precoDe } from "./_precos.js";
 
-export const ACOES = ["pagamento", "pedido_metodo", "pix_avisei", "pagar_cartao", "confirmar_cartao"];
-// ID da transação do Pix (end-to-end): "E" + 31 letras ou números. Espaços nas pontas vêm da cópia e são tirados.
-export const lerE2E = (v) => (typeof v === "string" && /^E[A-Za-z0-9]{31}$/.test(v.trim()) ? v.trim() : "");
-// A data e hora do Pix vêm no próprio ID: E + ISPB (8) + yyyyMMddHHmm + 11. Devolve a data ou null.
-export function dataDoE2E(e2e) {
-  const m = /^E\d{8}(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)/.exec(e2e || "");
-  if (!m) return null;
-  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));
-  return d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] && +m[4] < 24 && +m[5] < 60 ? d : null;
-}
+export const ACOES = ["pagamento", "pagar_cartao", "confirmar_cartao"];
 const idValido = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(v);
 const ok = (corpo) => ({ status: 200, corpo });
 const falha = (status, erro) => ({ status, corpo: { erro } });
 const INDISPONIVEL = "Pagamento indisponível no momento.";
-export const MSG_NAO_ENCONTRADO = "Não encontramos seu Pix. Confira o valor e o código e avise de novo.";
 
 const meios = (tipo) => metodosDisponiveis(tipo).map((metodo) => ({ metodo, valor: precoDe(metodo, tipo) }));
-const pixDe = (tipo) => (linkPix(tipo) ? { link: linkPix(tipo), recebedor: (process.env.PIX_TITULAR_EXIBIDO || "").trim() } : null);
 
 // Marca como pago numa instrução só: pedido, dias de acesso e admin_log. UPDATE condicional: dois cliques ou um
 // webhook repetido não somam dias (a 2ª chamada não acha a linha). Sem linha devolvida, nada mudou.
-// opc: quem (admin ou "infinitepay"), metodo, de (status de onde pode vir), e pix_e2e ou transaction_nsu + checkout_slug + capture_method.
-// exigirAcesso: novo_treino só com acesso ativo (o Pix confere; o cartão já cobrou e não pode recusar).
-export async function aplicarPagamento(sql, pedido, { quem, metodo, de, pix_e2e = null, transaction_nsu = null, checkout_slug = null, capture_method = null, exigirAcesso = false }) {
+// opc: quem ("infinitepay"), metodo, de (status de onde pode vir), transaction_nsu, checkout_slug e capture_method.
+export async function aplicarPagamento(sql, pedido, { quem, metodo, de, transaction_nsu = null, checkout_slug = null, capture_method = null }) {
   const ef = efeitoDoPagamento(pedido.tipo), valor = precoDe(metodo, pedido.tipo);
   if (!ef || valor === undefined) return null;
   const status = ef.gerar ? "pago" : "pronto";
   const [x] = await sql`with p as (update pedidos set status = ${status}, pago_em = now(), atualizado = now(), metodo = ${metodo}, valor = ${valor},
-          confirmado_por = ${quem}, pix_e2e = coalesce(${pix_e2e}::text, pix_e2e), transaction_nsu = coalesce(${transaction_nsu}::text, transaction_nsu),
+          confirmado_por = ${quem}, transaction_nsu = coalesce(${transaction_nsu}::text, transaction_nsu),
           checkout_slug = coalesce(${checkout_slug}::text, checkout_slug), capture_method = coalesce(${capture_method}::text, capture_method), mensagem_usuario = null
         where id = ${pedido.id} and status = any(${de}::text[]) and tipo = ${pedido.tipo}
           and (${transaction_nsu}::text is null or transaction_nsu is null)
-          and (not ${exigirAcesso}::boolean or tipo <> 'novo_treino' or exists (select 1 from usuarios where email = pedidos.email and acesso_ate > now()))
         returning id, email, tipo, valor, status),
       a as (update usuarios set acesso_ate = greatest(now(), acesso_ate) + make_interval(days => ${ef.dias}::int)
         where email = (select email from p) and ${ef.dias}::int > 0 returning acesso_ate),
       l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
         select ${quem}, 'pedido_pago', email, jsonb_build_object('pedido', id, 'tipo', tipo, 'valor', valor, 'dias', ${ef.dias}::int,
-          'metodo', ${metodo}::text, 'pix_e2e', ${pix_e2e}::text, 'transaction_nsu', ${transaction_nsu}::text) from p)
+          'metodo', ${metodo}::text, 'transaction_nsu', ${transaction_nsu}::text) from p)
     select p.status, (select acesso_ate from a) as acesso_ate from p`;
   return x || null;
 }
@@ -98,7 +83,7 @@ export async function confirmarCartao(sql, ref, { fetch = globalThis.fetch } = {
   const cm = typeof j.capture_method === "string" ? j.capture_method.slice(0, 20) : null;
   try {
     const x = await aplicarPagamento(sql, p, { quem: "infinitepay", metodo: "cartao", de: ABERTO, transaction_nsu, checkout_slug: slug, capture_method: cm });
-    return x ? "pago" : sobra(); // fechou entre a leitura e a gravação (ex.: Pix confirmado ao mesmo tempo)
+    return x ? "pago" : sobra(); // fechou entre a leitura e a gravação
   } catch (e) {
     if (e && e.code === "23505") return "ignorado"; // transaction_nsu ou slug já usado em outro pedido
     throw e;
@@ -116,40 +101,13 @@ export async function acaoPagamento(sql, u, b, { fetch = globalThis.fetch } = {}
     return ok({ resultado: r, status: x && x.status });
   }
   if (!idValido(b.id)) return falha(400, "Pedido inválido.");
-  const [p] = await sql`select id, tipo, status, metodo, valor, codigo, mensagem_usuario, checkout_url from pedidos where id = ${b.id} and email = ${u.email}`;
+  const [p] = await sql`select id, tipo, status, metodo, valor, checkout_url from pedidos where id = ${b.id} and email = ${u.email}`;
   if (!p) return falha(404, "Pedido não encontrado.");
   const pendente = p.status === "aguardando_pagamento";
 
   if (b.acao === "pagamento") {
-    if (!p.codigo) { // pedido de antes do código: ganha um ao abrir o pagamento
-      const [c] = await sql`update pedidos set codigo = coalesce(codigo, ${novoCodigo()}) where id = ${p.id} returning codigo`;
-      p.codigo = c ? c.codigo : null;
-    }
     const { checkout_url, ...pedido } = p;
-    return ok({ pedido, metodos: meios(p.tipo), pix: pixDe(p.tipo), temCheckout: !!checkout_url });
-  }
-
-  if (b.acao === "pedido_metodo") {
-    if (!metodosDisponiveis(p.tipo).includes(b.metodo)) return falha(400, "Este meio de pagamento não está disponível.");
-    if (!pendente) return falha(400, "Este pedido não está aguardando pagamento.");
-    const [x] = await sql`update pedidos set metodo = ${b.metodo}, valor = ${precoDe(b.metodo, p.tipo)}, atualizado = now()
-      where id = ${p.id} and email = ${u.email} and status = 'aguardando_pagamento' returning id, tipo, status, metodo, valor, codigo, mensagem_usuario`;
-    if (!x) return falha(400, "Este pedido não está aguardando pagamento.");
-    return ok({ pedido: x, pix: b.metodo === "pix" ? pixDe(p.tipo) : null });
-  }
-
-  if (b.acao === "pix_avisei") {
-    const nome = typeof b.pagador_nome === "string" ? limparTexto(b.pagador_nome).replace(/\s+/g, " ") : "";
-    if (nome.length < 2 || nome.length > 80) return falha(400, "Digite o nome de quem pagou (2 a 80 caracteres).");
-    if (!jpegValido(b.comprovante)) return falha(400, "Anexe o comprovante do Pix (uma imagem).");
-    const vazio = b.pix_e2e === undefined || b.pix_e2e === null || (typeof b.pix_e2e === "string" && !b.pix_e2e.trim());
-    const e2e = vazio ? null : lerE2E(b.pix_e2e);
-    if (e2e === "") return falha(400, "O ID da transação começa com E e tem 32 letras e números. Confira ou deixe em branco.");
-    const [x] = await sql`update pedidos set status = 'aguardando_confirmacao', pagador_nome = ${nome}, comprovante = ${b.comprovante},
-        pix_e2e_informado = ${e2e}, aviso_em = now(), mensagem_usuario = null, atualizado = now()
-      where id = ${p.id} and email = ${u.email} and metodo = 'pix' and status = 'aguardando_pagamento' returning id, tipo, status, metodo, valor, codigo, mensagem_usuario`;
-    if (!x) return falha(400, "Este pedido não está aguardando o Pix.");
-    return ok({ pedido: x });
+    return ok({ pedido, metodos: meios(p.tipo) });
   }
 
   if (b.acao === "pagar_cartao") {

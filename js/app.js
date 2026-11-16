@@ -665,12 +665,11 @@
     const botao = (tipo, txt) => `<button class="btn" data-pedir="${tipo}">${txt} — a partir de ${reais(ia.precos[tipo])}</button>`;
     if (p && p.status === "aguardando_pagamento") {
       h += `<p class="ia-status">${NOME_PEDIDO[p.tipo]} — ${reais(p.valor)}</p>
-        ${p.mensagem_usuario ? `<p class="err" role="alert">${esc(p.mensagem_usuario)}</p>` : ""}
         <p class="muted" style="margin-bottom:10px">Aguardando pagamento. Assim que ele for confirmado, ${p.tipo === "mensalidade" ? "seu acesso é renovado" : "seu treino começa a ser montado"}.</p>
         <a class="btn pag-link" href="#/pagamento/${encodeURIComponent(p.id)}">Pagar</a>`;
     } else if (p && p.status === "aguardando_confirmacao") {
       h += `<p class="ia-status">${NOME_PEDIDO[p.tipo]} — ${reais(p.valor)}</p>
-        <p class="muted">Recebemos seu aviso. Estamos conferindo o Pix (até 24 horas).</p>`;
+        <p class="muted">Seu pedido está em análise.</p>`; // Pix manual antigo
     } else if (p && (p.status === "pago" || p.status === "gerando")) {
       h += `<p class="ia-status">Gerando seu treino…</p>
         <p class="muted">Isso leva até 1 minuto. Pode sair desta tela: o treino aparece na aba Treinos quando ficar pronto.</p>`;

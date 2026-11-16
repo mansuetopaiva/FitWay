@@ -171,10 +171,22 @@ test("ações de pagamento pelo handler: sem sessão dá 401 sem tocar em pedido
   assert.deepEqual(chamadas.find((c) => c.q.startsWith("select id, tipo, status, metodo")).valores, ["p1", "a@x.com"]);
 });
 
-test("pedido_status: devolve meio, código e mensagem do pedido, e os preços do Pix", async () => {
+test("Pix manual removido: pedido_metodo e pix_avisei respondem Ação desconhecida sem tocar em pedidos", async () => {
+  usuario = { email: "a@x.com", nome: "Ana", dados: {}, acesso_ate: null };
+  responder = () => [{ id: "p1", tipo: "inicial", status: "aguardando_pagamento" }];
+  for (const acao of ["pedido_metodo", "pix_avisei"]) {
+    chamadas.length = 0;
+    const r = await chamar({ acao, id: "p1", metodo: "pix", pagador_nome: "Ana", comprovante: "data:image/jpeg;base64,QUJD" });
+    assert.equal(r.status, 400, acao);
+    assert.equal(r.corpo.erro, "Ação desconhecida.");
+    assert.equal(chamadas.some((c) => /pedidos/.test(c.q) && !/^create|^alter|^do |^drop/.test(c.q)), false, acao);
+  }
+});
+
+test("pedido_status: devolve meio e código do pedido (sem a mensagem do Pix manual), e os preços do Pix", async () => {
   usuario = comPlano("ia", 5, 10);
-  const pedido = { id: "p1", tipo: "mensalidade", status: "aguardando_pagamento", metodo: "pix", valor: 999, codigo: "FWABCDEF", mensagem_usuario: "Não encontramos seu Pix." };
-  responder = (q) => (q.startsWith("select id, tipo, status, metodo, valor, codigo, mensagem_usuario") ? [pedido] : []);
+  const pedido = { id: "p1", tipo: "mensalidade", status: "aguardando_pagamento", metodo: "pix", valor: 999, codigo: "FWABCDEF" };
+  responder = (q) => (q.startsWith("select id, tipo, status, metodo, valor, codigo, criado") ? [pedido] : []);
   chamadas.length = 0;
   const r = (await chamar({ acao: "pedido_status" })).corpo;
   assert.deepEqual(r.pedido, pedido);

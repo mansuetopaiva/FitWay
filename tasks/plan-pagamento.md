@@ -65,7 +65,7 @@ O Pix manual (link do Nubank + comprovante) sai. Pix e cartão passam a ser link
 Nenhuma migração destrutiva. Commits de remoção separados; histórico intacto.
 
 - [x] **T11. Spec e plano** (`docs/pagamento.md`, este arquivo).
-- [ ] **T12. Remover o Pix manual no servidor** (`api/_precos.js`, `api/_pagamento.js`, `api/_admin.js`, `api/app.js`, testes)
+- [x] **T12. Remover o Pix manual no servidor** (`api/_precos.js`, `api/_pagamento.js`, `api/_admin.js`, `api/app.js`, testes)
   - Saem `linkPix`, `PIX_LINK_*`, `PIX_TITULAR_EXIBIDO`, `pedido_metodo`, `pix_avisei`, `lerE2E`/`dataDoE2E`, `pix_confirmar`,
     `pix_nao_encontrado`, `pixAguardando`, `mensagem_usuario` na resposta.
   - Aceite: ações e ops removidas respondem "Ação desconhecida." / "Operação desconhecida."; pedido em `aguardando_confirmacao` ainda cancela.

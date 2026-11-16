@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ABERTOS, PRECOS, precoDe, linkPix, metodosDisponiveis, podePedir, efeitoDoPagamento, acessoAtivo, planoVisivel } from "../api/_precos.js";
+import { ABERTOS, PRECOS, precoDe, metodosDisponiveis, podePedir, efeitoDoPagamento, acessoAtivo, planoVisivel } from "../api/_precos.js";
 
 const AGORA = new Date("2026-11-15T12:00:00Z");
 const diasAtras = (n) => new Date(AGORA - n * 864e5).toISOString();
@@ -13,7 +13,7 @@ test("PRECOS em centavos por meio, num lugar só", () => {
   assert.deepEqual(PRECOS, { pix: { inicial: 999, mensalidade: 999, novo_treino: 499 }, cartao: { inicial: 1199, mensalidade: 1199, novo_treino: 599 } });
 });
 
-test("ABERTOS inclui aguardando_confirmacao (no máximo 1 pedido aberto por pessoa)", () => {
+test("ABERTOS inclui aguardando_confirmacao (pedido antigo do Pix manual ainda bloqueia até o admin cancelar)", () => {
   assert.deepEqual(ABERTOS, ["aguardando_pagamento", "aguardando_confirmacao", "pago", "gerando"]);
 });
 
@@ -31,45 +31,16 @@ const comEnv = (vars, fn) => {
   poe(vars);
   try { fn(); } finally { poe(antes); }
 };
-const L999 = "https://nubank.com.br/cobrar/exemplo999", L499 = "https://nubank.com.br/cobrar/exemplo499";
-const SEM_CARTAO = { INFINITEPAY_HANDLE: undefined, SITE_URL: undefined };
 
-test("linkPix: inicial e mensalidade usam o de 9,99; novo_treino o de 4,99", () => {
-  comEnv({ PIX_LINK_999: L999, PIX_LINK_499: L499 }, () => {
-    assert.equal(linkPix("inicial"), L999);
-    assert.equal(linkPix("mensalidade"), L999);
-    assert.equal(linkPix("novo_treino"), L499);
-    assert.equal(linkPix("toString"), undefined);
-    assert.equal(linkPix("__proto__"), undefined);
-  });
-});
-
-test("linkPix: URL fora de https://nubank.com.br/cobrar/ é recusada", () => {
-  for (const ruim of ["http://nubank.com.br/cobrar/x", "https://nubank.com.br.evil.com/cobrar/x", "https://evil.com/?https://nubank.com.br/cobrar/x",
-    "https://nubank.com.br/cobrar/", "https://nubank.com.br/outra/x", "https://nubank.com.br/cobrar/x y", " https://nubank.com.br/cobrar/x", "javascript:alert(1)", ""])
-    comEnv({ PIX_LINK_999: ruim }, () => assert.equal(linkPix("inicial"), undefined, JSON.stringify(ruim)));
-});
-
-test("metodosDisponiveis: sem o link do valor do pedido, o Pix não aparece", () => {
-  comEnv({ PIX_LINK_999: L999, PIX_LINK_499: undefined, ...SEM_CARTAO }, () => {
-    assert.deepEqual(metodosDisponiveis("inicial"), ["pix"]);
-    assert.deepEqual(metodosDisponiveis("mensalidade"), ["pix"]);
-    assert.deepEqual(metodosDisponiveis("novo_treino"), [], "o link de 9,99 não serve para 4,99");
-  });
-  comEnv({ PIX_LINK_999: "https://evil.com/cobrar/x", PIX_LINK_499: L499, ...SEM_CARTAO }, () => {
+test("metodosDisponiveis: precisa de INFINITEPAY_HANDLE e SITE_URL; os links do Nubank não contam mais; tipo desconhecido não tem meio", () => {
+  comEnv({ PIX_LINK_999: "https://nubank.com.br/cobrar/x", PIX_LINK_499: "https://nubank.com.br/cobrar/y", INFINITEPAY_HANDLE: undefined, SITE_URL: undefined }, () => {
     assert.deepEqual(metodosDisponiveis("inicial"), []);
-    assert.deepEqual(metodosDisponiveis("novo_treino"), ["pix"]);
   });
-});
-
-test("metodosDisponiveis: cartão precisa de INFINITEPAY_HANDLE e SITE_URL; tipo desconhecido não tem meio", () => {
-  comEnv({ PIX_LINK_999: L999, PIX_LINK_499: L499, INFINITEPAY_HANDLE: "exemplo", SITE_URL: "https://exemplo.app" }, () => {
-    assert.deepEqual(metodosDisponiveis("inicial"), ["pix", "cartao"]);
+  comEnv({ INFINITEPAY_HANDLE: "exemplo", SITE_URL: "https://exemplo.app" }, () => {
+    assert.deepEqual(metodosDisponiveis("inicial"), ["cartao"]);
     assert.deepEqual(metodosDisponiveis("toString"), []);
   });
-  comEnv({ PIX_LINK_999: undefined, PIX_LINK_499: undefined, INFINITEPAY_HANDLE: "exemplo", SITE_URL: undefined }, () => {
-    assert.deepEqual(metodosDisponiveis("inicial"), []);
-  });
+  comEnv({ INFINITEPAY_HANDLE: "exemplo", SITE_URL: undefined }, () => assert.deepEqual(metodosDisponiveis("inicial"), []));
 });
 
 test("podePedir inicial: só sem plano de IA (PDF não conta)", () => {

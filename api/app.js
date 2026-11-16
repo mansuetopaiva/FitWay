@@ -229,7 +229,7 @@ export default async function handler(req, res) {
     if (b.acao === "pedido_status") {
       await limparPedidos(sql, u.email);
       // O pedido aberto vem primeiro: o admin pode reabrir um pedido antigo com "Gerar de novo".
-      const ultimo = async () => (await sql`select id, tipo, status, metodo, valor, codigo, mensagem_usuario, criado, pago_em, gerado_em from pedidos
+      const ultimo = async () => (await sql`select id, tipo, status, metodo, valor, codigo, criado, pago_em, gerado_em from pedidos
         where email = ${u.email} order by status = any(${ABERTOS}) desc, criado desc limit 1`)[0] || null;
       let pedido = await ultimo(), x = u;
       // O formulário só lê as perguntas: não segura a tela esperando uma geração.

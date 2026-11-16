@@ -68,7 +68,7 @@ export function limparRespostas(r, { temFotos, agora }) {
 export const CHAVES_FOTOS = ["frente", "costas", "direito", "esquerdo"];
 const MAX_FOTO = 409600; // caracteres base64 ≈ 300 KB de imagem
 const JPEG = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/;
-export const jpegValido = (v) => typeof v === "string" && v.length <= MAX_FOTO + 23 && JPEG.test(v); // fotos e comprovante do Pix
+export const jpegValido = (v) => typeof v === "string" && v.length <= MAX_FOTO + 23 && JPEG.test(v); // fotos
 
 export function limparFotos(f) {
   if (f === undefined || f === null) return { fotos: null };
@@ -83,9 +83,9 @@ export function limparFotos(f) {
 }
 
 // Rotinas de prazo, sem cron: rodam no pedido_status (email do usuário) e no resumo do admin (email null = todos).
-// - aguardando pagamento há mais de 30 dias (contando do último aviso do Pix, se houve): cancelado e sem fotos;
-// - fotos e comprovante do Pix apagados 90 dias depois do pedido ficar pronto, cancelado ou com erro (as respostas ficam).
-//   aguardando_confirmacao nunca é cancelado aqui: a pessoa já disse que pagou e o admin ainda vai conferir.
+// - aguardando pagamento há mais de 30 dias (aviso_em: último aviso do Pix manual antigo, se houve): cancelado e sem fotos;
+// - fotos (e o comprovante do Pix manual antigo) apagados 90 dias depois do pedido ficar pronto, cancelado ou com erro (as respostas ficam).
+//   aguardando_confirmacao (Pix manual antigo) não é cancelado aqui: a pessoa disse que pagou; só o admin cancela.
 export async function limparPedidos(sql, email) {
   await sql`update pedidos set status = 'cancelado', fotos = null, comprovante = null, pagador_nome = null, atualizado = now()
     where (${email}::text is null or email = ${email}) and status = 'aguardando_pagamento' and greatest(criado, aviso_em) < now() - interval '30 days'`;
@@ -122,7 +122,7 @@ export async function criarPedido(sql, u, b, headers, agora, { admin = false } =
   // metodo vazio até a pessoa escolher; o valor do Pix (o menor) é provisório, só para a lista do admin.
   const [p] = await sql`insert into pedidos (id, email, tipo, status, valor, codigo, respostas, fotos, aceite)
     values (${id}, ${u.email}, ${b.tipo}, 'aguardando_pagamento', ${PRECOS.pix[b.tipo]}, ${codigo}, ${js(respostas)}::jsonb, ${js(fotos)}::jsonb, ${js(aceite)}::jsonb)
-    on conflict do nothing returning id, tipo, status, metodo, valor, codigo, mensagem_usuario, criado, pago_em, gerado_em`;
+    on conflict do nothing returning id, tipo, status, metodo, valor, codigo, criado, pago_em, gerado_em`;
   if (!p) return { status: 400, corpo: { erro: "Você já tem um pedido em andamento." } };
   return { status: 200, corpo: { pedido: p } };
 }

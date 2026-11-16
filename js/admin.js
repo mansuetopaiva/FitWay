@@ -44,7 +44,7 @@
   }
   const secoes = (qual) => `<nav class="adm-secoes" aria-label="Seções do painel">
     <a href="#/admin" ${qual === "usuarios" ? 'aria-current="page" class="on"' : ""}>Usuários</a>
-    <a href="#/admin/pedidos" ${qual === "pedidos" ? 'aria-current="page" class="on"' : ""}>Pedidos${resumo && resumo.pixAguardando ? ` <span class="selo aviso">${resumo.pixAguardando}<span class="sr"> Pix aguardando confirmação</span></span>` : ""}</a>
+    <a href="#/admin/pedidos" ${qual === "pedidos" ? 'aria-current="page" class="on"' : ""}>Pedidos</a>
   </nav>`;
   function renderUsuarios(arg) {
     const antes = detEmail; // usuário aberto até agora (para devolver o foco à linha dele)
@@ -103,21 +103,14 @@
     const aviso = falta.length
       ? `<p class="adm-erro" role="note"><b>Treino com IA bloqueado${resumo.iaLigada ? "" : " (e desligado)"}:</b> o termo precisa das variáveis ${esc(falta.join(", "))} na Vercel.</p>`
       : resumo.iaLigada ? "" : `<p class="muted adm-aviso-ia">Treino com IA desligado para os usuários (TREINO_IA_ATIVO). Você, como admin, pode pedir para testar.</p>`;
-    const pix = resumo.pixAguardando ? `<p class="adm-erro" role="note"><b>${resumo.pixAguardando} Pix aguardando confirmação.</b>
-      <button class="btn-sec" id="verPix">Ver ${resumo.pixAguardando > 1 ? "os Pix" : "o Pix"}</button></p>` : "";
     const sp = resumo.cartaoSemPedido || [];
-    const sobra = sp.length ? `<div class="adm-erro" role="note"><b>Cartão pago sem pedido aberto (últimos 30 dias): devolva pelo InfinitePay.</b>
+    const sobra = sp.length ? `<div class="adm-erro" role="note"><b>Pagamentos para devolver pelo InfinitePay (últimos 30 dias):</b>
       <ul>${sp.map((x) => `<li>${esc(quando(x.criado))} · ${esc(x.email || "")} · pedido ${esc(x.codigo || "—")}${x.valor ? " · " + reais(x.valor) : ""} · transação ${esc(x.transaction_nsu || "—")}</li>`).join("")}</ul></div>` : "";
-    el.innerHTML = sobra + pix + aviso + `<div class="adm-cards">
+    el.innerHTML = sobra + aviso + `<div class="adm-cards">
       ${c(resumo.usuarios, "usuários")}${c(resumo.novos7d, "novos em 7 dias")}${c(resumo.comTreino, "com treino")}
       ${c(resumo.comAcesso, "com acesso liberado")}${c(resumo.checkinsHoje, "check-ins hoje")}${c(resumo.checkinsSemana, "check-ins na semana")}
       ${c(resumo.aguardando, "pedidos aguardando pagamento")}${c(reais(resumo.receitaMes), "receita do mês")}${c(resumo.vencendo7d, "acessos vencem em 7 dias")}
     </div>`;
-    const ver = $("#verPix");
-    if (ver) ver.onclick = () => {
-      pedLista.status = "aguardando_confirmacao"; pedLista.itens = []; pedLista.estado = "carregando";
-      if (location.hash === "#/admin/pedidos") renderPedidos(""); else location.hash = "#/admin/pedidos";
-    };
   }
 
   // ---------- lista ----------
@@ -236,8 +229,8 @@
     if (h.acao === "acesso") return x.dias ? `Acesso +${x.dias} dias` : x.ate ? `Acesso até ${diaBR(x.ate)}` : "Acesso cortado";
     const n = x.treinos ? ` (${x.treinos} treinos, ${x.exercicios} exercícios)` : "";
     const ped = x.pedido ? " · pedido " + x.pedido.slice(0, 6) : "";
-    return ({ plano_salvar: "Treino editado", plano_pdf: "Treino enviado por PDF", plano_remover: "Treino removido", pedido_ver: "Pedido visto (saúde, fotos ou comprovante)",
-      cartao_sem_pedido: `Cartão pago sem pedido aberto${x.paid_amount ? ` (${reais(x.paid_amount)})` : ""}: devolver`,
+    return ({ plano_salvar: "Treino editado", plano_pdf: "Treino enviado por PDF", plano_remover: "Treino removido", pedido_ver: "Pedido visto (saúde ou fotos)",
+      cartao_sem_pedido: `Pagamento para devolver${x.paid_amount ? ` (${reais(x.paid_amount)})` : ""}`,
       pedido_pago: `Pagamento confirmado${x.metodo === "cartao" ? " (cartão)" : x.metodo === "pix" ? " (Pix)" : ""}${x.dias ? ` (+${x.dias} dias)` : ""}`,
       pix_nao_encontrado: "Pix não encontrado (pedido voltou para aguardando pagamento)", pedido_gerar_de_novo: "Treino do pedido gerado de novo", pedido_cancelar: "Pedido cancelado" }[h.acao] || h.acao) + n + ped;
   }
@@ -424,13 +417,13 @@
   window.addEventListener("beforeunload", (ev) => { if (sujo) ev.preventDefault(); });
 
   // ---------- pedidos ----------
-  const STATUS = { aguardando_pagamento: ["Aguardando pagamento", "aviso"], aguardando_confirmacao: ["Pix a conferir", "aviso"], pago: ["Pago", "ok"], gerando: ["Gerando", "ok"],
+  const STATUS = { aguardando_pagamento: ["Aguardando pagamento", "aviso"], aguardando_confirmacao: ["Pix a conferir (antigo)", "aviso"], pago: ["Pago", "ok"], gerando: ["Gerando", "ok"],
     pronto: ["Pronto", "ok"], erro: ["Erro", "erro"], cancelado: ["Cancelado", ""] };
   const TIPOS = { inicial: "Treino inicial", mensalidade: "Mensalidade", novo_treino: "Novo treino" };
   const selo = (st) => `<span class="selo ${STATUS[st][1]}">${STATUS[st][0]}</span>`;
   const pedLista = { status: "aguardando_pagamento", tipo: "", pagina: 0, itens: [], temMais: false, estado: "carregando", erro: "" };
-  let ped = null, pedId = "", pedEstado = "", pedErro = "", versaoPed = 0, versaoPedLista = 0, fotoGrande = "", termoVisto = null, compGrande = false, e2eDigitado = "";
-  const METODOS = { pix: "Pix", cartao: "Cartão" };
+  let ped = null, pedId = "", pedEstado = "", pedErro = "", versaoPed = 0, versaoPedLista = 0, fotoGrande = "", termoVisto = null;
+  const METODOS = { pix: "Pix", cartao: "Cartão" }, FORMAS = { pix: "Pix", credit_card: "Cartão de crédito" };
 
   function renderPedidos(id) {
     const antes = pedId;
@@ -499,8 +492,7 @@
   // gerar: logo depois de marcar como pago, o servidor já monta o treino nesta chamada (até 1 minuto).
   async function carregarPedido(id, gerar) {
     const v = ++versaoPed;
-    if (id !== pedId) e2eDigitado = "";
-    pedId = id; fotoGrande = ""; termoVisto = null; compGrande = false;
+    pedId = id; fotoGrande = ""; termoVisto = null;
     pedEstado = gerar ? "gerando" : "carregando"; ped = gerar ? ped : null;
     pintarPedido();
     try {
@@ -556,45 +548,16 @@
       ${p.plano ? planoHtml(p.plano) : ""}`;
     if (focar) { const t = $("#admDetTit"); if (t) t.focus(); }
   }
-  // Conferência do pagamento: valor esperado em destaque ao lado do comprovante, e o ID da transação lado a lado.
+  // Pagamento pelo checkout do InfinitePay (Pix ou cartão): confirmado só pelo payment_check.
   function pagamentoHtml(p) {
+    if (!(p.metodo || p.transactionNsu || p.checkoutRef)) return "";
     const linha = (k, v) => `<div class="row"><span>${k}</span><span>${esc(v)}</span></div>`;
-    const aberto = ["aguardando_pagamento", "aguardando_confirmacao"].includes(p.status);
-    let cartao = "";
-    if (p.metodo === "cartao" || p.transactionNsu || p.checkoutRef) {
-      const ref = p.checkoutRef || {};
-      cartao = `<div class="card"><h2 class="adm-tit">Cartão (InfinitePay)</h2>
-        ${p.metodo === "cartao" ? `<div class="adm-valor"><span>Valor esperado</span><b>${reais(p.valor)}</b></div>` : ""}
-        ${p.transactionNsu ? linha("Transação", p.transactionNsu) : ""}${p.captureMethod ? linha("Forma", p.captureMethod === "credit_card" ? "Cartão de crédito" : p.captureMethod) : ""}
-        ${!p.transactionNsu && ref.transaction_nsu ? linha("Último retorno (não confirmado)", ref.transaction_nsu) : ""}
-        ${p.confirmadoPor ? linha("Confirmado por", p.confirmadoPor === "infinitepay" ? "InfinitePay (automático)" : p.confirmadoPor) : ""}
-        ${aberto && p.checkoutRef ? `<div class="adm-botoes"><button class="btn-sec" data-ped-cartao>Verificar no InfinitePay</button></div>` : ""}</div>`;
-    }
-    const comp = typeof p.comprovante === "string" && p.comprovante.startsWith("data:image/jpeg;base64,") ? p.comprovante : "";
-    // O Pix pode ser confirmado com qualquer meio escolhido enquanto o pedido está aberto (a pessoa pode ter pagado e depois trocado).
-    if (!(aberto || comp || p.pixE2e)) return cartao;
-    const vPix = p.valorPix || p.valor;
-    const valor = `<div class="adm-valor"><span>Valor esperado</span><b>${reais(vPix)}</b><span>${esc(TIPOS[p.tipo])} · ${esc(p.codigo || "")}</span></div>`;
-    if (compGrande && comp) return `<div class="card"><h2 class="adm-tit">Comprovante do Pix</h2>
-      <img class="adm-foto-grande" src="${esc(comp)}" alt="Comprovante do Pix de ${esc(p.pagadorNome || p.nome)}">
-      <button class="btn-sec" data-ped-comp-fechar style="margin-top:8px">Fechar comprovante</button></div>` + cartao;
-    return `<div class="card"><h2 class="adm-tit">Pix</h2>
-      <div class="adm-confere">
-        ${comp ? `<button data-ped-comp aria-label="Ampliar o comprovante"><img src="${esc(comp)}" alt=""></button>` : `<p class="muted">${p.status === "aguardando_pagamento" ? "A pessoa ainda não avisou o pagamento." : "Sem comprovante."}</p>`}
-        ${valor}
-      </div>
-      ${p.pagadorNome ? linha("Quem pagou", p.pagadorNome) : ""}${p.avisoEm ? linha("Aviso em", quando(p.avisoEm)) : ""}
-      ${p.pixE2e ? linha("ID da transação", p.pixE2e) : ""}${p.confirmadoPor ? linha("Confirmado por", p.confirmadoPor) : ""}
-      ${p.mensagemUsuario ? `<p class="muted">Mensagem para a pessoa: ${esc(p.mensagemUsuario)}</p>` : ""}
-      ${aberto ? `<div class="adm-e2e">
-          <div><span class="muted">ID informado pela pessoa</span><div class="informado">${esc(p.pixE2eInformado || "Não informado")}</div></div>
-          <div class="field" style="margin:0"><label for="pedE2e">ID da transação (copie do app do Nubank)</label>
-            <input id="pedE2e" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(e2eDigitado)}"></div>
-        </div>
-        <p class="muted">Confira no Nubank: valor ${reais(vPix)}, Pix feito depois de ${esc(quando(p.criado))}. Copie o ID do app, não do comprovante.</p>
-        <div class="adm-botoes"><button class="btn" data-ped-pix>Confirmar Pix recebido</button>
-          ${p.status === "aguardando_confirmacao" ? `<button class="btn-sec" data-ped-pix-nao>Não encontrei o Pix</button>` : ""}</div>` : ""}
-    </div>` + cartao;
+    const ref = p.checkoutRef || {};
+    return `<div class="card"><h2 class="adm-tit">Pagamento (InfinitePay)</h2>
+      ${p.transactionNsu ? linha("Transação", p.transactionNsu) : ""}${p.captureMethod ? linha("Pago com", FORMAS[p.captureMethod] || p.captureMethod) : ""}
+      ${!p.transactionNsu && ref.transaction_nsu ? linha("Último retorno (não confirmado)", ref.transaction_nsu) : ""}
+      ${p.confirmadoPor ? linha("Confirmado por", p.confirmadoPor === "infinitepay" ? "InfinitePay (automático)" : p.confirmadoPor) : ""}
+      ${p.status === "aguardando_pagamento" && p.checkoutRef ? `<div class="adm-botoes"><button class="btn-sec" data-ped-cartao>Verificar no InfinitePay</button></div>` : ""}</div>`;
   }
   function respostasHtml(p, r) {
     const linha = (k, v) => `<div class="row"><span>${k}</span><span>${esc(v === "" || v === undefined ? "—" : v)}</span></div>`;
@@ -635,7 +598,6 @@
     botao.disabled = true;
     try {
       const r = await api("admin", { op, id, ...extra });
-      if (op === "pix_confirmar") e2eDigitado = "";
       toast(msg);
       carregarResumo();
       const item = pedLista.itens.find((x) => x.id === id);
@@ -656,21 +618,7 @@
     if (ds.tentar === "pedido") return carregarPedido(pedId);
     if (ds.tentar === "resumo") { resumo = null; pintarResumo(); return carregarResumo(); }
     if (ds.pedMais !== undefined) return carregarPedLista(true);
-    if (ds.pedPix !== undefined) {
-      const campo = $("#pedE2e"), e2e = campo.value.trim();
-      e2eDigitado = campo.value;
-      if (!/^E[A-Za-z0-9]{31}$/.test(e2e)) { toast("Cole o ID da transação do app do Nubank: começa com E e tem 32 letras e números."); return campo.focus(); }
-      const efeito = ped.tipo === "inicial" ? "Libera 30 dias de acesso e gera o treino." : ped.tipo === "mensalidade" ? "Soma 30 dias ao acesso." : "Gera o novo treino (o acesso não muda).";
-      if (confirm(`Confirmar o Pix de ${reais(ped.valorPix || ped.valor)} de ${ped.nome}? ${efeito}`)) acaoPedido("pix_confirmar", "Pix confirmado.", b, { pix_e2e: e2e });
-      return;
-    }
-    if (ds.pedPixNao !== undefined) {
-      if (confirm(`Avisar ${ped.nome} que o Pix não foi encontrado? O pedido volta para aguardando pagamento e a pessoa pode avisar de novo.`)) acaoPedido("pix_nao_encontrado", "A pessoa vai ver o aviso no app.", b);
-      return;
-    }
     if (ds.pedCartao !== undefined) return acaoPedido("cartao_verificar", "Pagamento confirmado pelo InfinitePay.", b);
-    if (ds.pedComp !== undefined) { e2eDigitado = ($("#pedE2e") || {}).value || e2eDigitado; compGrande = true; pintarPedido(); const f = $("[data-ped-comp-fechar]"); if (f) f.focus(); return; }
-    if (ds.pedCompFechar !== undefined) { compGrande = false; pintarPedido(); const f = $("[data-ped-comp]"); if (f) f.focus(); return; }
     if (ds.pedGerar !== undefined) {
       if (confirm(`Gerar o treino de ${ped.nome} de novo? ${ped.status === "pronto" ? "O treino atual dele será substituído." : ""}`)) acaoPedido("pedido_gerar_de_novo", "Pedido voltou para a fila de geração.", b);
       return;

@@ -5,11 +5,11 @@ import { DIA, escaparLike, limpar, validarPlano } from "./_dados.js";
 import { NOMES_FOTOS, lerPdf } from "./_treino.js";
 import { PARQ, limparPedidos } from "./_pedido.js";
 import { termoFaltando } from "./_termo.js";
-import { ABERTOS, efeitoDoPagamento, precoDe, tipoValido } from "./_precos.js";
-import { MSG_NAO_ENCONTRADO, aplicarPagamento, confirmarCartao, dataDoE2E, lerE2E } from "./_pagamento.js";
+import { ABERTOS, tipoValido } from "./_precos.js";
+import { confirmarCartao } from "./_pagamento.js";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
-  "pedidos", "pedido", "pix_confirmar", "pix_nao_encontrado", "cartao_verificar", "pedido_gerar_de_novo", "pedido_cancelar"];
+  "pedidos", "pedido", "cartao_verificar", "pedido_gerar_de_novo", "pedido_cancelar"];
 const STATUS = ["aguardando_pagamento", "aguardando_confirmacao", "pago", "gerando", "pronto", "erro", "cancelado"];
 
 // Lido a cada chamada: tirar alguém da variável na Vercel vale sem depender do navegador.
@@ -48,18 +48,17 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
       from usuarios`;
     await limparPedidos(sql, null); // prazos de pedidos e fotos (sem cron: roda aqui e no pedido_status)
     const [p] = await sql`select count(*) filter (where status = 'aguardando_pagamento')::int as aguardando,
-        count(*) filter (where status = 'aguardando_confirmacao')::int as pix_aguardando,
         coalesce(sum(valor) filter (where pago_em >= date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'), 0)::int as receita_mes,
         (select count(*) from usuarios where acesso_ate > now() and acesso_ate <= now() + interval '7 days')::int as vencendo7d
       from pedidos`;
-    // Cartão pago num pedido que já não estava aberto (cancelado, pago por Pix, link pago duas vezes): devolver o dinheiro.
+    // Pago num pedido que já não estava aberto (cancelado, link pago duas vezes): devolver o dinheiro.
     const semPedido = await sql`select l.criado, l.alvo_email as email, l.detalhes->>'transaction_nsu' as transaction_nsu,
         (l.detalhes->>'paid_amount')::int as valor, coalesce(p.codigo, p.id) as codigo
       from admin_log l left join pedidos p on p.id = l.detalhes->>'pedido'
       where l.acao = 'cartao_sem_pedido' and l.criado > now() - interval '30 days' order by l.criado desc limit 10`;
     return ok({ usuarios: r.usuarios, novos7d: r.novos7d, comTreino: r.com_treino, comAcesso: r.com_acesso,
       checkinsHoje: r.checkins_hoje, checkinsSemana: r.checkins_semana, cadastroAntes: r.cadastro_antes || "",
-      aguardando: p.aguardando, pixAguardando: p.pix_aguardando, cartaoSemPedido: semPedido, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d,
+      aguardando: p.aguardando, cartaoSemPedido: semPedido, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d,
       iaLigada: process.env.TREINO_IA_ATIVO === "1", termoFaltando: termoFaltando() });
   }
 
@@ -85,64 +84,27 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     return ok({ itens: xs.slice(0, 20), temMais: xs.length > 20 });
   }
 
-  if (b.op.startsWith("pedido") || b.op.startsWith("pix_") || b.op.startsWith("cartao_")) {
+  if (b.op.startsWith("pedido") || b.op.startsWith("cartao_")) {
     const id = typeof b.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(b.id) ? b.id : "";
     if (!id) return falha(400, "Informe o pedido.");
     // Cada escrita e o seu registro no admin_log vão numa única instrução.
     const log = (acao) => JSON.stringify({ pedido: id, acao });
     if (b.op === "pedido") {
       if (b.gerar === true && opc.gerar) await opc.gerar(id); // logo depois de marcar como pago: gera sem esperar o aluno abrir o app
-      // Ver dados de saúde, fotos ou o comprovante do Pix fica registrado.
+      // Ver dados de saúde ou fotos fica registrado.
       const [x] = await sql`with p as (select p.*, u.nome, u.acesso_ate from pedidos p join usuarios u on u.email = p.email where p.id = ${id}),
           l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
-            select ${u.email}, 'pedido_ver', email, jsonb_build_object('pedido', id) from p where respostas is not null or fotos is not null or comprovante is not null)
+            select ${u.email}, 'pedido_ver', email, jsonb_build_object('pedido', id) from p where respostas is not null or fotos is not null)
         select * from p`;
       if (!x) return falha(404, "Pedido não encontrado.");
       return ok({ id: x.id, email: x.email, nome: x.nome, acessoAte: x.acesso_ate, tipo: x.tipo, status: x.status, valor: x.valor,
         criado: x.criado, pagoEm: x.pago_em, geradoEm: x.gerado_em, atualizado: x.atualizado, erro: x.erro, tentativas: x.tentativas,
         modelo: x.modelo, respostas: x.respostas, fotos: x.fotos, aceite: x.aceite, plano: x.plano_gerado, parq: PARQ,
-        metodo: x.metodo, codigo: x.codigo, pagadorNome: x.pagador_nome, comprovante: x.comprovante, avisoEm: x.aviso_em,
-        pixE2e: x.pix_e2e, pixE2eInformado: x.pix_e2e_informado, confirmadoPor: x.confirmado_por, mensagemUsuario: x.mensagem_usuario,
-        transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref, valorPix: precoDe("pix", x.tipo) ?? null });
+        metodo: x.metodo, codigo: x.codigo, confirmadoPor: x.confirmado_por,
+        transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref });
     }
     let x;
-    if (b.op === "pix_confirmar") {
-      // O ID da transação, copiado do app do Nubank, identifica o Pix: o mesmo Pix nunca confirma dois pedidos (pix_e2e é unique).
-      const e2e = lerE2E(b.pix_e2e);
-      if (!e2e) return falha(400, "ID da transação inválido. Ele começa com E e tem 32 letras e números, sem espaços.");
-      // Também de aguardando_pagamento (o admin pode ver o Pix antes do aviso) e com qualquer meio escolhido: quem pagou o Pix
-      // e depois tocou em "Trocar" para cartão continua podendo ser confirmado. Um cartão pago depois vira "cartao_sem_pedido".
-      const [p] = await sql`select p.tipo, p.criado, coalesce(u.acesso_ate > now(), false) as ativo from pedidos p join usuarios u on u.email = p.email
-        where p.id = ${id} and p.status in ('aguardando_confirmacao', 'aguardando_pagamento')`;
-      if (!p) return falha(400, "Este pedido não está aguardando o Pix.");
-      // A data do Pix está no ID. Folga de 1 dia (fuso do ID não documentado): barra um Pix antigo, de antes do pedido.
-      const quando = dataDoE2E(e2e);
-      if (!quando || quando < new Date(new Date(p.criado) - 864e5) || quando > new Date(Date.now() + 864e5))
-        return falha(400, "Este ID é de um Pix de antes do pedido (ou a data dele não confere). Copie o ID do Pix certo no app do Nubank.");
-      // Novo treino não mexe no acesso: com o acesso vencido, o treino pago ficaria escondido.
-      if (p.tipo === "novo_treino" && !p.ativo) return falha(400, "O acesso deste usuário venceu. Ele precisa renovar (mensalidade) antes do novo treino.");
-      const ef = efeitoDoPagamento(p.tipo);
-      // Sem a chave, a geração falharia e gastaria uma tentativa: avisa e não muda nada.
-      if (ef.gerar && !process.env.ANTHROPIC_API_KEY) return falha(400, "Chave da IA não configurada.");
-      const usado = async () => (await sql`select coalesce(codigo, id) as codigo from pedidos where upper(pix_e2e) = upper(${e2e}) and id <> ${id}`)[0];
-      const ja = await usado();
-      if (ja) return falha(400, `Este Pix já confirmou o pedido ${ja.codigo}.`);
-      // Os dias somam a partir de greatest(now(), acesso_ate): renovar antes do vencimento não perde dias.
-      try {
-        x = await aplicarPagamento(sql, { id, tipo: p.tipo }, { quem: u.email, metodo: "pix", de: ["aguardando_confirmacao", "aguardando_pagamento"], pix_e2e: e2e, exigirAcesso: true });
-      } catch (e) {
-        if (!(e && e.code === "23505")) throw e;
-        const outro = await usado(); // o mesmo ID gravado em outro pedido ao mesmo tempo
-        return falha(400, outro ? `Este Pix já confirmou o pedido ${outro.codigo}.` : "Este Pix já foi usado.");
-      }
-      if (!x) return falha(400, "Este pedido não está aguardando o Pix.");
-    } else if (b.op === "pix_nao_encontrado") {
-      [x] = await sql`with p as (update pedidos set status = 'aguardando_pagamento', mensagem_usuario = ${MSG_NAO_ENCONTRADO}, atualizado = now()
-            where id = ${id} and status = 'aguardando_confirmacao' returning email, status),
-          l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, 'pix_nao_encontrado', email, ${log("pix_nao_encontrado")}::jsonb from p)
-        select status from p`;
-      if (!x) return falha(400, "Este pedido não está aguardando a conferência do Pix.");
-    } else if (b.op === "cartao_verificar") {
+    if (b.op === "cartao_verificar") {
       // Roda o payment_check de novo com o último retorno recebido (volta do checkout ou webhook), guardado em checkout_ref.
       const [p] = await sql`select checkout_ref from pedidos where id = ${id}`;
       if (!p) return falha(404, "Pedido não encontrado.");
