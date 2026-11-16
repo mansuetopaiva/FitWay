@@ -136,7 +136,12 @@ export default async function handler(req, res) {
       return res.json(publico(u));
     }
 
-    if (b.acao === "termo") { // texto público; versão antiga para o admin conferir o que foi aceito
+    if (b.acao === "termo") { // versão antiga serve para o admin conferir o que foi aceito
+      // Com a função desligada o termo não é público (tem dados pessoais do responsável): só o admin lê.
+      if (!iaAtiva()) {
+        const s = await usuarioDaSessao(req);
+        if (!s || !ehAdmin(s.email)) return res.status(400).json({ erro: "Em breve." });
+      }
       const t = b.versao === undefined ? TERMO : termoDaVersao(b.versao);
       return t ? res.json(t) : res.status(404).json({ erro: "Versão do termo não encontrada." });
     }

@@ -684,7 +684,7 @@
         if (ia.pode.novo_treino) h += `<div style="margin-top:8px">${botao("novo_treino", "Pedir um novo treino")}</div>`;
       }
     }
-    return h + `<p class="ia-termo"><a href="#/termo">Termo de Responsabilidade e Uso</a></p>`;
+    return h + (ia.ativo ? `<p class="ia-termo"><a href="#/termo">Termo de Responsabilidade e Uso</a></p>` : ""); // desligada: o termo não é público
   }
   function ligarIA() {
     app.querySelectorAll("[data-pedir]").forEach((b) => b.onclick = async () => {
@@ -718,12 +718,12 @@
   // ---------- termo de responsabilidade (texto atual, vindo do servidor) ----------
   async function viewTermo() {
     shell("Termo", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
-    let t;
-    try { t = await api("termo"); } catch (e) { t = null; }
+    let t = null, erro = "";
+    try { t = await api("termo"); } catch (e) { erro = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; }
     if (location.hash.split("/")[1] !== "termo") return;
     shell("Termo", `<a class="adm-voltar" href="#/perfil">${icon("back")}Perfil</a>
       <section class="card">${t ? `<p class="muted">Versão ${esc(t.versao)}</p><div class="termo-texto">${esc(t.texto)}</div>`
-        : `<p class="err" role="alert">Sem conexão com o servidor. Tente de novo.</p>`}</section>`, "perfil");
+        : `<p class="err" role="alert">${esc(erro)}</p>`}</section>`, "perfil");
   }
 
   // ---------- ranking: grupo de amigos que compara check-ins ----------

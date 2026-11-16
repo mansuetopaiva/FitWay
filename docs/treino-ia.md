@@ -9,7 +9,7 @@ A pessoa pede um treino personalizado. Preenche um formulário em etapas, o pedi
 - **Novo treino:** R$ 4,99, depois de 8 semanas com o plano atual e com acesso ativo.
 - **Acesso vencido:** o treino da IA some da aba Treinos, mas continua guardado. Check-ins, ranking e cargas seguem normais.
 
-**Chave de liga/desliga:** `TREINO_IA_ATIVO` só liga com o valor exato `"1"`. Desligado, usuário comum não vê o pedido inicial, o novo treino nem o formulário, e `pedido_criar` responde "Em breve."; admin continua vendo e podendo pedir. Renovar e ver um treino de IA existente funcionam sempre. Sem `ANTHROPIC_API_KEY`, "Marcar como pago" (e "Gerar de novo") de um pedido que gera treino responde "Chave da IA não configurada." sem mudar o status.
+**Chave de liga/desliga:** `TREINO_IA_ATIVO` só liga com o valor exato `"1"`. Desligado, usuário comum não vê o pedido inicial, o novo treino nem o formulário, e `pedido_criar` responde "Em breve."; admin continua vendo e podendo pedir. Renovar e ver um treino de IA existente funcionam sempre. Desligado, a ação `termo` também responde "Em breve." (menos para o admin) e o link do termo some do Perfil, porque o texto tem dados pessoais do responsável. Sem `ANTHROPIC_API_KEY`, "Marcar como pago" (e "Gerar de novo") de um pedido que gera treino responde "Chave da IA não configurada." sem mudar o status.
 
 **Fora do escopo:** qualquer meio de pagamento (Pix, cartão, InfinitePay). Todo pedido nasce `aguardando_pagamento` e o admin marca como pago.
 

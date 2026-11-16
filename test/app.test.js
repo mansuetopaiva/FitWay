@@ -108,3 +108,25 @@ test("TREINO_IA_ATIVO desligado: pedido_status esconde inicial e novo treino par
     delete process.env.ADMIN_EMAILS;
   }
 });
+
+test("termo com a função desligada: \"Em breve.\" para visitante e usuário comum; admin lê; ligada, é público", async () => {
+  delete process.env.TREINO_IA_ATIVO;
+  try {
+    usuario = null;
+    for (const b of [{ acao: "termo" }, { acao: "termo", versao: TERMO.versao }]) {
+      const r = await chamar(b);
+      assert.deepEqual([r.status, r.corpo.erro, r.corpo.texto], [400, "Em breve.", undefined], "visitante");
+    }
+    usuario = { email: "c@x.com", nome: "Caio", dados: {}, acesso_ate: null };
+    let r = await chamar({ acao: "termo" });
+    assert.deepEqual([r.status, r.corpo.texto], [400, undefined], "usuário comum");
+    process.env.ADMIN_EMAILS = "c@x.com";
+    r = await chamar({ acao: "termo", versao: TERMO.versao });
+    assert.equal(r.corpo.texto, TERMO.texto, "admin lê para conferir o aceite");
+  } finally {
+    process.env.TREINO_IA_ATIVO = "1";
+    delete process.env.ADMIN_EMAILS;
+  }
+  usuario = null;
+  assert.equal((await chamar({ acao: "termo" })).corpo.versao, TERMO.versao, "ligada: público");
+});

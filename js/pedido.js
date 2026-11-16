@@ -19,7 +19,8 @@
   async function render(t) {
     tipo = t === "novo_treino" ? "novo_treino" : "inicial";
     shell("Treino personalizado", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
-    try { [st, termo] = await Promise.all([api("pedido_status", { form: true }), api("termo")]); }
+    // Primeiro confere se o pedido está liberado; o termo só é lido depois (com a função desligada, ele não é público).
+    try { st = await api("pedido_status", { form: true }); if (st.pode[tipo]) termo = await api("termo"); }
     catch (e) { return shell("Treino personalizado", `<p class="err" role="alert" style="margin-top:16px">${esc(e.message)}</p><a class="btn-sec" href="#/perfil">Voltar ao perfil</a>`, "perfil"); }
     if (location.hash.split("/")[1] !== "pedido") return;
     if (!st.pode[tipo]) { toast(st.pedido && ["aguardando_pagamento", "pago", "gerando"].includes(st.pedido.status) ? "Você já tem um pedido em andamento." : "Este pedido não está disponível agora."); location.hash = "#/perfil"; return; }
