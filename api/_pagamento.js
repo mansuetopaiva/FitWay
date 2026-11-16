@@ -1,0 +1,150 @@
+// Pagamento dos pedidos: Pix por link de cobrança do Nubank (conferido pelo admin) e cartão pelo InfinitePay.
+// O "_" impede a Vercel de expor como rota. Recebe sql (e fetch) por parâmetro para o teste.
+// Nenhuma ação do usuário grava "pago": só aplicarPagamento, chamado pelo admin (Pix) ou por confirmarCartao.
+import { efeitoDoPagamento, linkPix, metodosDisponiveis, precoDe } from "./_precos.js";
+import { jpegValido, limparTexto } from "./_pedido.js";
+
+export const ACOES = ["pagamento", "pedido_metodo", "pix_avisei", "pagar_cartao", "confirmar_cartao"];
+// ID da transação do Pix (end-to-end): "E" + 31 letras ou números. Espaços nas pontas vêm da cópia e são tirados.
+export const lerE2E = (v) => (typeof v === "string" && /^E[A-Za-z0-9]{31}$/.test(v.trim()) ? v.trim() : "");
+const idValido = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(v);
+const ok = (corpo) => ({ status: 200, corpo });
+const falha = (status, erro) => ({ status, corpo: { erro } });
+const INDISPONIVEL = "Pagamento indisponível no momento.";
+export const MSG_NAO_ENCONTRADO = "Não encontramos seu Pix. Confira o valor e o código e avise de novo.";
+
+const meios = (tipo) => metodosDisponiveis(tipo).map((metodo) => ({ metodo, valor: precoDe(metodo, tipo) }));
+const pixDe = (tipo) => (linkPix(tipo) ? { link: linkPix(tipo), recebedor: (process.env.PIX_TITULAR_EXIBIDO || "").trim() } : null);
+
+// Marca como pago numa instrução só: pedido, dias de acesso e admin_log. UPDATE condicional: dois cliques ou um
+// webhook repetido não somam dias (a 2ª chamada não acha a linha). Sem linha devolvida, nada mudou.
+// opc: quem (admin ou "infinitepay"), metodo, de (status de onde pode vir), e pix_e2e ou transaction_nsu + capture_method.
+// exigirAcesso: novo_treino só com acesso ativo (o Pix confere; o cartão já cobrou e não pode recusar).
+export async function aplicarPagamento(sql, pedido, { quem, metodo, de, pix_e2e = null, transaction_nsu = null, capture_method = null, exigirAcesso = false }) {
+  const ef = efeitoDoPagamento(pedido.tipo), valor = precoDe(metodo, pedido.tipo);
+  if (!ef || valor === undefined) return null;
+  const status = ef.gerar ? "pago" : "pronto";
+  const [x] = await sql`with p as (update pedidos set status = ${status}, pago_em = now(), atualizado = now(), metodo = ${metodo}, valor = ${valor},
+          confirmado_por = ${quem}, pix_e2e = coalesce(${pix_e2e}::text, pix_e2e), transaction_nsu = coalesce(${transaction_nsu}::text, transaction_nsu),
+          capture_method = coalesce(${capture_method}::text, capture_method), mensagem_usuario = null
+        where id = ${pedido.id} and status = any(${de}::text[]) and tipo = ${pedido.tipo}
+          and (${transaction_nsu}::text is null or transaction_nsu is null)
+          and (not ${exigirAcesso}::boolean or tipo <> 'novo_treino' or exists (select 1 from usuarios where email = pedidos.email and acesso_ate > now()))
+        returning id, email, tipo, valor, status),
+      a as (update usuarios set acesso_ate = greatest(now(), acesso_ate) + make_interval(days => ${ef.dias}::int)
+        where email = (select email from p) and ${ef.dias}::int > 0 returning acesso_ate),
+      l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
+        select ${quem}, 'pedido_pago', email, jsonb_build_object('pedido', id, 'tipo', tipo, 'valor', valor, 'dias', ${ef.dias}::int,
+          'metodo', ${metodo}::text, 'pix_e2e', ${pix_e2e}::text, 'transaction_nsu', ${transaction_nsu}::text) from p)
+    select p.status, (select acesso_ate from a) as acesso_ate from p`;
+  return x || null;
+}
+
+// ---------- cartão (InfinitePay) ----------
+const API = "https://api.checkout.infinitepay.io";
+const REF = /^[A-Za-z0-9_-]{1,100}$/; // transaction_nsu e slug: só o formato, nunca enviados sem esta checagem
+async function postar(fetch, caminho, corpo) {
+  return fetch(API + caminho, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo), signal: AbortSignal.timeout(10000) });
+}
+
+// Webhook, volta do checkout e "Verificar no InfinitePay". Nunca usa valor nem "paid" vindos de fora:
+// só o payment_check, com o handle do servidor. Devolve "pago", "ignorado", "recusado" ou "temporario".
+export async function confirmarCartao(sql, { order_nsu, transaction_nsu, slug }, { fetch = globalThis.fetch } = {}) {
+  const handle = process.env.INFINITEPAY_HANDLE;
+  if (!handle || !idValido(order_nsu) || !REF.test(transaction_nsu || "") || !REF.test(slug || "")) return "ignorado";
+  // Aceita pedido que tem ou teve link de cartão (P3): quem trocou para Pix e pagou o cartão mesmo assim não perde o acesso.
+  const [p] = await sql`update pedidos set checkout_ref = ${JSON.stringify({ slug, transaction_nsu })}::jsonb
+    where id = ${order_nsu} and status in ('aguardando_pagamento', 'aguardando_confirmacao') and (metodo = 'cartao' or checkout_url is not null)
+    returning id, tipo`;
+  if (!p) return "ignorado";
+  let j;
+  try {
+    const r = await postar(fetch, "/payment_check", { handle, order_nsu, transaction_nsu, slug });
+    if (r.status >= 500 || r.status === 429) return "temporario";
+    if (!r.ok) return "recusado";
+    j = await r.json();
+  } catch (e) {
+    return "temporario"; // rede, tempo esgotado ou resposta que não é JSON
+  }
+  const minimo = precoDe("cartao", p.tipo);
+  // paid_amount pode passar de amount (juros do parcelamento pagos pelo comprador); menos que o preço do cartão, não.
+  if (!j || j.success !== true || j.paid !== true || !(typeof j.paid_amount === "number" && j.paid_amount >= minimo)) return "recusado";
+  const cm = typeof j.capture_method === "string" ? j.capture_method.slice(0, 20) : null;
+  try {
+    const x = await aplicarPagamento(sql, p, { quem: "infinitepay", metodo: "cartao", de: ["aguardando_pagamento", "aguardando_confirmacao"], transaction_nsu, capture_method: cm });
+    return x ? "pago" : "ignorado";
+  } catch (e) {
+    if (e && e.code === "23505") return "ignorado"; // transaction_nsu já usado em outro pedido
+    throw e;
+  }
+}
+
+// ---------- ações do usuário ----------
+export async function acaoPagamento(sql, u, b, { fetch = globalThis.fetch } = {}) {
+  if (b.acao === "confirmar_cartao") {
+    if (!idValido(b.order_nsu)) return falha(400, "Pedido inválido.");
+    const [p] = await sql`select id from pedidos where id = ${b.order_nsu} and email = ${u.email}`;
+    if (!p) return falha(404, "Pedido não encontrado.");
+    const r = await confirmarCartao(sql, { order_nsu: b.order_nsu, transaction_nsu: b.transaction_nsu, slug: b.slug }, { fetch });
+    const [x] = await sql`select status from pedidos where id = ${p.id}`;
+    return ok({ resultado: r, status: x && x.status });
+  }
+  if (!idValido(b.id)) return falha(400, "Pedido inválido.");
+  const [p] = await sql`select id, tipo, status, metodo, valor, codigo, mensagem_usuario, checkout_url from pedidos where id = ${b.id} and email = ${u.email}`;
+  if (!p) return falha(404, "Pedido não encontrado.");
+  const pendente = p.status === "aguardando_pagamento";
+
+  if (b.acao === "pagamento") {
+    const { checkout_url, ...pedido } = p;
+    return ok({ pedido, metodos: meios(p.tipo), pix: pixDe(p.tipo), temCheckout: !!checkout_url });
+  }
+
+  if (b.acao === "pedido_metodo") {
+    if (!metodosDisponiveis(p.tipo).includes(b.metodo)) return falha(400, "Este meio de pagamento não está disponível.");
+    if (!pendente) return falha(400, "Este pedido não está aguardando pagamento.");
+    const [x] = await sql`update pedidos set metodo = ${b.metodo}, valor = ${precoDe(b.metodo, p.tipo)}, atualizado = now()
+      where id = ${p.id} and email = ${u.email} and status = 'aguardando_pagamento' returning id, tipo, status, metodo, valor, codigo, mensagem_usuario`;
+    if (!x) return falha(400, "Este pedido não está aguardando pagamento.");
+    return ok({ pedido: x, pix: b.metodo === "pix" ? pixDe(p.tipo) : null });
+  }
+
+  if (b.acao === "pix_avisei") {
+    const nome = typeof b.pagador_nome === "string" ? limparTexto(b.pagador_nome).replace(/\s+/g, " ") : "";
+    if (nome.length < 2 || nome.length > 80) return falha(400, "Digite o nome de quem pagou (2 a 80 caracteres).");
+    if (!jpegValido(b.comprovante)) return falha(400, "Anexe o comprovante do Pix (uma imagem).");
+    const vazio = b.pix_e2e === undefined || b.pix_e2e === null || (typeof b.pix_e2e === "string" && !b.pix_e2e.trim());
+    const e2e = vazio ? null : lerE2E(b.pix_e2e);
+    if (e2e === "") return falha(400, "O ID da transação começa com E e tem 32 letras e números. Confira ou deixe em branco.");
+    const [x] = await sql`update pedidos set status = 'aguardando_confirmacao', pagador_nome = ${nome}, comprovante = ${b.comprovante},
+        pix_e2e_informado = ${e2e}, aviso_em = now(), mensagem_usuario = null, atualizado = now()
+      where id = ${p.id} and email = ${u.email} and metodo = 'pix' and status = 'aguardando_pagamento' returning id, tipo, status, metodo, valor, codigo, mensagem_usuario`;
+    if (!x) return falha(400, "Este pedido não está aguardando o Pix.");
+    return ok({ pedido: x });
+  }
+
+  if (b.acao === "pagar_cartao") {
+    if (!metodosDisponiveis(p.tipo).includes("cartao")) return falha(400, INDISPONIVEL);
+    if (!pendente) return falha(400, "Este pedido não está aguardando pagamento.");
+    const valor = precoDe("cartao", p.tipo);
+    const [x] = await sql`update pedidos set metodo = 'cartao', valor = ${valor}, atualizado = now()
+      where id = ${p.id} and email = ${u.email} and status = 'aguardando_pagamento' returning id, checkout_url`;
+    if (!x) return falha(400, "Este pedido não está aguardando pagamento.");
+    if (x.checkout_url) return ok({ url: x.checkout_url }); // o mesmo link: um 2º link do mesmo pedido poderia ser pago duas vezes
+    const site = process.env.SITE_URL.replace(/\/+$/, "");
+    const NOMES = { inicial: "Treino personalizado FitWay", mensalidade: "Renovação do acesso FitWay (30 dias)", novo_treino: "Novo treino FitWay" };
+    let url;
+    try {
+      const r = await postar(fetch, "/links", {
+        handle: process.env.INFINITEPAY_HANDLE, order_nsu: p.id, redirect_url: site + "/", webhook_url: site + "/api/infinitepay",
+        items: [{ quantity: 1, price: valor, description: NOMES[p.tipo] }],
+        customer: { name: u.nome, email: u.email },
+      });
+      const j = r.ok ? await r.json() : null;
+      url = j && j.url; // P2: a documentação não diz o nome do campo; confirmar com um link real antes de liberar
+    } catch (e) { url = null; }
+    if (typeof url !== "string" || !/^https:\/\/[^\s"'<>]+$/.test(url)) return falha(502, INDISPONIVEL);
+    await sql`update pedidos set checkout_url = ${url} where id = ${p.id} and checkout_url is null`;
+    return ok({ url });
+  }
+  return falha(400, "Ação desconhecida.");
+}

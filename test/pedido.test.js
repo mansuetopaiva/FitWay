@@ -171,7 +171,7 @@ test("aceite do termo: recusado sem aceite, com versão antiga, com hash diferen
   assert.equal(registrarAceite(TERMO_VERSAO, hash, {}, AGORA).aceite.ip, "");
 });
 
-test("limparPedidos: fotos de 90 dias e pedido aguardando pagamento há mais de 30 dias cancelado e sem fotos", async () => {
+test("limparPedidos: fotos e comprovante de 90 dias e pedido aguardando pagamento há mais de 30 dias cancelado e sem fotos", async () => {
   const chamadas = [];
   const sql = async (partes, ...valores) => { chamadas.push({ q: partes.join("?"), valores }); return []; };
   await limparPedidos(sql, "a@x.com");
@@ -179,7 +179,9 @@ test("limparPedidos: fotos de 90 dias e pedido aguardando pagamento há mais de 
   const [cancela, fotos] = chamadas;
   assert.match(cancela.q, /update pedidos set status = 'cancelado', fotos = null, atualizado = now\(\)/);
   assert.match(cancela.q, /status = 'aguardando_pagamento' and criado < now\(\) - interval '30 days'/);
-  assert.match(fotos.q, /status = 'pronto' and gerado_em < now\(\) - interval '90 days'/);
+  assert.doesNotMatch(cancela.q, /aguardando_confirmacao/, "quem avisou o Pix nunca é cancelado pelo prazo");
+  assert.match(fotos.q, /set fotos = null, comprovante = null/);
+  assert.match(fotos.q, /status = 'pronto' and coalesce\(gerado_em, pago_em\) < now\(\) - interval '90 days'/, "a mensalidade fica pronta sem gerado_em");
   assert.match(fotos.q, /status in \('cancelado', 'erro'\) and atualizado < now\(\) - interval '90 days'/);
   for (const c of chamadas) assert.deepEqual(c.valores, ["a@x.com", "a@x.com"], "só os pedidos deste usuário");
   chamadas.length = 0;

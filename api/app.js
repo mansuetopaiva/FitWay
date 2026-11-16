@@ -1,19 +1,20 @@
 // Backend do FitWay: uma função Vercel, POST /api/app com { acao, ... }.
-// Ações: criar, entrar, eu, salvar, sair, perfil, foto, treino, ranking, admin, termo, pedido_criar, pedido_status.
+// Ações: criar, entrar, eu, salvar, sair, perfil, foto, treino, ranking, admin, termo, pedido_criar, pedido_status
+// e as de pagamento (api/_pagamento.js). O webhook do InfinitePay é outra função: api/infinitepay.js.
 // Banco: Postgres (Neon) via DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { acaoAdmin, ehAdmin } from "./_admin.js";
 import { DIA, juntar, limpar } from "./_dados.js";
 import { gerarSeDevido } from "./_ia.js";
-import { OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_pedido.js";
+import { ACOES as ACOES_PAGAMENTO, acaoPagamento } from "./_pagamento.js";
+import { LETRAS, OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_pedido.js";
 import { ABERTOS, PRECOS, iaAtiva, planoVisivel, podePedir } from "./_precos.js";
 import { TERMO_VERSAO, montarTermo, termoFaltando } from "./_termo.js";
 import { lerPdf } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
-const LETRAS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 símbolos, sem 0/O e 1/I
 
 // Cria as tabelas na primeira chamada de cada instância; não precisa rodar SQL à mão.
 let pronto;
@@ -54,7 +55,7 @@ const schema = () => pronto ||= (async () => {
     id text primary key,
     email text not null references usuarios on delete cascade,
     tipo text not null check (tipo in ('inicial', 'mensalidade', 'novo_treino')),
-    status text not null check (status in ('aguardando_pagamento', 'pago', 'gerando', 'pronto', 'erro', 'cancelado')),
+    status text not null check (status in ('aguardando_pagamento', 'aguardando_confirmacao', 'pago', 'gerando', 'pronto', 'erro', 'cancelado')),
     valor int not null,
     metodo text,
     respostas jsonb,
@@ -71,8 +72,27 @@ const schema = () => pronto ||= (async () => {
   )`;
   await sql`create index if not exists pedidos_email_criado on pedidos (email, criado desc)`;
   await sql`create index if not exists pedidos_status on pedidos (status)`;
-  // No máximo 1 pedido aberto por usuário, garantido pelo banco (dois cliques ao mesmo tempo).
-  await sql`create unique index if not exists pedidos_um_aberto on pedidos (email) where status in ('aguardando_pagamento', 'pago', 'gerando')`;
+  // Pagamento (docs/pagamento.md). Os "unique" ficam em índices próprios: "add column if not exists ... unique" não é idempotente em todo Postgres.
+  await sql`alter table pedidos add column if not exists codigo text, add column if not exists pagador_nome text,
+    add column if not exists comprovante text, add column if not exists aviso_em timestamptz, add column if not exists confirmado_por text,
+    add column if not exists transaction_nsu text, add column if not exists capture_method text, add column if not exists mensagem_usuario text,
+    add column if not exists checkout_url text, add column if not exists checkout_ref jsonb, add column if not exists pix_e2e text,
+    add column if not exists pix_e2e_informado text`;
+  await sql`create unique index if not exists pedidos_codigo on pedidos (codigo)`;
+  await sql`create unique index if not exists pedidos_transaction_nsu on pedidos (transaction_nsu)`;
+  await sql`create unique index if not exists pedidos_pix_e2e on pedidos (pix_e2e)`;
+  // Status novo aguardando_confirmacao: troca a restrição antiga uma vez só.
+  await sql`do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'pedidos_status_check' and pg_get_constraintdef(oid) like '%aguardando_confirmacao%') then
+      alter table pedidos drop constraint if exists pedidos_status_check;
+      alter table pedidos add constraint pedidos_status_check
+        check (status in ('aguardando_pagamento', 'aguardando_confirmacao', 'pago', 'gerando', 'pronto', 'erro', 'cancelado'));
+    end if;
+  end $$`;
+  // No máximo 1 pedido aberto por usuário (ABERTOS), garantido pelo banco (dois cliques ao mesmo tempo).
+  await sql`create unique index if not exists pedidos_um_aberto_v2 on pedidos (email)
+    where status in ('aguardando_pagamento', 'aguardando_confirmacao', 'pago', 'gerando')`;
+  await sql`drop index if exists pedidos_um_aberto`;
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
@@ -201,11 +221,15 @@ export default async function handler(req, res) {
       const r = await criarPedido(sql, u, b, req.headers, new Date(), { admin: ehAdmin(u.email) });
       return res.status(r.status).json(r.corpo);
     }
+    if (ACOES_PAGAMENTO.includes(b.acao)) {
+      const r = await acaoPagamento(sql, u, b);
+      return res.status(r.status).json(r.corpo);
+    }
     if (b.acao === "pedido_status") {
       await limparPedidos(sql, u.email);
       // O pedido aberto vem primeiro: o admin pode reabrir um pedido antigo com "Gerar de novo".
-      const ultimo = async () => (await sql`select id, tipo, status, valor, criado, pago_em, gerado_em from pedidos
-        where email = ${u.email} order by status in ('aguardando_pagamento', 'pago', 'gerando') desc, criado desc limit 1`)[0] || null;
+      const ultimo = async () => (await sql`select id, tipo, status, metodo, valor, codigo, mensagem_usuario, criado, pago_em, gerado_em from pedidos
+        where email = ${u.email} order by status = any(${ABERTOS}) desc, criado desc limit 1`)[0] || null;
       let pedido = await ultimo(), x = u;
       // O formulário só lê as perguntas: não segura a tela esperando uma geração.
       if (b.form !== true && pedido && (pedido.status === "pago" || pedido.status === "gerando") && await gerar(pedido.id)) {

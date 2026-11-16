@@ -19,7 +19,7 @@ Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda 
 
 ## Fase 2: pagamento de ponta a ponta no servidor
 
-- [ ] **T4. Banco e Pix** (`api/app.js` schema, `api/_pagamento.js`, `api/_pedido.js` limparPedidos, testes)
+- [x] **T4. Banco e Pix** (`api/app.js` schema, `api/_pagamento.js`, `api/_pedido.js` limparPedidos, testes)
   - Colunas, restrição de status e índice único novo, numa migração idempotente.
   - Ações `pagamento`, `pedido_metodo` e `pix_avisei`; `aplicarPagamento`.
   - Aceite:

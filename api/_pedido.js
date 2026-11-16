@@ -1,6 +1,7 @@
 // Pedidos de treino: validação do formulário e das fotos e a criação do pedido. O "_" impede a Vercel de expor como rota.
 // O formulário (js/pedido.js) recebe PARQ, OPCOES e TEXTOS do servidor, então o texto fica só aqui.
 import { randomBytes } from "node:crypto";
+export const LETRAS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 símbolos, sem 0/O e 1/I (grupos do ranking e código do pedido)
 import { ABERTOS, PRECOS, iaAtiva, podePedir } from "./_precos.js";
 import { registrarAceite, termoFaltando } from "./_termo.js";
 
@@ -25,7 +26,7 @@ const NOMES = { objetivo: "o objetivo", nivel: "o nível", sexo: "o sexo", minut
 const FAIXA = { idade: "de 18 a 90 anos", altura: "de 120 a 230 cm", peso: "de 30 a 300 kg", dias: "de 2 a 6" };
 
 // Tira caracteres de controle (menos quebra de linha) e espaços nas pontas.
-const limparTexto = (s) => s.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, "").trim();
+export const limparTexto = (s) => s.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, "").trim();
 
 // Nunca confia no navegador: confere tudo de novo e devolve só os campos conhecidos.
 export function limparRespostas(r, { temFotos, agora }) {
@@ -65,6 +66,7 @@ export function limparRespostas(r, { temFotos, agora }) {
 export const CHAVES_FOTOS = ["frente", "costas", "direito", "esquerdo"];
 const MAX_FOTO = 409600; // caracteres base64 ≈ 300 KB de imagem
 const JPEG = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/;
+export const jpegValido = (v) => typeof v === "string" && v.length <= MAX_FOTO + 23 && JPEG.test(v); // fotos e comprovante do Pix
 
 export function limparFotos(f) {
   if (f === undefined || f === null) return { fotos: null };
@@ -72,7 +74,7 @@ export function limparFotos(f) {
   const fotos = {};
   for (const [k, v] of Object.entries(f)) {
     if (!CHAVES_FOTOS.includes(k)) return { erro: "Fotos inválidas." };
-    if (typeof v !== "string" || v.length > MAX_FOTO + 23 || !JPEG.test(v)) return { erro: "Uma das fotos é inválida ou grande demais. Tente outra." };
+    if (!jpegValido(v)) return { erro: "Uma das fotos é inválida ou grande demais. Tente outra." };
     fotos[k] = v;
   }
   return { fotos: Object.keys(fotos).length ? fotos : null };
@@ -80,12 +82,14 @@ export function limparFotos(f) {
 
 // Rotinas de prazo, sem cron: rodam no pedido_status (email do usuário) e no resumo do admin (email null = todos).
 // - aguardando pagamento há mais de 30 dias: cancelado e sem fotos;
-// - fotos apagadas 90 dias depois do pedido ficar pronto, cancelado ou com erro (as respostas ficam).
+// - fotos e comprovante do Pix apagados 90 dias depois do pedido ficar pronto, cancelado ou com erro (as respostas ficam).
+//   aguardando_confirmacao nunca é cancelado aqui: a pessoa já disse que pagou e o admin ainda vai conferir.
 export async function limparPedidos(sql, email) {
   await sql`update pedidos set status = 'cancelado', fotos = null, atualizado = now()
     where (${email}::text is null or email = ${email}) and status = 'aguardando_pagamento' and criado < now() - interval '30 days'`;
-  await sql`update pedidos set fotos = null where (${email}::text is null or email = ${email}) and fotos is not null and (
-    (status = 'pronto' and gerado_em < now() - interval '90 days') or (status in ('cancelado', 'erro') and atualizado < now() - interval '90 days'))`;
+  // A mensalidade vira pronto sem gerado_em: conta de pago_em.
+  await sql`update pedidos set fotos = null, comprovante = null where (${email}::text is null or email = ${email}) and (fotos is not null or comprovante is not null) and (
+    (status = 'pronto' and coalesce(gerado_em, pago_em) < now() - interval '90 days') or (status in ('cancelado', 'erro') and atualizado < now() - interval '90 days'))`;
 }
 
 // pedido_criar. Recebe sql e "agora" por parâmetro para o teste. u traz email, acesso_ate e dados do banco.
@@ -109,11 +113,14 @@ export async function criarPedido(sql, u, b, headers, agora, { admin = false } =
     ({ aceite } = a); ({ fotos } = f); ({ respostas } = r);
   }
   const id = randomBytes(12).toString("base64url");
+  // Código curto para a pessoa anotar e o admin achar o pedido. shortcut: colisão (1 em ~1 bilhão) cai no "já tem pedido"; tentar de novo se um dia acontecer.
+  const codigo = "FW" + Array.from(randomBytes(6), (x) => LETRAS[x % 32]).join("");
   const js = (v) => (v ? JSON.stringify(v) : null);
   // O índice único pedidos_um_aberto recusa um 2º pedido aberto mesmo em dois cliques simultâneos.
-  const [p] = await sql`insert into pedidos (id, email, tipo, status, valor, respostas, fotos, aceite)
-    values (${id}, ${u.email}, ${b.tipo}, 'aguardando_pagamento', ${PRECOS.pix[b.tipo]}, ${js(respostas)}::jsonb, ${js(fotos)}::jsonb, ${js(aceite)}::jsonb)
-    on conflict do nothing returning id, tipo, status, valor, criado, pago_em, gerado_em`;
+  // metodo vazio até a pessoa escolher; o valor do Pix (o menor) é provisório, só para a lista do admin.
+  const [p] = await sql`insert into pedidos (id, email, tipo, status, valor, codigo, respostas, fotos, aceite)
+    values (${id}, ${u.email}, ${b.tipo}, 'aguardando_pagamento', ${PRECOS.pix[b.tipo]}, ${codigo}, ${js(respostas)}::jsonb, ${js(fotos)}::jsonb, ${js(aceite)}::jsonb)
+    on conflict do nothing returning id, tipo, status, metodo, valor, codigo, mensagem_usuario, criado, pago_em, gerado_em`;
   if (!p) return { status: 400, corpo: { erro: "Você já tem um pedido em andamento." } };
   return { status: 200, corpo: { pedido: p } };
 }

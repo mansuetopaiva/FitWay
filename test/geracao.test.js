@@ -56,8 +56,11 @@ test("pedido_criar: grava valor do servidor, aceite com a hora do servidor e res
   b.respostas.consentimentos.fotos = true;
   const x = await criarPedido(sql, novo, b, H, AGORA);
   assert.equal(x.status, 200);
-  const [id, email, tipo, valor, resp, fotos, aceite] = inserido(chamadas).valores;
+  const [id, email, tipo, valor, codigo, resp, fotos, aceite] = inserido(chamadas).valores;
   assert.equal(typeof id, "string"); assert.ok(id.length >= 16);
+  assert.match(codigo, /^FW[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/, "código curto para a pessoa anotar");
+  assert.match(inserido(chamadas).q, /'aguardando_pagamento'/);
+  assert.doesNotMatch(inserido(chamadas).q.split("values")[0], /metodo/, "o meio fica vazio até a pessoa escolher");
   assert.deepEqual([email, tipo, valor], ["a@x.com", "inicial", 999]);
   assert.deepEqual(JSON.parse(aceite), { versao: TERMO_VERSAO, hash: montarTermo().hash, aceito_em: AGORA.toISOString(), ip: "203.0.113.7", user_agent: "teste" });
   assert.equal(JSON.parse(resp).consentimentos.fotos, AGORA.toISOString());
@@ -70,7 +73,7 @@ test("pedido_criar: mensalidade não exige termo nem formulário; novo_treino ex
   let s = sqlFalso(semAberto);
   const m = await criarPedido(s.sql, comIA, { tipo: "mensalidade" }, H, AGORA);
   assert.equal(m.status, 200);
-  assert.deepEqual(inserido(s.chamadas).valores.slice(3), [999, null, null, null]);
+  assert.deepEqual(inserido(s.chamadas).valores.slice(3).filter((_, i) => i !== 1), [999, null, null, null], "valor do Pix provisório, sem formulário");
   s = sqlFalso(semAberto);
   assert.equal((await criarPedido(s.sql, comIA, { tipo: "novo_treino", respostas: respostas() }, H, AGORA)).status, 400, "sem termo");
   s = sqlFalso(semAberto);
