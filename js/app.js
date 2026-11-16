@@ -113,8 +113,8 @@
           ${criar ? `<p class="muted login-aceite" id="loginAceite">Ao criar a conta, você concorda com a <a href="#/privacidade">Política de privacidade</a>.</p>` : ""}
           <button class="btn" type="submit" ${criar ? 'aria-describedby="loginAceite"' : ""}>${criar ? "Criar conta" : "Entrar"}</button>
         </form>
-        <p class="muted" style="margin-top:16px;text-align:center">Seus dados ficam salvos na sua conta e aparecem em qualquer aparelho.</p>
         ${criar ? "" : `<p class="login-links"><button type="button" class="link" id="esqueci">Esqueci a senha</button></p>`}
+        <p class="muted" style="margin-top:16px;text-align:center">Seus dados ficam salvos na sua conta e aparecem em qualquer aparelho.</p>
         <p class="muted login-links"><a href="#/privacidade">Política de privacidade</a></p>
       </main>`;
     if (!criar) $("#esqueci").onclick = () => { loginMode = "esqueci"; esqueciEmail = $("#email").value.trim(); viewLogin(); };
@@ -155,8 +155,13 @@
 
   // ---------- esqueci a senha (docs/senha.md) ----------
   let esqueciEmail = "", tokenSenha = "";
-  const campoSenha = (id, rot, auto) => `<div class="field"><label for="${id}">${rot}</label>
-    <input id="${id}" type="password" autocomplete="${auto}" minlength="6" maxlength="100" required></div>`;
+  const campoSenha = (id, rot, auto, dica = "") => `<div class="field"><label for="${id}">${rot}</label>
+    <input id="${id}" type="password" autocomplete="${auto}" minlength="6" maxlength="100" required ${dica ? `aria-describedby="${dica}"` : ""}></div>`;
+  // Uma caixa mostra/oculta todas as senhas do formulário (no celular, digitar a nova duas vezes às cegas é onde mais se erra).
+  const mostrarSenhas = (id) => `<label class="ped-caixa mostrar-senhas"><input type="checkbox" id="${id}"> Mostrar senhas</label>`;
+  const ligarMostrar = (id, form) => { $("#" + id).onchange = (ev) => form.querySelectorAll("input[autocomplete$=password]").forEach((i) => { i.type = ev.target.checked ? "text" : "password"; }); };
+  // Campo de usuário escondido: o gerenciador de senhas sabe de que conta é a senha nova.
+  const campoUsuario = (v) => `<input class="sr" type="email" autocomplete="username" value="${esc(v)}" readonly tabindex="-1" aria-hidden="true">`;
   async function viewEsqueci() {
     app.innerHTML = `
       <main class="login">
@@ -165,18 +170,23 @@
         <div id="esqCorpo"><p class="muted" role="status">Carregando…</p></div>
         <p class="login-links"><button type="button" class="link" id="voltarLogin">Voltar para Entrar</button></p>
       </main>`;
-    $("#voltarLogin").onclick = () => { loginMode = "entrar"; viewLogin(); };
+    $("#voltarLogin").onclick = () => {
+      const e = $("#email"); if (e) esqueciEmail = e.value.trim();
+      loginMode = "entrar"; viewLogin(); if (esqueciEmail) { $("#email").value = esqueciEmail; $("#senha").focus(); }
+    };
     $("#esqTit").focus();
+    const corpoEl = $("#esqCorpo");
     let d;
     try { d = await api("senha_disponivel"); } catch (e) { d = { disponivel: true }; } // sem conexão: o envio mostra o erro
-    if (loginMode !== "esqueci" || email || !$("#esqCorpo")) return;
-    if (!d.disponivel) { $("#esqCorpo").innerHTML = `<p class="ia-status" role="alert">${esc(d.mensagem)}</p>`; return; }
-    $("#esqCorpo").innerHTML = `<form novalidate id="esqForm">
+    if (loginMode !== "esqueci" || email || !corpoEl.isConnected) return;
+    if (!d.disponivel) { corpoEl.innerHTML = `<p class="ia-status" role="alert">${esc(d.mensagem)}</p>`; return; }
+    corpoEl.innerHTML = `<form novalidate id="esqForm">
         <p class="muted" style="margin-bottom:12px">Digite o email da sua conta. Vamos mandar um link para você criar uma senha nova.</p>
         <div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="email" inputmode="email" maxlength="120" required value="${esc(esqueciEmail)}"></div>
         <p class="err" role="alert"></p>
         <button class="btn" type="submit">Enviar link</button>
       </form>`;
+    if (document.activeElement === $("#esqTit")) $("#email").focus();
     $("#esqForm").onsubmit = async (ev) => {
       ev.preventDefault();
       const err = $("#esqForm .err"), em = $("#email").value.trim().toLowerCase(), botao = $("#esqForm .btn");
@@ -185,41 +195,46 @@
       let r;
       try { r = await api("senha_pedir", { email: em }); }
       catch (e) { botao.disabled = false; botao.textContent = "Enviar link"; err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return; }
-      if (!$("#esqCorpo")) return;
-      $("#esqCorpo").innerHTML = `<p class="ia-status ${r.indisponivel ? "" : "ok"}" role="status" tabindex="-1" id="esqOk">${esc(r.mensagem)}</p>`;
+      if (!corpoEl.isConnected) return; // a pessoa saiu e voltou: a resposta antiga não sobrescreve a tela nova
+      corpoEl.innerHTML = `<p class="ia-status ${r.indisponivel ? "" : "ok"}" tabindex="-1" id="esqOk">${esc(r.mensagem)}</p>`;
       $("#esqOk").focus();
     };
   }
   // #/nova-senha/<token>: o token já saiu do endereço (veja o início do app) e fica só na memória.
-  function viewNovaSenha() {
+  const MSG_LINK_APP = "Este link não vale mais. Peça um novo em Esqueci a senha.";
+  function viewNovaSenha(motivo) {
     const fora = !email;
+    const semToken = motivo === "vencido" ? `<p class="ia-status" role="alert">${esc(MSG_LINK_APP)}</p>`
+      : `<p class="ia-status">Abra de novo o link que enviamos por email. Se ele já foi usado ou passou de 30 minutos, peça um novo.</p>`;
     const corpo = tokenSenha ? `<form novalidate id="novaForm">
-        ${campoSenha("nova1", "Nova senha", "new-password")}${campoSenha("nova2", "Repetir a nova senha", "new-password")}
-        <p class="muted" style="margin:-6px 0 10px">Pelo menos 6 caracteres.</p>
+        ${campoSenha("nova1", "Nova senha", "new-password", "novaDica")}${campoSenha("nova2", "Repetir a nova senha", "new-password", "novaDica")}
+        <p class="muted" id="novaDica" style="margin:-6px 0 10px">Pelo menos 6 caracteres.</p>
+        ${mostrarSenhas("novaVer")}
         <p class="err" role="alert"></p>
-        <button class="btn" type="submit">Trocar a senha</button></form>`
-      : `<p class="ia-status" role="alert">Este link não vale mais. Peça um novo em Esqueci a senha.</p>
-        <button type="button" class="btn" id="pedirNovo" style="margin-top:12px">Esqueci a senha</button>`;
+        <button class="btn" type="submit">Salvar senha nova</button></form>`
+      : semToken + (fora ? `<button type="button" class="btn" id="pedirNovo" style="margin-top:12px">Pedir um link novo</button>`
+        : `<p class="login-links"><a class="link-alto" href="#/perfil">Trocar a senha no Perfil</a></p>`);
     app.innerHTML = `<main class="login">
         <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
         <h2 class="esq-tit" id="esqTit" tabindex="-1">Criar uma senha nova</h2>${corpo}
-        ${fora ? "" : `<p class="login-links"><a href="#/perfil">Voltar ao app</a></p>`}</main>`;
+        <p class="login-links">${fora ? `<a class="link-alto" href="#/">Voltar para Entrar</a>` : `<a class="link-alto" href="#/perfil">Voltar ao app</a>`}</p></main>`;
     $("#esqTit").focus();
     if (!tokenSenha) {
-      $("#pedirNovo").onclick = () => { if (email) return toast("Saia da conta para usar Esqueci a senha, ou troque a senha no Perfil."); loginMode = "esqueci"; location.hash = ""; render(); };
+      if (fora) $("#pedirNovo").onclick = () => { loginMode = "esqueci"; location.hash = ""; render(); };
       return;
     }
+    ligarMostrar("novaVer", $("#novaForm"));
     $("#novaForm").onsubmit = async (ev) => {
       ev.preventDefault();
       const err = $("#novaForm .err"), a = $("#nova1").value, b = $("#nova2").value, botao = $("#novaForm .btn");
       if (a.length < 6) { err.textContent = "A senha precisa ter pelo menos 6 caracteres."; return $("#nova1").focus(); }
       if (a !== b) { err.textContent = "As duas senhas não são iguais."; return $("#nova2").focus(); }
-      botao.disabled = true; err.textContent = "";
+      botao.disabled = true; botao.textContent = "Salvando…"; err.textContent = "";
       let u;
       try { u = await api("senha_nova", { token: tokenSenha, senha: a }); }
       catch (e) {
-        botao.disabled = false;
-        if (e.status === 400 && /link/.test(e.message)) { tokenSenha = ""; viewNovaSenha(); return toast(e.message); }
+        botao.disabled = false; botao.textContent = "Salvar senha nova";
+        if (e.status === 400 && e.message === MSG_LINK_APP) { tokenSenha = ""; return viewNovaSenha("vencido"); }
         err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return;
       }
       tokenSenha = "";
@@ -662,14 +677,16 @@
             <div class="tools"><button type="button" id="cancelar">Cancelar</button></div>
           </form>` : `<h2>${esc(u.nome)}</h2>`}
         <p class="muted" ${editandoPerfil ? 'style="margin-top:10px"' : ""}>${esc(email)}</p>
-        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar perfil</button><button id="trocarSenha" aria-expanded="${trocandoSenha}">${icon("shield")}Trocar senha</button></div>`}
+        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar perfil</button><button id="trocarSenha" aria-expanded="${trocandoSenha}" aria-controls="senhaForm">${icon("shield")}Trocar senha</button></div>`}
       </section>
       ${trocandoSenha && !editandoPerfil ? `<form class="card" id="senhaForm" novalidate aria-labelledby="senhaTit">
         <h2 id="senhaTit" tabindex="-1">Trocar senha</h2>
-        ${campoSenha("senhaAtual", "Senha atual", "current-password")}${campoSenha("senhaNova1", "Nova senha", "new-password")}${campoSenha("senhaNova2", "Repetir a nova senha", "new-password")}
-        <p class="muted" style="margin:-6px 0 10px">Pelo menos 6 caracteres. Os outros aparelhos conectados nesta conta serão desconectados.</p>
+        ${campoUsuario(email)}
+        ${campoSenha("senhaAtual", "Senha atual", "current-password")}${campoSenha("senhaNova1", "Nova senha", "new-password", "senhaDica")}${campoSenha("senhaNova2", "Repetir a nova senha", "new-password", "senhaDica")}
+        <p class="muted" id="senhaDica" style="margin:-6px 0 10px">Pelo menos 6 caracteres. Os outros aparelhos conectados nesta conta serão desconectados.</p>
+        ${mostrarSenhas("senhaVer")}
         <p class="err" role="alert"></p>
-        <button class="btn" type="submit">Trocar senha</button>
+        <button class="btn" type="submit">Salvar nova senha</button>
         <div class="tools"><button type="button" id="senhaCancelar">Cancelar</button></div>
       </form>` : ""}
       <section class="card">
@@ -734,15 +751,16 @@
       const sf = $("#senhaForm");
       if (sf) {
         $("#senhaCancelar").onclick = () => { trocandoSenha = false; viewPerfil(); $("#trocarSenha").focus(); };
+        ligarMostrar("senhaVer", sf);
         sf.onsubmit = async (ev) => {
           ev.preventDefault();
           const err = sf.querySelector(".err"), atual = $("#senhaAtual").value, a = $("#senhaNova1").value, b = $("#senhaNova2").value, botao = sf.querySelector(".btn");
           if (!atual) { err.textContent = "Digite a senha atual."; return $("#senhaAtual").focus(); }
           if (a.length < 6) { err.textContent = "A senha precisa ter pelo menos 6 caracteres."; return $("#senhaNova1").focus(); }
           if (a !== b) { err.textContent = "As duas senhas não são iguais."; return $("#senhaNova2").focus(); }
-          botao.disabled = true; err.textContent = "";
+          botao.disabled = true; botao.textContent = "Salvando…"; err.textContent = "";
           try { await api("senha_alterar", { atual, nova: a }); }
-          catch (e) { botao.disabled = false; err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return; }
+          catch (e) { botao.disabled = false; botao.textContent = "Salvar nova senha"; err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return; }
           trocandoSenha = false;
           toast("Senha trocada. Os outros aparelhos foram desconectados.");
           if (location.hash.split("/")[1] === "perfil") { viewPerfil(); $("#trocarSenha").focus(); }

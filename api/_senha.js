@@ -99,5 +99,5 @@ export async function alterarSenha(sql, u, { atual, nova }, sessaoHash) {
       o as (update senha_tokens set expira = least(expira, now()) where email = ${u.email} and usado_em is null and exists (select 1 from a)),
       l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select email, 'senha_trocada', email, '{"via":"perfil"}'::jsonb from a)
     select email from a`;
-  return x ? { status: 200 } : { status: 409, erro: "A senha mudou enquanto você trocava. Tente de novo." };
+  return x ? { status: 200 } : { status: 400, erro: "A senha mudou enquanto você trocava. Tente de novo." }; // não 409: o app reserva 409 para "outra conta entrou"
 }

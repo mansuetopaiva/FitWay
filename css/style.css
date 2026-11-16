@@ -426,3 +426,5 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 button.link { background: none; border: 0; padding: 8px 4px; min-height: 44px; color: var(--green); font-size: 14px; text-decoration: underline; cursor: pointer; }
 .esq-tit { font-size: 20px; font-weight: 400; margin: 8px 0 12px; }
 .esq-tit:focus { outline: none; }
+.mostrar-senhas { margin: 0 0 10px; }
+.link-alto { display: inline-flex; align-items: center; min-height: 44px; color: var(--green); }
