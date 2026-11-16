@@ -1,5 +1,5 @@
 // Backend do FitWay: uma função Vercel, POST /api/app com { acao, ... }.
-// Ações: criar, entrar, eu, salvar, sair, perfil, foto, treino, ranking, admin, termo, pedido_criar, pedido_status
+// Ações: criar, entrar, privacidade (pública), eu, salvar, sair, perfil, foto, treino, ranking, admin, termo, pedido_criar, pedido_status
 // e as de pagamento (api/_pagamento.js). O webhook do InfinitePay é outra função: api/infinitepay.js.
 // Banco: Postgres (Neon) via DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
@@ -11,6 +11,7 @@ import { ACOES as ACOES_PAGAMENTO, acaoPagamento } from "./_pagamento.js";
 import { LETRAS, OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_pedido.js";
 import { ABERTOS, PRECOS, iaAtiva, planoVisivel, podePedir } from "./_precos.js";
 import { TERMO_VERSAO, montarTermo, termoFaltando } from "./_termo.js";
+import { montarPrivacidade } from "./_privacidade.js";
 import { lerPdf } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
@@ -157,6 +158,8 @@ export default async function handler(req, res) {
       await abrirSessao(res, u.email);
       return res.json(publico(u));
     }
+
+    if (b.acao === "privacidade") return res.json(montarPrivacidade()); // pública: vale para o app inteiro
 
     if (b.acao === "termo") { // versão antiga serve para o admin conferir o que foi aceito
       // Com a função desligada o termo não é público (tem dados pessoais do responsável): só o admin lê.

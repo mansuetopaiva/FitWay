@@ -77,7 +77,7 @@
       + item(4, [["Observações", f.observacoes || "Nenhuma"]])
       + `<div class="row ped-total"><span>Valor do pedido</span><b>a partir de ${reais(st.precos[tipo])}</b></div>
       <h3 class="ped-termo-tit" id="termoTit">Termo de Responsabilidade e Uso</h3>
-      <div class="ped-termo" tabindex="0" role="region" aria-labelledby="termoTit">${esc(termo.texto)}</div>
+      <div class="ped-termo" tabindex="0" role="region" aria-labelledby="termoTit">${esc(termo.texto).replace(/Política de privacidade/g, '<a href="#/privacidade" target="_blank" rel="noopener">Política de privacidade</a>')}</div>
       ${caixa("termo", "Li e aceito o Termo de Responsabilidade e Uso", f.termo)}
       ${caixa("cdados", "Autorizo guardar meus dados de saúde e fotos para montar e ajustar meu treino (LGPD: dado de saúde é dado sensível).", f.consentimentos.dados)}
       <p class="muted">Depois de enviar, você escolhe como pagar (Pix ou cartão). Assim que o pagamento for confirmado, o treino é montado e aparece na aba Treinos.</p>`;

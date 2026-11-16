@@ -147,6 +147,9 @@ O repositório é público, então nome, documento, email e foro do responsável
   O `vercel env pull` reescreve o `.env.local`: cadastre na Vercel antes, para não perdê-las.
 - Se alguma estiver vazia, o treino com IA fica bloqueado mesmo com `TREINO_IA_ATIVO=1`: o usuário vê "Em breve." e o painel do admin
   mostra qual variável falta.
+- A **Política de privacidade** (`api/_privacidade.js`, rota pública `#/privacidade`, ação `privacidade` sem login) usa `TERMO_RESPONSAVEL`
+  e `TERMO_EMAIL` (nunca o documento). Sem elas, mostra "o responsável pelo FitWay" e nenhum email. Ao mudar o texto, acrescente uma
+  versão nova no topo de `PRIVACIDADES`.
 - O aceite grava o SHA-256 do texto exato mostrado. Se as variáveis mudarem depois, o painel avisa que o texto atual é diferente do aceito.
 
 Cada geração custa por volta de US$ 0,05 a 0,10. A geração roda dentro da consulta de status (do aluno ou do admin), sem fila nem cron;
@@ -179,6 +182,12 @@ Variáveis na Vercel:
 | `SITE_URL` | endereço do site, sem barra no fim (ex.: `https://fitway.vercel.app`); usado na volta do checkout e no webhook |
 
 `PIX_LINK_999`, `PIX_LINK_499` e `PIX_TITULAR_EXIBIDO` (do Pix manual, que saiu) não são mais lidas e podem ser apagadas.
+
+**Devoluções.** O dinheiro sempre volta pelo app do InfinitePay; o painel só registra:
+- **Registrar devolução e cancelar** (no detalhe de um pedido pago, pronto ou com erro, com motivo): cancela o pedido, marca como estornado,
+  tira do acesso os 30 dias que aquele pedido deu (nunca antes de hoje; novo treino não dá dias) e, se o treino atual veio daquele pedido,
+  tira o treino da conta. Uma vez só por pedido.
+- **Marcar como devolvido** (na lista "para devolver" do resumo): tira o pagamento da lista e grava no histórico.
 
 Antes de liberar: habilitar o checkout externo nas configurações de checkout do InfinitePay e conferir, com um link real (criar link
 é grátis), o campo da URL na resposta de `/links` (pergunta P2 da spec).

@@ -42,7 +42,7 @@ Ao marcar "Li e aceito", eu declaro que li, entendi e concordo com o que segue.
 6.1. Este termo pode ser atualizado. Quando isso acontecer, vou precisar aceitar a nova versão no próximo pedido.
 6.2. Fica eleito o foro da comarca de {{foro}}, ressalvado o meu direito, como consumidor, de propor ação no foro do meu domicílio.`;
 
-// 2026-11-16-2: o 4.2 diz que os dados vão para a Anthropic (EUA) e que nome e email vão para a InfinitePay; o 6.1 fala em "pedido de treino"; e o item 5 passa a ter os dois meios de pagamento
+// 2026-11-16-2: o 4.5 aponta para a Política de privacidade; o 4.2 diz que os dados vão para a Anthropic (EUA) e que nome e email vão para a InfinitePay; o 6.1 fala em "pedido de treino"; e o item 5 passa a ter os dois meios de pagamento
 // (Pix e cartão, os dois pelo InfinitePay), com os valores de PRECOS.
 const ITEM_4_2 = "4.2. Para isso, essas informações são enviadas à Anthropic, empresa dos Estados Unidos que fornece o serviço de inteligência artificial usado na montagem do plano, e podem ser processadas fora do Brasil. Ao pagar, meu nome e email são enviados à InfinitePay, que processa os pagamentos por Pix e cartão. Meus dados não são vendidos nem usados para publicidade.";
 const ITEM_5_PAGAMENTO = `5. Pagamento e acesso
@@ -53,6 +53,7 @@ const ITEM_5_PAGAMENTO = `5. Pagamento e acesso
 5.5. Posso desistir da compra em até 7 dias depois do pagamento, como garante o Código de Defesa do Consumidor, pedindo pelo email de contato. O valor pago é devolvido.
 5.6. Valores e condições podem mudar. Mudanças valem para os próximos pagamentos, nunca para o que já foi pago, e serão avisadas no app.`;
 const V_2026_11_16_2 = V_2026_11_16.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, () => ITEM_5_PAGAMENTO).replace(/^4\.2\. .*$/m, () => ITEM_4_2)
+  .replace(/^4\.4\. .*$/m, (m) => m + "\n4.5. A Política de privacidade do FitWay, disponível no app, explica com mais detalhes como meus dados são tratados.")
   .replace(/^6\.1\. .*$/m, () => "6.1. Este termo pode ser atualizado. Quando isso acontecer, vou precisar aceitar a nova versão no próximo pedido de treino.");
 
 export const TERMOS = [{ versao: "2026-11-16-2", modelo: V_2026_11_16_2 }, { versao: "2026-11-16", modelo: V_2026_11_16 }];

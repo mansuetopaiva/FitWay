@@ -193,3 +193,15 @@ test("pedido_status: devolve meio e código do pedido (sem a mensagem do Pix man
   assert.deepEqual(r.precos, { inicial: 999, mensalidade: 999, novo_treino: 499 });
   assert.match(chamadas.find((c) => c.q.startsWith("select id, tipo, status, metodo")).q, /order by status = any\(\?\) desc/, "pedido aberto (inclui aguardando_confirmacao) vem primeiro");
 });
+
+test("privacidade: pública (sem login e com a IA desligada), sem consultar sessão", async () => {
+  const { montarPrivacidade } = await import("../api/_privacidade.js");
+  const ativo = process.env.TREINO_IA_ATIVO, antes = usuario;
+  try {
+    process.env.TREINO_IA_ATIVO = "0"; usuario = null; chamadas.length = 0;
+    const r = await chamar({ acao: "privacidade" });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.corpo, montarPrivacidade());
+    assert.ok(!chamadas.some((c) => c.q.includes("from sessoes")), "não precisa de login");
+  } finally { process.env.TREINO_IA_ATIVO = ativo; usuario = antes; }
+});

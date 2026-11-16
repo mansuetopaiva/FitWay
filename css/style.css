@@ -362,3 +362,10 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 .ped-estorno legend { font-size: 13px; margin-bottom: 6px; }
 .ped-op { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; }
 .adm-devolvido { display: block; margin: 6px 0 4px; }
+
+/* política de privacidade e links legais */
+.login-aceite { margin-top: 10px; text-align: center; }
+.login-links { margin-top: 12px; text-align: center; }
+.login-links a, .login-aceite a, .termo-texto a, .ped-termo a { color: var(--green); }
+.login.privacidade { text-align: left; }
+.login.privacidade h2 { margin-bottom: 8px; }

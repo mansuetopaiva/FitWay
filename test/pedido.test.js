@@ -115,9 +115,9 @@ test("termo: marcadores trocados pelas variáveis, nenhum sobrando no texto most
   assert.equal(montarTermo({}), null);
 });
 
-test("termo 2026-11-16-2: só o 4.2 e o item 5 mudam, e os valores do texto batem com PRECOS", () => {
+test("termo 2026-11-16-2: só o 4.2, o 4.5 (novo), o 6.1 e o item 5 mudam, e os valores do texto batem com PRECOS", () => {
   const [nova, antiga] = TERMOS.map((t) => t.modelo);
-  const sem = (m) => m.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, "").replace(/\n4\.2\. .*/, "").replace(/\n6\.1\. .*/, "");
+  const sem = (m) => m.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, "").replace(/\n4\.2\. .*/, "").replace(/\n6\.1\. .*/, "").replace(/\n4\.5\. .*/, "");
   assert.notEqual(nova, antiga);
   assert.equal(sem(nova), sem(antiga), "o resto do texto é igual");
   assert.ok(nova.includes("\n4.2. Para isso, essas informações são enviadas à Anthropic, empresa dos Estados Unidos que fornece o serviço de inteligência artificial usado na montagem do plano, e podem ser processadas fora do Brasil. Ao pagar, meu nome e email são enviados à InfinitePay, que processa os pagamentos por Pix e cartão. Meus dados não são vendidos nem usados para publicidade.\n"), "4.2 da versão nova");

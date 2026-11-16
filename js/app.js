@@ -109,8 +109,10 @@
           </div>
           <p class="err" role="alert"></p>
           <button class="btn" type="submit">${criar ? "Criar conta" : "Entrar"}</button>
+          ${criar ? `<p class="muted login-aceite">Ao criar a conta, você concorda com a <a href="#/privacidade">Política de privacidade</a>.</p>` : ""}
         </form>
         <p class="muted" style="margin-top:16px;text-align:center">Seus dados ficam salvos na sua conta e aparecem em qualquer aparelho.</p>
+        <p class="muted login-links"><a href="#/privacidade">Política de privacidade</a></p>
       </main>`;
     app.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
       const em = $("#email").value, pw = $("#senha").value;
@@ -572,7 +574,8 @@
         <button class="btn" id="enviarPdf">${data.plano ? "Trocar PDF do treino" : "Enviar PDF do treino"}</button>
         ${data.plano ? `<div class="tools"><button id="removerTreino">Remover treino</button></div>` : ""}
       </section>
-      <button class="btn" id="sair" style="margin-top:16px">Sair</button>`, "perfil");
+      <button class="btn" id="sair" style="margin-top:16px">Sair</button>
+      <p class="muted login-links"><a href="#/privacidade">Política de privacidade</a></p>`, "perfil");
     $("#sair").onclick = sair;
     ligarIA();
     atualizarIA();
@@ -728,6 +731,24 @@
     if (ia.pedido && (ia.pedido.status === "pago" || ia.pedido.status === "gerando")) iaTimer = setTimeout(atualizarIA, 4000);
   }
 
+  // ---------- política de privacidade (pública: abre também sem login) ----------
+  // O texto já escapado ganha o link na expressão fixa (usado também no termo).
+  const linkPrivacidade = (h, alvo = "") => h.replace(/Política de privacidade/g, `<a href="#/privacidade"${alvo}>Política de privacidade</a>`);
+  async function viewPrivacidade() {
+    const tela = (corpo) => {
+      const voltar = email ? `<a class="adm-voltar" href="#/perfil">${icon("back")}Perfil</a>` : `<a class="adm-voltar" href="#/">${icon("back")}Entrar</a>`;
+      const html = `${voltar}<section class="card"><h2 id="privTit" tabindex="-1">Política de privacidade</h2>${corpo}</section>`;
+      if (email) shell("Privacidade", html, "perfil"); else app.innerHTML = `<main class="login privacidade">${html}</main>`;
+    };
+    tela(`<p class="muted" style="margin-top:12px">Carregando…</p>`);
+    let t = null, erro = "";
+    try { t = await api("privacidade"); } catch (e) { erro = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; }
+    if (location.hash.split("/")[1] !== "privacidade") return;
+    tela(t ? `<p class="muted">Versão de ${esc(t.versao.slice(8, 10) + "/" + t.versao.slice(5, 7) + "/" + t.versao.slice(0, 4))}</p><div class="termo-texto">${esc(t.texto)}</div>`
+      : `<p class="err" role="alert">${esc(erro)}</p>`);
+    $("#privTit").focus();
+  }
+
   // ---------- termo de responsabilidade (texto atual, vindo do servidor) ----------
   async function viewTermo() {
     shell("Termo", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
@@ -735,7 +756,7 @@
     try { t = await api("termo"); } catch (e) { erro = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; }
     if (location.hash.split("/")[1] !== "termo") return;
     shell("Termo", `<a class="adm-voltar" href="#/perfil">${icon("back")}Perfil</a>
-      <section class="card">${t ? `<p class="muted">Versão ${esc(t.versao)}</p><div class="termo-texto">${esc(t.texto)}</div>`
+      <section class="card">${t ? `<p class="muted">Versão ${esc(t.versao)}</p><div class="termo-texto">${linkPrivacidade(esc(t.texto))}</div>`
         : `<p class="err" role="alert">${esc(erro)}</p>`}</section>`, "perfil");
   }
 
@@ -804,8 +825,9 @@
   function render() {
     clearInterval(tickTimer);
     clearTimeout(iaTimer);
-    if (!email) return viewLogin();
     const [, rota, arg] = location.hash.split("/");
+    if (rota === "privacidade") { window.scrollTo(0, 0); return viewPrivacidade(); } // pública
+    if (!email) return viewLogin();
     editandoPerfil = false;
     if (rota !== "treino") stopRest();
     if (!plano() && (rota === "treinos" || rota === "treino")) { location.hash = "#/perfil"; return; }
@@ -829,7 +851,7 @@
     if (document.hidden || !email) return;
     tickRest();
     const rota = location.hash.split("/")[1];
-    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "pagamento", "termo"].includes(rota) && diaRender !== dayKey(today())) render();
+    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "pagamento", "termo", "privacidade"].includes(rota) && diaRender !== dayKey(today())) render();
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });
