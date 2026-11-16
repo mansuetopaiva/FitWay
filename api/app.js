@@ -12,7 +12,7 @@ import { LETRAS, OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_ped
 import { ABERTOS, PRECOS, iaAtiva, planoVisivel, podePedir } from "./_precos.js";
 import { TERMO_VERSAO, montarTermo, termoFaltando } from "./_termo.js";
 import { montarPrivacidade } from "./_privacidade.js";
-import { ACOES as ACOES_SUPORTE, acaoSuporte, limparChamados, naoLido } from "./_suporte.js";
+import { ACOES as ACOES_SUPORTE, acaoSuporte, naoLido } from "./_suporte.js";
 import { lerPdf } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
@@ -122,6 +122,7 @@ const schema = () => pronto ||= (async () => {
     criado timestamptz not null default now()
   )`;
   await sql`create index if not exists chamado_mensagens_chamado on chamado_mensagens (chamado_id, id)`;
+  await sql`create unique index if not exists admin_log_devolvido on admin_log ((detalhes->>'transaction_nsu')) where acao = 'devolvido'`;
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
@@ -182,7 +183,7 @@ export default async function handler(req, res) {
         await sql`delete from sessoes where expira < now()`;
       }
       await abrirSessao(res, u.email);
-      return res.json(publico(u));
+      return res.json({ ...publico(u), suporteNaoLido: await naoLido(sql, u.email) });
     }
 
     if (b.acao === "privacidade") return res.json(montarPrivacidade()); // pública: vale para o app inteiro
@@ -262,7 +263,6 @@ export default async function handler(req, res) {
     }
     if (b.acao === "pedido_status") {
       await limparPedidos(sql, u.email);
-      await limparChamados(sql, u.email);
       // O pedido aberto vem primeiro: o admin pode reabrir um pedido antigo com "Gerar de novo".
       const ultimo = async () => (await sql`select id, tipo, status, metodo, valor, codigo, criado, pago_em, gerado_em from pedidos
         where email = ${u.email} order by status = any(${ABERTOS}) desc, criado desc limit 1`)[0] || null;

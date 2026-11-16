@@ -21,6 +21,7 @@ const anexoDe = (v) => (v === undefined || v === null || v === "" ? null : anexo
 const ERRO_TEXTO = `Escreva a mensagem (até ${MAX_TEXTO} caracteres).`;
 const ERRO_ANEXO = "Imagem inválida. Tente outra (JPEG).";
 const ERRO_HORA = `Você mandou ${MAX_HORA} mensagens na última hora. Espere um pouco e tente de novo.`;
+const ERRO_IMAGENS = "Limite de imagens de hoje atingido (cerca de 2 MB). Mande só o texto ou tente amanhã.";
 const naoAchou = () => falha(404, "Chamado não encontrado.");
 
 // Há resposta do admin que o aluno ainda não viu (ponto de aviso no Perfil e na aba).
@@ -30,7 +31,7 @@ export async function naoLido(sql, email) {
   return !!(x && x.n);
 }
 
-// Prazos, sem cron (roda junto do limparPedidos). email null = todos.
+// Prazos, sem cron: roda na lista do aluno, no resumo e na lista do admin. email null = todos.
 export async function limparChamados(sql, email) {
   await sql`update chamados set status = 'fechado', fechado_em = now()
     where (${email}::text is null or email = ${email}) and status = 'respondido' and atualizado < now() - interval '7 days'`;
@@ -68,6 +69,9 @@ export async function acaoSuporte(sql, u, b) {
             and (select count(*) from chamado_mensagens m join chamados k on k.id = m.chamado_id
               where k.email = ${email} and m.autor = 'aluno' and m.criado > now() - interval '1 hour') < 10
             and (${pid}::text is null or exists (select 1 from pedidos where id = ${pid}::text and email = ${email}))
+            and (select count(*) from chamados where email = ${email} and criado > now() - interval '1 day') < 5
+            and (${anexo}::text is null or (select coalesce(sum(length(m.anexo)), 0) from chamado_mensagens m join chamados k on k.id = m.chamado_id
+              where k.email = ${email} and m.autor = 'aluno' and m.criado > now() - interval '1 day') + length(${anexo}::text) <= 2000000)
           returning id),
         m as (insert into chamado_mensagens (chamado_id, autor, texto, anexo) select id, 'aluno', ${texto}, ${anexo}::text from c)
       select id from c`;
@@ -75,10 +79,13 @@ export async function acaoSuporte(sql, u, b) {
     const [d] = await sql`select (select count(*) from chamados where email = ${email} and status in ('aberto', 'respondido'))::int as abertos,
         (select count(*) from chamado_mensagens m join chamados k on k.id = m.chamado_id
           where k.email = ${email} and m.autor = 'aluno' and m.criado > now() - interval '1 hour')::int as hora,
-        (${pid}::text is null or exists (select 1 from pedidos where id = ${pid}::text and email = ${email})) as pedido_ok`;
+        (${pid}::text is null or exists (select 1 from pedidos where id = ${pid}::text and email = ${email})) as pedido_ok,
+        (select count(*) from chamados where email = ${email} and criado > now() - interval '1 day')::int as hoje`;
     if (d && !d.pedido_ok) return falha(404, "Pedido não encontrado.");
     if (d && d.abertos >= MAX_ABERTOS) return falha(429, `Você já tem ${MAX_ABERTOS} chamados em andamento. Encerre um deles ou aguarde a resposta.`);
-    return falha(429, ERRO_HORA);
+    if (d && d.hora >= MAX_HORA) return falha(429, ERRO_HORA);
+    if (d && d.hoje >= 5) return falha(429, "Você abriu 5 chamados hoje. Continue pelos que já estão abertos ou tente amanhã.");
+    return falha(429, ERRO_IMAGENS);
   }
 
   if (!idValido(b.id)) return falha(400, "Chamado inválido.");
@@ -91,7 +98,7 @@ export async function acaoSuporte(sql, u, b) {
     if (!c) return naoAchou();
     // Sem o anexo (só se existe) e sem o email de quem respondeu.
     const mensagens = await sql`select id, autor, texto, anexo is not null as anexo, criado from chamado_mensagens where chamado_id = ${id} order by id`;
-    return ok({ chamado: c, mensagens });
+    return ok({ chamado: c, mensagens, naoLido: await naoLido(sql, email) });
   }
 
   if (b.acao === "chamado_anexo") {
@@ -109,6 +116,8 @@ export async function acaoSuporte(sql, u, b) {
           where id = ${id} and email = ${email} and status <> 'fechado'
             and (select count(*) from chamado_mensagens m join chamados k on k.id = m.chamado_id
               where k.email = ${email} and m.autor = 'aluno' and m.criado > now() - interval '1 hour') < 10
+            and (${anexo}::text is null or (select coalesce(sum(length(m.anexo)), 0) from chamado_mensagens m join chamados k on k.id = m.chamado_id
+              where k.email = ${email} and m.autor = 'aluno' and m.criado > now() - interval '1 day') + length(${anexo}::text) <= 2000000)
           returning id),
         m as (insert into chamado_mensagens (chamado_id, autor, texto, anexo) select id, 'aluno', ${texto}, ${anexo}::text from c returning id)
       select id from m`;
@@ -116,7 +125,7 @@ export async function acaoSuporte(sql, u, b) {
     const [d] = await sql`select status from chamados where id = ${id} and email = ${email}`;
     if (!d) return naoAchou();
     if (d.status === "fechado") return falha(400, "Este chamado foi encerrado. Abra um novo chamado.");
-    return falha(429, ERRO_HORA);
+    return falha(429, anexo ? `${ERRO_HORA} ${ERRO_IMAGENS}` : ERRO_HORA);
   }
 
   if (b.acao === "chamado_encerrar") {
@@ -195,7 +204,7 @@ export async function acaoAdminSuporte(sql, u, b) {
     const [m] = await sql`with m as (select m.anexo, c.email, c.id from chamado_mensagens m join chamados c on c.id = m.chamado_id
           where c.id = ${id} and m.id = ${b.msg} and m.anexo is not null),
         l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
-          select ${u.email}, 'suporte_anexo_ver', email, jsonb_build_object('chamado', id, 'mensagem', ${b.msg}::int) from m)
+          select ${u.email}, 'suporte_anexo_ver', email, jsonb_build_object('chamado', id, 'mensagem', ${b.msg}::bigint) from m)
       select anexo from m`;
     return m ? ok({ anexo: m.anexo }) : falha(404, "Imagem não encontrada (pode ter sido apagada 90 dias depois do encerramento).");
   }

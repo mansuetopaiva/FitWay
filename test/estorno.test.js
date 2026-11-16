@@ -24,13 +24,13 @@ test("estornar: não-admin 403 e motivo inválido 400, sem consultar o banco", a
   }
 });
 
-test("estornar: uma instrução só, condicional (pago/pronto/erro, sem estorno anterior), com log, dias e treino do próprio pedido", async () => {
+test("estornar: uma instrução só, condicional (pago/pronto/erro ou cancelado depois de pago, sem estorno anterior), com log, dias e treino do próprio pedido", async () => {
   const s = sqlFalso(() => [{ status: "cancelado", acesso_ate: null }]);
   const r = await acaoAdmin(s.sql, dono, { op: "pedido_estornar", id: "p1", motivo: "outro", texto: "  cobrou duas vezes  " });
   assert.equal(r.status, 200);
   assert.equal(s.chamadas.length, 1, "uma instrução: nunca efeito sem log");
   const { q, valores } = s.chamadas[0];
-  assert.match(q, /status in \('pago', 'pronto', 'erro'\) and estornado_em is null/);
+  assert.match(q, /estornado_em is null\s+and \(status in \('pago', 'pronto', 'erro'\) or \(status = 'cancelado' and pago_em is not null\)\)/);
   assert.match(q, /'pedido_estornado'/);
   assert.match(q, /least\(acesso_ate, greatest\(now\(\), acesso_ate - make_interval/, "nunca aumenta e nunca antes de now()");
   assert.match(q, /dados->'plano'->>'pedido' = \(select id from p\)/, "treino só se for o deste pedido");

@@ -115,15 +115,19 @@ e chama `confirmarPagamento`; 200 (processado ou ignorado) ou 400 (temporário).
 
 O dinheiro é sempre devolvido pelo dono no app do InfinitePay; o app só registra e desfaz o efeito.
 
-- **`pedido_estornar { id, motivo, texto? }`** (botão "Registrar devolução e cancelar", em pedido `pago`, `pronto` ou `erro`):
+- **`pedido_estornar { id, motivo, texto? }`** (botão "Registrar devolução e cancelar", em pedido `pago`, `pronto` ou `erro`, ou
+  `cancelado` que tinha sido pago, `pago_em` preenchido):
   `motivo` = `desistencia` ("Desistência em 7 dias"), `duplicado` ("Pagamento duplicado") ou `outro` (com `texto` de 1 a 200 caracteres).
   Numa instrução: `status = 'cancelado'`, `estornado_em` e `estornado_por` (colunas novas); tira do acesso os dias que **este** pedido deu
   (`inicial` e `mensalidade`: 30; `novo_treino`: 0), com `least(acesso_ate, greatest(now(), acesso_ate - dias))` (nunca antes de agora,
-  nunca aumenta); se `dados.plano.pedido` é este pedido, o treino sai da conta (continua em `pedidos.plano_gerado`); `admin_log`
+  nunca aumenta). **Limite conhecido:** os 30 dias saem do fim do acesso atual; se o pedido estornado for antigo e já usado, quem perde
+  dias é o pagamento mais novo (o pedido não guarda o período que cobriu). Se `dados.plano.pedido` é este pedido, o treino sai da conta
+  (continua em `pedidos.plano_gerado`) e volta o do pedido `pronto` anterior não estornado, se houver; `admin_log`
   `pedido_estornado` com valor, dias, motivo e se o treino saiu. Condição `estornado_em is null`: o segundo clique não desconta de novo.
   `erro` entra porque também é pedido pago.
 - **`devolucao_marcar { transaction_nsu }`** (botão "Marcar como devolvido" na lista "para devolver"): grava `admin_log` `devolvido`
-  só se o pagamento está na lista e ainda não foi marcado; a lista do resumo deixa de mostrá-lo.
+  só se o pagamento está na lista e ainda não foi marcado (índice único `admin_log_devolvido` contra dois cliques); a lista do resumo deixa de mostrá-lo.
+- Pagamento em dobro do mesmo pedido: o segundo vai para "Pagamentos para devolver"; resolve com "Marcar como devolvido", sem estornar o pedido.
 - A receita do mês não conta pedidos estornados.
 
 ### Telas

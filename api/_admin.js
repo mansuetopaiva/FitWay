@@ -108,11 +108,14 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     const t = typeof b.transaction_nsu === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(b.transaction_nsu) ? b.transaction_nsu : "";
     if (!t) return falha(400, "Informe o pagamento.");
     // Só um item que está na lista "para devolver", e uma vez.
-    const [x] = await sql`insert into admin_log (admin_email, acao, alvo_email, detalhes)
+    let x;
+    try {
+      [x] = await sql`insert into admin_log (admin_email, acao, alvo_email, detalhes)
       select ${u.email}, 'devolvido', l.alvo_email, jsonb_build_object('transaction_nsu', ${t}::text, 'valor', l.detalhes->'paid_amount', 'pedido', l.detalhes->'pedido')
       from admin_log l where l.acao = 'cartao_sem_pedido' and l.detalhes->>'transaction_nsu' = ${t}
         and not exists (select 1 from admin_log d where d.acao = 'devolvido' and d.detalhes->>'transaction_nsu' = ${t})
       limit 1 returning id`;
+    } catch (e) { if (!(e && e.code === "23505")) throw e; } // dois cliques ao mesmo tempo: o índice admin_log_devolvido segura
     if (!x) return falha(400, "Este pagamento não está na lista para devolver (ou já foi marcado).");
     return ok({});
   }
@@ -147,7 +150,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         metodo: x.metodo, codigo: x.codigo, confirmadoPor: x.confirmado_por,
         transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref,
         links: { pix: !!x.checkout_url_pix, cartao: !!x.checkout_url }, meioEscolhido: meioEscolhido(x), pixAntigo: x.pix_antigo || null,
-        estornadoEm: x.estornado_em || null, estornadoPor: x.estornado_por || null });
+        estornadoEm: x.estornado_em || null, estornadoPor: x.estornado_por || null, diasDoPedido: DIAS[x.tipo] || 0 });
     }
     let x;
     if (b.op === "pedido_verificar") {
@@ -189,21 +192,26 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
       if (!x) return falha(400, "Este pedido não pode mais ser cancelado.");
     } else if (b.op === "pedido_estornar") {
       // Numa instrução: cancela e marca o pedido, tira só os dias que ESTE pedido deu (sem passar de now() nem aumentar)
-      // e, se o treino atual da conta é o deste pedido, tira o treino (continua em pedidos.plano_gerado). A condição
+      // (também um pedido pago que já tinha sido cancelado) e, se o treino atual da conta é o deste pedido, tira o treino (continua em pedidos.plano_gerado). A condição
       // "estornado_em is null" faz o segundo clique não achar a linha: nunca desconta duas vezes.
       [x] = await sql`with p as (update pedidos set status = 'cancelado', estornado_em = now(), estornado_por = ${u.email}, atualizado = now()
-            where id = ${id} and status in ('pago', 'pronto', 'erro') and estornado_em is null
+            where id = ${id} and estornado_em is null
+              and (status in ('pago', 'pronto', 'erro') or (status = 'cancelado' and pago_em is not null))
             returning id, email, tipo, valor, (${JSON.stringify(DIAS)}::jsonb->>tipo)::int as dias),
           a as (update usuarios set
               acesso_ate = case when (select dias from p) > 0 and acesso_ate is not null
                 then least(acesso_ate, greatest(now(), acesso_ate - make_interval(days => (select dias from p)))) else acesso_ate end,
-              dados = case when dados->'plano'->>'pedido' = (select id from p) then dados - 'plano' else dados end
+              -- O treino deste pedido sai; volta o do pedido pronto anterior (não estornado), se houver.
+              dados = case when dados->'plano'->>'pedido' = (select id from p) then
+                coalesce((select (dados - 'plano') || jsonb_build_object('plano', o.plano_gerado, 'proximo', 'A') from pedidos o
+                  where o.email = usuarios.email and o.id <> (select id from p) and o.status = 'pronto' and o.estornado_em is null and o.plano_gerado is not null
+                  order by o.gerado_em desc nulls last limit 1), dados - 'plano') else dados end
             where email = (select email from p) returning acesso_ate, (select dados->'plano'->>'pedido' from usuarios where email = (select email from p)) = (select id from p) as tirou),
           l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
             select ${u.email}, 'pedido_estornado', p.email, jsonb_build_object('pedido', p.id, 'tipo', p.tipo, 'valor', p.valor, 'dias', p.dias,
               'motivo', ${motivo}::text, 'texto', ${texto}::text, 'treino_removido', coalesce((select tirou from a), false)) from p)
         select 'cancelado' as status, (select acesso_ate from a) as acesso_ate from p`;
-      if (!x) return falha(400, "Só dá para registrar a devolução de um pedido pago, pronto ou com erro, e uma vez só (este já foi estornado ou não foi pago).");
+      if (!x) return falha(400, "Só dá para registrar a devolução de um pedido que foi pago, e uma vez só (este já foi estornado ou não foi pago).");
     } else return falha(400, "Operação desconhecida.");
     if (!x) return falha(400, "Este pedido não está aguardando pagamento.");
     return ok({ status: x.status, acessoAte: x.acesso_ate });
@@ -219,16 +227,22 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     if (ehAdmin(alvo)) return falha(400, "Conta de admin não pode ser excluída por aqui.");
     // Numa instrução: apaga (cascata: sessões, pedidos, chamados e mensagens) e registra só o SHA-256 do email, não o email.
     const hash = createHash("sha256").update(alvo).digest("hex");
+    // Os registros antigos dessa conta no admin_log perdem o email (fica o mesmo hash): quem se cadastrar depois com o
+    // mesmo email não vê o histórico da conta excluída. Pedido aberto também impede: o link dele ainda pode ser pago.
     const [x] = await sql`with a as (select email from usuarios where email = ${alvo}
-          and not exists (select 1 from pedidos where email = ${alvo} and status in ('pago', 'gerando'))),
+          and not exists (select 1 from pedidos where email = ${alvo} and status in ('pago', 'gerando', 'aguardando_pagamento', 'aguardando_confirmacao'))),
         d as (delete from usuarios where email in (select email from a) returning email),
+        h as (update admin_log set alvo_email = null, detalhes = coalesce(detalhes, '{}'::jsonb) - 'texto' || jsonb_build_object('email_sha256', ${hash}::text)
+          where alvo_email = ${alvo} and exists (select 1 from d)),
         l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
           select ${u.email}, 'conta_excluida', null, jsonb_build_object('email_sha256', ${hash}::text) from d)
       select true as ok from d`;
     if (x) return ok({});
     const [d] = await sql`select exists (select 1 from usuarios where email = ${alvo}) as existe,
-      exists (select 1 from pedidos where email = ${alvo} and status in ('pago', 'gerando')) as andamento`;
+      exists (select 1 from pedidos where email = ${alvo} and status in ('pago', 'gerando')) as andamento,
+      exists (select 1 from pedidos where email = ${alvo} and status in ('aguardando_pagamento', 'aguardando_confirmacao')) as aberto`;
     if (d && d.andamento) return falha(400, "Esta conta tem um pedido pago ou gerando o treino. Resolva antes (gere o treino ou registre a devolução).");
+    if (d && d.aberto) return falha(400, "Esta conta tem um pedido aguardando pagamento. Cancele o pedido antes de excluir.");
     return falha(404, "Usuário não encontrado.");
   }
 

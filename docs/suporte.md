@@ -34,9 +34,10 @@ Todas exigem login e filtram por `email = u.email` dentro da própria instruçã
 | `chamado_responder` | `id, texto, anexo?` | só em chamado não fechado; status vira `aberto` |
 | `chamado_encerrar` | `id` | `fechado`, `fechado_em = now()` |
 
-- `eu` e `pedido_status` também devolvem `suporteNaoLido` (ponto de aviso no Perfil e no ícone da aba).
+- `eu`, `entrar`, `criar`, `pedido_status` e `chamado` também devolvem o aviso (`suporteNaoLido` / `naoLido`) (ponto de aviso no Perfil e no ícone da aba).
 - **Limites (servidor):** no máximo 3 chamados `aberto` ou `respondido` por aluno; no máximo 10 mensagens do aluno por hora (soma de
-  todos os chamados). Conferidos dentro do INSERT. `shortcut:` dois envios exatamente simultâneos podem passar 1 do limite; trocar por
+  todos os chamados); no máximo 5 chamados abertos por dia e ~2 MB de imagens por dia (soma de `length(anexo)` ≤ 2 000 000). Conferidos
+  dentro do INSERT. `shortcut:` dois envios exatamente simultâneos podem passar 1 do limite; trocar por
   trava (`for update` na linha do usuário) se virar abuso.
 - **Texto:** `trim`, 1 a 2000 caracteres. Mostrado sempre com `esc()` e `white-space: pre-wrap` (nunca como HTML).
 - **Anexo:** só `data:image/jpeg;base64,/9j/…` (assinatura JPEG `FF D8 FF`), até 410 000 caracteres (~300 KB). O app reduz a imagem
@@ -57,12 +58,17 @@ Todas exigem login e filtram por `email = u.email` dentro da própria instruçã
 ### Exclusão de conta (`usuario_excluir`)
 
 - `confirmacao` precisa ser igual ao email (o painel pede para digitar). A conta do próprio admin → 400.
-- Pedido em `pago` ou `gerando` → 400 "Resolva antes o pedido em andamento (pago ou gerando)."
+- Pedido em `pago` ou `gerando` → 400 (resolver antes). Pedido em `aguardando_pagamento` ou `aguardando_confirmacao` → 400 (cancelar
+  antes): o link dele ainda pode ser pago, e depois da exclusão esse pagamento não deixaria rastro.
 - Numa instrução: `delete from usuarios` (cascata: sessões, pedidos, chamados, mensagens) e `admin_log` `conta_excluida` com
   `alvo_email = null` e `detalhes = { email_sha256 }` (SHA-256 do email em minúsculas). A data e quem excluiu ficam nas colunas do log.
-- O histórico antigo do `admin_log` (`alvo_email` de ações anteriores) **não** é apagado nesta versão (pergunta S1).
+- Na mesma instrução, os registros antigos da conta no `admin_log` ficam com `alvo_email = null`, sem o `texto` livre do estorno e com o
+  mesmo `email_sha256`: quem se cadastrar depois com o mesmo email não vê o histórico, e o registro continua ligável pelo hash.
+- **Limite conhecido:** o SHA-256 de um email sem segredo é pseudônimo (quem tem o banco e uma lista de emails reverte). Trocar por HMAC
+  com uma variável secreta, se for preciso mais que isso. Pedidos pagos somem na cascata (decisão do dono): o comprovante da venda fica
+  no InfinitePay.
 
-## Prazos (`limparChamados`, sem cron: roda junto com `limparPedidos`, no `pedido_status`, no resumo do admin e na lista do suporte)
+## Prazos (`limparChamados`, sem cron: roda na lista do aluno, no resumo do admin e na lista do suporte do admin; fora do `pedido_status`, que é consultado a cada 4 s)
 
 - `respondido` com `atualizado` há mais de 7 dias → `fechado` (o aluno não escreveu depois da resposta).
 - Anexos apagados (`anexo = null`) 90 dias depois de `fechado_em`. Reabrir zera `fechado_em`.
@@ -87,10 +93,11 @@ Acrescenta o 2.6 (mensagens e imagens dos chamados), a linha dos anexos no item 
 | Ler, responder ou encerrar chamado de outra conta (id adivinhado) | `where email = u.email` em toda instrução do aluno; id com 96 bits aleatórios |
 | HTML/script no texto (o admin lê) | `esc()` sempre; nenhum `innerHTML` com texto cru; CSP sem `unsafe-inline` em scripts |
 | Anexo que não é imagem (SVG, HTML, `javascript:`) | só `data:image/jpeg;base64,` com assinatura JPEG; mostrado só como `<img src>` |
-| Encher o banco ou o painel | 3 chamados abertos, 10 mensagens por hora, 2000 caracteres, ~300 KB por anexo |
+| Encher o banco ou o painel | 3 chamados abertos, 5 por dia, 10 mensagens por hora, ~2 MB de imagens por dia, 2000 caracteres, ~300 KB por anexo |
+| Pedir pelo chamado algo sobre outra conta | Regra escrita no painel: só a conta do chamado; nunca trocar email ou senha a pedido |
 | Anexo com dado pessoal visto sem rastro | `suporte_anexo_ver` no `admin_log` |
 | Exclusão por engano | duas etapas (digitar o email) conferidas também no servidor; recusa com pedido pago ou gerando; nunca a própria conta |
-| Exclusão deixar o email no log | o registro da exclusão guarda só o SHA-256 |
+| Exclusão deixar o email no log | o registro da exclusão e os antigos da conta guardam só o SHA-256 |
 
 ## Testes
 
@@ -100,4 +107,5 @@ limites reais; resposta do admin acende o aviso; 7 dias fecha; 90 dias apaga ane
 
 ## Perguntas em aberto
 
-- **S1.** Ao excluir uma conta, apagar também o `alvo_email` dos registros antigos do `admin_log` (trocar pelo hash)? Hoje ficam.
+- **S1 (fechada em 2026-11-16).** Os registros antigos do `admin_log` perdem o email na exclusão (ficam com o hash).
+- **S2.** Limite por IP no cadastro (contas criadas em série burlam os limites por conta). Fora desta versão; a Vercel Firewall resolve sem código.

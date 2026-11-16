@@ -40,6 +40,8 @@ test("abrir: uma instrução com os limites (3 abertos, 10 mensagens/hora) e o p
   assert.match(ins.q, /m\.autor = 'aluno' and m\.criado > now\(\) - interval '1 hour'\) < 10/);
   assert.match(ins.q, /select id from pedidos where id = .* and email = /s, "pedido só da própria conta");
   assert.match(ins.q, /insert into chamado_mensagens/);
+  assert.match(ins.q, /criado > now\(\) - interval '1 day'\) < 5/, "no máximo 5 chamados por dia");
+  assert.match(ins.q, /sum\(length\(m\.anexo\)\).*<= 2000000/s, "no máximo ~2 MB de imagens por dia");
   assert.ok(ins.valores.includes("paguei\ne não liberou"), "texto aparado, quebra de linha mantida");
   assert.ok(ins.valores.includes(JPEG));
 });
@@ -164,7 +166,8 @@ test("excluir conta: uma instrução, recusa com pedido pago ou gerando, log só
   const r = await acaoAdmin(s.sql, dono, { op: "usuario_excluir", email: "Al@X.com", confirmacao: "al@x.com" });
   assert.equal(r.status, 200);
   const del = s.chamadas.find((c) => c.q.includes("delete from usuarios"));
-  assert.match(del.q, /status in \('pago', 'gerando'\)/);
+  assert.match(del.q, /status in \('pago', 'gerando', 'aguardando_pagamento', 'aguardando_confirmacao'\)/);
+  assert.match(del.q, /update admin_log set alvo_email = null, .*'email_sha256'.*where alvo_email = \? and exists \(select 1 from d\)/s, "histórico antigo perde o email");
   assert.match(del.q, /insert into admin_log .*'conta_excluida', null, jsonb_build_object\('email_sha256'/s);
   assert.ok(del.valores.includes(createHash("sha256").update("al@x.com").digest("hex")));
   const det = del.valores.filter((v) => typeof v === "string" && v.includes("al@x.com"));
@@ -172,6 +175,9 @@ test("excluir conta: uma instrução, recusa com pedido pago ou gerando, log só
   const p = sqlFalso((q) => (q.includes("delete from usuarios") ? [] : [{ existe: true, andamento: true }]));
   const r2 = await acaoAdmin(p.sql, dono, { op: "usuario_excluir", email: "al@x.com", confirmacao: "al@x.com" });
   assert.equal(r2.status, 400); assert.match(r2.corpo.erro, /pago ou gerando/);
+  const a = sqlFalso((q) => (q.includes("delete from usuarios") ? [] : [{ existe: true, andamento: false, aberto: true }]));
+  const r3 = await acaoAdmin(a.sql, dono, { op: "usuario_excluir", email: "al@x.com", confirmacao: "al@x.com" });
+  assert.equal(r3.status, 400); assert.match(r3.corpo.erro, /aguardando pagamento/);
   const n = sqlFalso((q) => (q.includes("delete from usuarios") ? [] : [{ existe: false, andamento: false }]));
   assert.equal((await acaoAdmin(n.sql, dono, { op: "usuario_excluir", email: "al@x.com", confirmacao: "al@x.com" })).status, 404);
 });
