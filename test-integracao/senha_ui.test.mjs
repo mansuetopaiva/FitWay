@@ -74,3 +74,27 @@ test("link de outra conta com alguém conectado: avisa e só segue depois de sai
   assert.match(n.texto(), /Conta: ata@x\.com/);
   assert.equal(n.$('#novaForm input[autocomplete="username"]').value, "ata@x.com");
 });
+
+test("Perfil: senhas novas diferentes não chegam ao servidor", async () => {
+  const t = (await chamar({ acao: "criar", nome: "Cris", email: "cris@x.com", senha: "velha12" })).token;
+  const vistos = [];
+  const n = await navegador(async (b, tk) => { vistos.push(b.acao); return chamar(b, tk); }, { hash: "#/perfil", token: t });
+  await n.espera(() => n.$("#trocarSenha"));
+  n.clicar("#trocarSenha");
+  await n.espera(() => n.$("#senhaForm"));
+  n.$("#senhaAtual").value = "velha12"; n.$("#senhaNova1").value = "nova123"; n.$("#senhaNova2").value = "nova124";
+  n.$("#senhaForm .btn").click();
+  assert.match(n.$("#senhaForm .err").textContent, /não são iguais/);
+  assert.ok(!vistos.includes("senha_alterar"));
+});
+
+test("link que vence entre abrir a tela e enviar: mostra que não vale mais", async () => {
+  await chamar({ acao: "criar", nome: "Dora", email: "dora@x.com", senha: "velha12" });
+  const tok = await pedir("dora@x.com");
+  const n = await navegador(chamar, { hash: "#/nova-senha/" + tok });
+  await n.espera(() => n.$("#novaForm"));
+  await sql`update senha_tokens set expira = now() - interval '1 second' where email = 'dora@x.com'`;
+  n.$("#nova1").value = "nova123"; n.$("#nova2").value = "nova123"; n.$("#novaForm .btn").click();
+  await n.espera(() => /Este link não vale mais/.test(n.texto()) && !n.$("#novaForm"));
+  assert.equal((await chamar({ acao: "entrar", email: "dora@x.com", senha: "velha12" })).status, 200, "a senha não mudou");
+});

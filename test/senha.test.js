@@ -164,6 +164,6 @@ test("pedir: conta de admin não recebe link (mesma resposta); IPv6 conta por /6
     assert.ok(s.chamadas.find((c) => c.q.includes("insert into senha_pedidos")).valores.includes("2001:db8:1:2::/64"));
     const cont = s.chamadas.find((c) => c.q.includes("as por_email"));
     assert.match(cont.q, /id < \?/); assert.ok(cont.valores.includes(7));
-    assert.match(s.chamadas.find((c) => c.q.includes("insert into senha_tokens")).q, /from senha_tokens where criado > now\(\) - interval '1 hour'\) < 100/, "teto global");
+    assert.match(s.chamadas.find((c) => c.q.includes("insert into senha_tokens")).q, /from senha_tokens where criado > now\(\) - interval '1 hour'\) < 100 returning/, "teto global");
   } finally { delete process.env.ADMIN_EMAILS; }
 });
