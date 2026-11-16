@@ -130,8 +130,10 @@ e chama `confirmarPagamento`; 200 (processado ou ignorado) ou 400 (temporário).
 
 ### Termo (versão `2026-11-16-2`, ainda não publicada, editada no lugar)
 
-- 4.2: "Para isso, essas informações são enviadas ao serviço de inteligência artificial usado na montagem do plano. Ao pagar, meu nome
-  e email são enviados à InfinitePay, que processa os pagamentos por Pix e cartão. Meus dados não são vendidos nem usados para publicidade."
+- 4.2: "Para isso, essas informações são enviadas à Anthropic, empresa dos Estados Unidos que fornece o serviço de inteligência artificial
+  usado na montagem do plano, e podem ser processadas fora do Brasil. Ao pagar, meu nome e email são enviados à InfinitePay, que processa
+  os pagamentos por Pix e cartão. Meus dados não são vendidos nem usados para publicidade."
+- 6.1: "Este termo pode ser atualizado. Quando isso acontecer, vou precisar aceitar a nova versão no próximo pedido de treino."
 - 4.3: já não citava o comprovante (o item 4 vinha igual ao da versão `2026-11-16`); fica como está.
 - 5.3: "Os pagamentos por Pix e por cartão são processados pela InfinitePay e confirmados automaticamente. O acesso e o treino são
   liberados assim que o pagamento é confirmado."

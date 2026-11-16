@@ -117,10 +117,13 @@ test("termo: marcadores trocados pelas variáveis, nenhum sobrando no texto most
 
 test("termo 2026-11-16-2: só o 4.2 e o item 5 mudam, e os valores do texto batem com PRECOS", () => {
   const [nova, antiga] = TERMOS.map((t) => t.modelo);
-  const sem = (m) => m.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, "").replace(/\n4\.2\. .*/, "");
+  const sem = (m) => m.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, "").replace(/\n4\.2\. .*/, "").replace(/\n6\.1\. .*/, "");
   assert.notEqual(nova, antiga);
   assert.equal(sem(nova), sem(antiga), "o resto do texto é igual");
-  assert.match(nova, /\n4\.2\. Para isso, essas informações são enviadas ao serviço de inteligência artificial usado na montagem do plano\. Ao pagar, meu nome e email são enviados à InfinitePay, que processa os pagamentos por Pix e cartão\. Meus dados não são vendidos nem usados para publicidade\.\n/);
+  assert.ok(nova.includes("\n4.2. Para isso, essas informações são enviadas à Anthropic, empresa dos Estados Unidos que fornece o serviço de inteligência artificial usado na montagem do plano, e podem ser processadas fora do Brasil. Ao pagar, meu nome e email são enviados à InfinitePay, que processa os pagamentos por Pix e cartão. Meus dados não são vendidos nem usados para publicidade.\n"), "4.2 da versão nova");
+  assert.ok(nova.includes("\n6.1. Este termo pode ser atualizado. Quando isso acontecer, vou precisar aceitar a nova versão no próximo pedido de treino.\n"), "6.1 da versão nova");
+  assert.match(antiga, /\n6\.1\. .*no próximo pedido\.\n/, "a versão publicada não muda");
+  assert.doesNotMatch(nova, /\n4\.2\. Para isso, essas informações são enviadas ao serviço de inteligência artificial usado na montagem do plano\. Ao pagar, meu nome e email são enviados à InfinitePay, que processa os pagamentos por Pix e cartão\. Meus dados não são vendidos nem usados para publicidade\.\n/);
   assert.match(antiga, /\n4\.2\. .*Elas não são vendidas nem usadas para publicidade\.\n/, "a versão publicada não muda");
   assert.doesNotMatch(nova, /comprovante|Nubank|link de cobrança|conferência é manual|24 horas/i);
   const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
