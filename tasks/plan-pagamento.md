@@ -78,7 +78,7 @@ Nenhuma migração destrutiva. Commits de remoção separados; histórico intact
   admin sem conferência de Pix, com "meio diferente" e "Cancelar pedido" no pedido antigo.
 - [x] **T15. Termo 2026-11-16-2** (4.2, 5.3, 5.4) e teste.
 - [x] **T16. README** (fluxo e variáveis).
-- [ ] **T17. Os 4 agentes em paralelo** (fraude pelo security-auditor), correções, go/no-go. Checkpoints PGlite e jsdom atualizados.
+- [x] **T17. Os 4 agentes em paralelo** (fraude pelo security-auditor), correções, go/no-go. Checkpoints PGlite e jsdom atualizados.
 
 **Depois:** você habilita o checkout externo no InfinitePay e eu rodo o teste com link real (P2).
 
