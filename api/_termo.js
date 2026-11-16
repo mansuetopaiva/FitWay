@@ -42,15 +42,17 @@ Ao marcar "Li e aceito", eu declaro que li, entendi e concordo com o que segue.
 6.1. Este termo pode ser atualizado. Quando isso acontecer, vou precisar aceitar a nova versão no próximo pedido.
 6.2. Fica eleito o foro da comarca de {{foro}}, ressalvado o meu direito, como consumidor, de propor ação no foro do meu domicílio.`;
 
-// 2026-11-16-2: o item 5 passa a ter os dois meios de pagamento (Pix e cartão), com os valores de PRECOS.
+// 2026-11-16-2: o 4.2 avisa que nome e email vão para a InfinitePay, e o item 5 passa a ter os dois meios de pagamento
+// (Pix e cartão, os dois pelo InfinitePay), com os valores de PRECOS.
+const ITEM_4_2 = "4.2. Para isso, essas informações são enviadas ao serviço de inteligência artificial usado na montagem do plano. Ao pagar, meu nome e email são enviados à InfinitePay, que processa os pagamentos por Pix e cartão. Meus dados não são vendidos nem usados para publicidade.";
 const ITEM_5_PAGAMENTO = `5. Pagamento e acesso
 5.1. O primeiro treino custa R$ 9,99 no Pix ou R$ 11,99 no cartão de crédito e inclui 30 dias de acesso. Para continuar vendo o treino, pago a mensalidade de R$ 9,99 no Pix ou R$ 11,99 no cartão a cada 30 dias. Sem o pagamento, o treino deixa de aparecer no app até eu renovar. Meus check-ins e meu histórico continuam guardados.
 5.2. Depois de 8 semanas do plano, com o acesso em dia, posso pedir um novo treino por R$ 4,99 no Pix ou R$ 5,99 no cartão.
-5.3. O pagamento por Pix é feito pelo link de cobrança indicado no app. Depois de pagar, preciso enviar o comprovante pelo app. A conferência é manual e feita em até 24 horas; o acesso e o treino são liberados depois da confirmação. O pagamento por cartão é confirmado automaticamente.
-5.4. Pedidos sem pagamento confirmado em 30 dias são cancelados, e as fotos e o comprovante enviados são apagados.
+5.3. Os pagamentos por Pix e por cartão são processados pela InfinitePay e confirmados automaticamente. O acesso e o treino são liberados assim que o pagamento é confirmado.
+5.4. Pedidos sem pagamento em 30 dias são cancelados, e as fotos enviadas são apagadas.
 5.5. Posso desistir da compra em até 7 dias depois do pagamento, como garante o Código de Defesa do Consumidor, pedindo pelo email de contato. O valor pago é devolvido.
 5.6. Valores e condições podem mudar. Mudanças valem para os próximos pagamentos, nunca para o que já foi pago, e serão avisadas no app.`;
-const V_2026_11_16_2 = V_2026_11_16.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, ITEM_5_PAGAMENTO);
+const V_2026_11_16_2 = V_2026_11_16.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, () => ITEM_5_PAGAMENTO).replace(/^4\.2\. .*$/m, () => ITEM_4_2);
 
 export const TERMOS = [{ versao: "2026-11-16-2", modelo: V_2026_11_16_2 }, { versao: "2026-11-16", modelo: V_2026_11_16 }];
 export const TERMO_VERSAO = TERMOS[0].versao;

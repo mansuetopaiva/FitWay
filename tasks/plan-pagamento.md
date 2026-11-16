@@ -76,7 +76,7 @@ Nenhuma migração destrutiva. Commits de remoção separados; histórico intact
     dois links confirmam uma vez só, 30 dias).
 - [x] **T14. Telas** (`js/pagamento.js`, `js/app.js`, `js/admin.js`, `css/style.css`): remover o Pix manual; os dois botões levam ao checkout;
   admin sem conferência de Pix, com "meio diferente" e "Cancelar pedido" no pedido antigo.
-- [ ] **T15. Termo 2026-11-16-2** (4.2, 5.3, 5.4) e teste.
+- [x] **T15. Termo 2026-11-16-2** (4.2, 5.3, 5.4) e teste.
 - [ ] **T16. README** (fluxo e variáveis).
 - [ ] **T17. Os 4 agentes em paralelo** (fraude pelo security-auditor), correções, go/no-go. Checkpoints PGlite e jsdom atualizados.
 

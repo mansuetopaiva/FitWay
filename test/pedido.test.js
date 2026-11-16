@@ -115,16 +115,22 @@ test("termo: marcadores trocados pelas variáveis, nenhum sobrando no texto most
   assert.equal(montarTermo({}), null);
 });
 
-test("termo 2026-11-16-2: só o item 5 muda, e os valores do texto batem com PRECOS", () => {
+test("termo 2026-11-16-2: só o 4.2 e o item 5 mudam, e os valores do texto batem com PRECOS", () => {
   const [nova, antiga] = TERMOS.map((t) => t.modelo);
-  const sem5 = (m) => m.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, "");
+  const sem = (m) => m.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, "").replace(/\n4\.2\. .*/, "");
   assert.notEqual(nova, antiga);
-  assert.equal(sem5(nova), sem5(antiga), "o resto do texto é igual");
+  assert.equal(sem(nova), sem(antiga), "o resto do texto é igual");
+  assert.match(nova, /\n4\.2\. Para isso, essas informações são enviadas ao serviço de inteligência artificial usado na montagem do plano\. Ao pagar, meu nome e email são enviados à InfinitePay, que processa os pagamentos por Pix e cartão\. Meus dados não são vendidos nem usados para publicidade\.\n/);
+  assert.match(antiga, /\n4\.2\. .*Elas não são vendidas nem usadas para publicidade\.\n/, "a versão publicada não muda");
+  assert.doesNotMatch(nova, /comprovante|Nubank|link de cobrança|conferência é manual|24 horas/i);
   const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
   const item5 = nova.match(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/)[0];
   assert.match(item5, new RegExp(`primeiro treino custa ${reais(PRECOS.pix.inicial)} no Pix ou ${reais(PRECOS.cartao.inicial)} no cartão de crédito`.replace(/\$/g, "\\$")));
   assert.match(item5, new RegExp(`mensalidade de ${reais(PRECOS.pix.mensalidade)} no Pix ou ${reais(PRECOS.cartao.mensalidade)} no cartão a cada 30 dias`.replace(/\$/g, "\\$")));
   assert.match(item5, new RegExp(`novo treino por ${reais(PRECOS.pix.novo_treino)} no Pix ou ${reais(PRECOS.cartao.novo_treino)} no cartão`.replace(/\$/g, "\\$")));
+  assert.match(item5, /\n5\.3\. Os pagamentos por Pix e por cartão são processados pela InfinitePay e confirmados automaticamente\. O acesso e o treino são liberados assim que o pagamento é confirmado\.\n/);
+  assert.match(item5, /\n5\.4\. Pedidos sem pagamento em 30 dias são cancelados, e as fotos enviadas são apagadas\.\n/);
+  assert.match(item5, /\n5\.5\. Posso desistir da compra em até 7 dias/);
   const todos = new Set(Object.values(PRECOS).flatMap((m) => Object.values(m)).map(reais));
   for (const v of item5.match(/R\$ \d+,\d\d/g)) assert.ok(todos.has(v), `${v} está em PRECOS`);
 });
