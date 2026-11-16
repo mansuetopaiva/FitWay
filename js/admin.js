@@ -20,12 +20,33 @@
   // acesso_ate é o instante em que o acesso acaba; o último dia liberado é o do instante anterior.
   const acessoAtivo = (a) => a && new Date(a) > new Date();
   const acessoTxt = (a) => (acessoAtivo(a) ? "Liberado até " + dataBR(new Date(new Date(a) - 1)).slice(0, 5) : "Sem acesso liberado");
+  const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
+  const quando = (d) => (d ? new Date(d).toLocaleString("pt-BR", { timeZone: TZ, dateStyle: "short", timeStyle: "short" }) : "—");
   const estado = (msg, tentar) => tentar
     ? `<div class="adm-estado" role="alert"><p>${esc(msg)}</p><button class="btn-sec" data-tentar="${tentar}">Tentar de novo</button></div>`
     : `<p class="adm-estado muted" role="status">${esc(msg)}</p>`;
 
   // ---------- estrutura ----------
+  // Rotas: #/admin (usuários), #/admin/<email>, #/admin/pedidos e #/admin/pedido.<id> (email sempre tem @, então não colide).
   function render(arg) {
+    let a = "";
+    try { a = arg ? decodeURIComponent(arg) : ""; } catch (e) { a = ""; }
+    if (a === "pedidos" || a.startsWith("pedido.")) {
+      if (sujo && !confirm("O treino tem alterações não salvas. Sair e descartar?")) {
+        history.replaceState(null, "", "#/admin/" + encodeURIComponent(detEmail));
+        return renderUsuarios(encodeURIComponent(detEmail));
+      }
+      sujo = false; det = null; edit = null; detEmail = "";
+      return renderPedidos(a === "pedidos" ? "" : a.slice(7));
+    }
+    pedId = "";
+    renderUsuarios(arg);
+  }
+  const secoes = (qual) => `<nav class="adm-secoes" aria-label="Seções do painel">
+    <a href="#/admin" ${qual === "usuarios" ? 'aria-current="page" class="on"' : ""}>Usuários</a>
+    <a href="#/admin/pedidos" ${qual === "pedidos" ? 'aria-current="page" class="on"' : ""}>Pedidos${resumo && resumo.aguardando ? ` <span class="selo aviso">${resumo.aguardando}<span class="sr"> aguardando pagamento</span></span>` : ""}</a>
+  </nav>`;
+  function renderUsuarios(arg) {
     const antes = detEmail; // usuário aberto até agora (para devolver o foco à linha dele)
     let alvo = "";
     try { alvo = arg ? decodeURIComponent(arg) : ""; } catch (e) { alvo = ""; }
@@ -36,6 +57,7 @@
     if (!alvo) detEmail = ""; // antes de pintar a lista, para a linha antiga não ficar destacada
     shell("Admin", `
       <div class="adm ${alvo ? "com-detalhe" : ""}">
+        ${secoes("usuarios")}
         <section class="adm-resumo" id="admResumo" aria-label="Resumo"></section>
         <section class="adm-lista" aria-labelledby="admListaTit">
           <h2 id="admListaTit" class="adm-tit" tabindex="-1">Usuários</h2>
@@ -68,6 +90,8 @@
   async function carregarResumo() {
     try { resumo = await api("admin", { op: "resumo" }); } catch (e) { resumo = { erro: e.message }; }
     pintarResumo();
+    const sec = app.querySelector(".adm-secoes");
+    if (sec) sec.outerHTML = secoes(pedId !== "" || location.hash.includes("/pedido") ? "pedidos" : "usuarios");
   }
   function pintarResumo() {
     const el = $("#admResumo");
@@ -78,6 +102,7 @@
     el.innerHTML = `<div class="adm-cards">
       ${c(resumo.usuarios, "usuários")}${c(resumo.novos7d, "novos em 7 dias")}${c(resumo.comTreino, "com treino")}
       ${c(resumo.comAcesso, "com acesso liberado")}${c(resumo.checkinsHoje, "check-ins hoje")}${c(resumo.checkinsSemana, "check-ins na semana")}
+      ${c(resumo.aguardando, "pedidos aguardando pagamento")}${c(reais(resumo.receitaMes), "receita do mês")}${c(resumo.vencendo7d, "acessos vencem em 7 dias")}
     </div>`;
   }
 
@@ -178,7 +203,8 @@
         <button class="btn-perigo" data-cortar ${acessoAtivo(d.acessoAte) ? "" : "disabled"}>Cortar acesso</button>
       </div>
       <div class="card" aria-labelledby="admTrTit">
-        <h2 id="admTrTit" class="adm-tit">Treino${sujo ? ' <span class="selo aviso">Não salvo</span>' : ""}</h2>
+        <h2 id="admTrTit" class="adm-tit">Treino${d.plano && d.plano.origem === "ia" ? ' <span class="selo ok">Feito pela IA</span>' : ""}${sujo ? ' <span class="selo aviso">Não salvo</span>' : ""}</h2>
+        ${d.plano && d.plano.origem === "ia" ? `<p class="muted" style="margin-bottom:10px">Editar mantém o treino como pago (some se o acesso vencer) e não zera a contagem das 8 semanas.</p>` : ""}
         ${editor()}
         <input type="file" id="admPdf" accept="application/pdf,.pdf" hidden>
       </div>
@@ -195,7 +221,9 @@
     const x = h.detalhes || {};
     if (h.acao === "acesso") return x.dias ? `Acesso +${x.dias} dias` : x.ate ? `Acesso até ${diaBR(x.ate)}` : "Acesso cortado";
     const n = x.treinos ? ` (${x.treinos} treinos, ${x.exercicios} exercícios)` : "";
-    return ({ plano_salvar: "Treino editado", plano_pdf: "Treino enviado por PDF", plano_remover: "Treino removido" }[h.acao] || h.acao) + n;
+    const ped = x.pedido ? " · pedido " + x.pedido.slice(0, 6) : "";
+    return ({ plano_salvar: "Treino editado", plano_pdf: "Treino enviado por PDF", plano_remover: "Treino removido", pedido_ver: "Pedido visto (saúde e fotos)",
+      pedido_pago: `Pedido marcado como pago${x.dias ? ` (+${x.dias} dias)` : ""}`, pedido_gerar_de_novo: "Treino do pedido gerado de novo", pedido_cancelar: "Pedido cancelado" }[h.acao] || h.acao) + n + ped;
   }
 
   // ---------- editor de treino ----------
@@ -311,11 +339,13 @@
       return;
     }
     if (ds.pdf !== undefined) {
-      if (!det.plano || confirm(`O PDF vai substituir o treino atual de ${det.nome}. Continuar?`)) $("#admPdf").click();
+      const ia = det.plano && det.plano.origem === "ia" ? " Este é um treino de IA pago: ele será apagado e a mensalidade deixa de valer para ele." : "";
+      if (!det.plano || confirm(`O PDF vai substituir o treino atual de ${det.nome}.${ia} Continuar?`)) $("#admPdf").click();
       return;
     }
     if (ds.removerPlano !== undefined) {
-      if (confirm(`Remover o treino de ${det.nome}? A aba Treinos some para ele até receber outro.`)) escrever({ op: "plano_remover" }, "Treino removido.", b);
+      const ia = det.plano && det.plano.origem === "ia" ? " Este é um treino de IA pago e será apagado." : "";
+      if (confirm(`Remover o treino de ${det.nome}?${ia} A aba Treinos some para ele até receber outro.`)) escrever({ op: "plano_remover" }, "Treino removido.", b);
       return;
     }
     if (ds.criar !== undefined) {
@@ -376,6 +406,212 @@
     fr.readAsDataURL(f);
   });
   window.addEventListener("beforeunload", (ev) => { if (sujo) ev.preventDefault(); });
+
+  // ---------- pedidos ----------
+  const STATUS = { aguardando_pagamento: ["Aguardando pagamento", "aviso"], pago: ["Pago", "ok"], gerando: ["Gerando", "ok"],
+    pronto: ["Pronto", "ok"], erro: ["Erro", "erro"], cancelado: ["Cancelado", ""] };
+  const TIPOS = { inicial: "Treino inicial", mensalidade: "Mensalidade", novo_treino: "Novo treino" };
+  const selo = (st) => `<span class="selo ${STATUS[st][1]}">${STATUS[st][0]}</span>`;
+  const pedLista = { status: "aguardando_pagamento", tipo: "", pagina: 0, itens: [], temMais: false, estado: "carregando", erro: "" };
+  let ped = null, pedId = "", pedEstado = "", pedErro = "", versaoPed = 0, versaoPedLista = 0, fotoGrande = "", termoVisto = null;
+
+  function renderPedidos(id) {
+    const antes = pedId;
+    const opts = (obj, atual, todos) => `<option value="">${todos}</option>` + Object.entries(obj).map(([k, v]) =>
+      `<option value="${k}" ${k === atual ? "selected" : ""}>${Array.isArray(v) ? v[0] : v}</option>`).join("");
+    shell("Admin", `
+      <div class="adm ${id ? "com-detalhe" : ""}">
+        ${secoes("pedidos")}
+        <section class="adm-resumo" id="admResumo" aria-label="Resumo"></section>
+        <section class="adm-lista" aria-labelledby="admListaTit">
+          <h2 id="admListaTit" class="adm-tit" tabindex="-1">Pedidos</h2>
+          <div class="adm-filtros">
+            <label>Status<select id="pedStatus">${opts(STATUS, pedLista.status, "Todos")}</select></label>
+            <label>Tipo<select id="pedTipo">${opts(TIPOS, pedLista.tipo, "Todos")}</select></label>
+          </div>
+          <div id="admLista"></div>
+        </section>
+        <section class="adm-det" id="admDetalhe" aria-live="polite"></section>
+      </div>`, "admin");
+    pintarResumo();
+    pintarPedLista();
+    const filtro = () => { pedLista.status = $("#pedStatus").value; pedLista.tipo = $("#pedTipo").value; carregarPedLista(false); };
+    $("#pedStatus").onchange = filtro; $("#pedTipo").onchange = filtro;
+    app.querySelector(".adm").addEventListener("click", cliquePedido);
+    if (!resumo) carregarResumo();
+    if (pedLista.estado === "carregando" && !pedLista.itens.length) carregarPedLista(false);
+    if (id) { if (id !== pedId || !ped) carregarPedido(id); else pintarPedido(); return; }
+    pedId = ""; ped = null;
+    pintarPedido();
+    const linha = antes && app.querySelector(`a[href="#/admin/pedido.${CSS.escape(antes)}"]`);
+    if (linha) linha.focus(); else if (antes) $("#admListaTit").focus();
+  }
+  async function carregarPedLista(mais) {
+    const v = ++versaoPedLista;
+    pedLista.pagina = mais ? pedLista.pagina + 1 : 0;
+    pedLista.estado = "carregando";
+    if (!mais) pedLista.itens = [];
+    pintarPedLista();
+    try {
+      const r = await api("admin", { op: "pedidos", status: pedLista.status, tipo: pedLista.tipo, pagina: pedLista.pagina });
+      if (v !== versaoPedLista) return;
+      pedLista.itens = mais ? pedLista.itens.concat(r.itens) : r.itens;
+      pedLista.temMais = r.temMais; pedLista.estado = "ok";
+    } catch (e) {
+      if (v !== versaoPedLista) return;
+      pedLista.estado = "erro"; pedLista.erro = e.message;
+      if (mais) pedLista.pagina--;
+    }
+    pintarPedLista();
+  }
+  function pintarPedLista() {
+    const el = $("#admLista");
+    if (!el) return;
+    const itens = pedLista.itens.map((x) => `
+      <li><a class="adm-item ${x.id === pedId ? "on" : ""}" href="#/admin/pedido.${x.id}" ${x.id === pedId ? 'aria-current="true"' : ""}>
+        <span class="t"><b>${esc(x.nome)}</b><span class="muted">${esc(TIPOS[x.tipo])} · ${reais(x.valor)} · ${esc(quando(x.criado))}</span></span>
+        <span class="adm-selos">${selo(x.status)}</span>
+      </a></li>`).join("");
+    let rodape = "";
+    if (pedLista.estado === "carregando") rodape = estado(pedLista.itens.length ? "Carregando mais…" : "Carregando pedidos…");
+    else if (pedLista.estado === "erro") rodape = estado(pedLista.erro, "pedLista");
+    else if (!pedLista.itens.length) rodape = estado("Nenhum pedido com estes filtros.");
+    else if (pedLista.temMais) rodape = `<button class="btn-sec adm-mais" data-ped-mais>Carregar mais</button>`;
+    el.innerHTML = (itens ? `<ul class="adm-itens">${itens}</ul>` : "") + rodape;
+  }
+  // gerar: logo depois de marcar como pago, o servidor já monta o treino nesta chamada (até 1 minuto).
+  async function carregarPedido(id, gerar) {
+    const v = ++versaoPed;
+    pedId = id; fotoGrande = ""; termoVisto = null;
+    pedEstado = gerar ? "gerando" : "carregando"; ped = gerar ? ped : null;
+    pintarPedido();
+    try {
+      const r = await api("admin", { op: "pedido", id, gerar: gerar === true });
+      if (v !== versaoPed) return;
+      ped = r; pedEstado = "ok";
+      const item = pedLista.itens.find((x) => x.id === id);
+      if (item && item.status !== r.status) { item.status = r.status; }
+    } catch (e) {
+      if (v !== versaoPed) return;
+      pedEstado = "erro"; pedErro = e.message;
+    }
+    pintarPedido(!gerar);
+    pintarPedLista();
+  }
+  function pintarPedido(focar) {
+    const el = $("#admDetalhe");
+    if (!el) return;
+    const voltar = `<a class="adm-voltar" href="#/admin/pedidos">${icon("back")}Voltar para os pedidos</a>`;
+    if (!pedId) { el.innerHTML = estado("Escolha um pedido na lista."); return; }
+    if (pedEstado === "carregando") { el.innerHTML = voltar + estado("Carregando pedido…"); return; }
+    if (pedEstado === "gerando") { el.innerHTML = voltar + estado("Gerando o treino com a IA… pode levar até 1 minuto."); return; }
+    if (pedEstado === "erro") { el.innerHTML = voltar + estado(pedErro, "pedido"); return; }
+    const p = ped, r = p.respostas, linha = (k, v) => `<div class="row"><span>${k}</span><span>${esc(v)}</span></div>`;
+    const ac = p.aceite;
+    const botoes = [
+      p.status === "aguardando_pagamento" ? `<button class="btn" data-ped-pago>Marcar como pago</button>` : "",
+      ["erro", "pronto"].includes(p.status) && p.tipo !== "mensalidade" ? `<button class="btn-sec" data-ped-gerar>Gerar de novo</button>` : "",
+      ["aguardando_pagamento", "pago", "erro"].includes(p.status) ? `<button class="btn-perigo" data-ped-cancelar>Cancelar pedido</button>` : "",
+    ].join("");
+    el.innerHTML = `${voltar}
+      <div class="card">
+        <h2 id="admDetTit" tabindex="-1">${esc(TIPOS[p.tipo])} · ${reais(p.valor)}</h2>
+        <p class="muted"><a href="#/admin/${encodeURIComponent(p.email)}">${esc(p.nome)} · ${esc(p.email)}</a></p>
+        <div class="row"><span>Status</span><span>${selo(p.status)}</span></div>
+        ${linha("Pedido em", quando(p.criado))}${p.pagoEm ? linha("Pago em", quando(p.pagoEm)) : ""}${p.geradoEm ? linha("Treino gerado em", quando(p.geradoEm)) : ""}
+        ${p.modelo ? linha("Modelo da IA", p.modelo) : ""}${p.tentativas ? linha("Tentativas de geração", p.tentativas) : ""}
+        ${linha("Acesso do usuário", acessoTxt(p.acessoAte))}
+        ${p.erro ? `<p class="adm-erro" role="note"><b>Último erro:</b> ${esc(p.erro)}</p>` : ""}
+        ${ac ? `<div class="row"><span>Termo aceito: versão ${esc(ac.versao)} em ${esc(quando(ac.aceito_em))}</span><button class="btn-sec" data-ped-termo="${esc(ac.versao)}">Ver texto</button></div>
+          <p class="muted">IP ${esc(ac.ip || "—")} · ${esc(ac.user_agent || "—")}</p>
+          ${termoVisto ? `<div class="ped-termo" tabindex="0" role="region" aria-label="Texto do termo, versão ${esc(termoVisto.versao)}">${esc(termoVisto.texto)}</div>` : ""}` : ""}
+        ${botoes ? `<div class="adm-botoes">${botoes}</div>` : ""}
+      </div>
+      ${r ? respostasHtml(p, r) : ""}
+      ${p.fotos ? fotosHtml(p.fotos) : r ? `<div class="card"><h2 class="adm-tit">Fotos</h2><p class="muted">Nenhuma foto (não enviadas ou já apagadas 90 dias depois do treino pronto).</p></div>` : ""}
+      ${p.plano ? planoHtml(p.plano) : ""}`;
+    if (focar) { const t = $("#admDetTit"); if (t) t.focus(); }
+  }
+  function respostasHtml(p, r) {
+    const linha = (k, v) => `<div class="row"><span>${k}</span><span>${esc(v === "" || v === undefined ? "—" : v)}</span></div>`;
+    const sims = r.parq.some(Boolean);
+    return `<div class="card"><h2 class="adm-tit">Respostas</h2>
+      <h3 class="adm-sub">Você</h3>${linha("Objetivo", r.objetivo)}${linha("Nível", r.nivel)}${linha("Idade", r.idade + " anos")}${linha("Sexo", r.sexo)}${linha("Altura", r.altura + " cm")}${linha("Peso", String(r.peso).replace(".", ",") + " kg")}
+      <h3 class="adm-sub">Rotina</h3>${linha("Dias por semana", r.dias)}${linha("Tempo por treino", r.minutos + " min")}
+      <h3 class="adm-sub">Saúde (PAR-Q)${sims ? ' <span class="selo aviso">Tem Sim</span>' : ""}</h3>
+      <ol class="adm-parq">${p.parq.map((q, i) => `<li class="${r.parq[i] ? "sim" : ""}"><span>${esc(q)}</span><b>${r.parq[i] ? "Sim" : "Não"}</b></li>`).join("")}</ol>
+      ${sims ? linha("Liberação médica", r.liberacao ? "Sim (declarada)" : "Não") : ""}
+      ${linha("Lesões ou dores", r.lesoes)}${linha("Cirurgias", r.cirurgias)}${linha("Problemas de saúde", r.doencas)}${linha("Remédios em uso", r.remedios)}${linha("Não pode ou não quer fazer", r.evitar)}
+      <h3 class="adm-sub">Observações</h3><p class="adm-obs">${esc(r.observacoes || "—")}</p>
+      <h3 class="adm-sub">Consentimentos</h3>${linha("Dados de saúde", r.consentimentos && r.consentimentos.dados ? quando(r.consentimentos.dados) : "—")}${linha("Fotos", r.consentimentos && r.consentimentos.fotos ? quando(r.consentimentos.fotos) : "—")}
+    </div>`;
+  }
+  const ROT_FOTOS = { frente: "Frente", costas: "Costas", direito: "Perfil direito", esquerdo: "Perfil esquerdo" };
+  function fotosHtml(fotos) {
+    const validas = Object.keys(ROT_FOTOS).filter((k) => typeof fotos[k] === "string" && fotos[k].startsWith("data:image/jpeg;base64,"));
+    if (fotoGrande && fotos[fotoGrande]) return `<div class="card"><h2 class="adm-tit">Foto: ${ROT_FOTOS[fotoGrande]}</h2>
+      <img class="adm-foto-grande" src="${esc(fotos[fotoGrande])}" alt="Foto: ${ROT_FOTOS[fotoGrande]}">
+      <button class="btn-sec" data-ped-fechar-foto="${fotoGrande}" style="margin-top:8px">Fechar foto</button></div>`;
+    return `<div class="card"><h2 class="adm-tit">Fotos</h2><div class="adm-fotos">${validas.map((k) => `
+      <button data-ped-foto="${k}" aria-label="Ampliar foto: ${ROT_FOTOS[k]}"><img src="${esc(fotos[k])}" alt=""><span>${ROT_FOTOS[k]}</span></button>`).join("")}</div></div>`;
+  }
+  function planoHtml(pl) {
+    const g = pl.guia || {};
+    return `<div class="card"><h2 class="adm-tit">Plano gerado: ${esc(pl.nome)}</h2>
+      ${g.resumo ? `<p class="adm-obs">${esc(g.resumo)}</p>` : ""}
+      ${(g.fases || []).map((f) => `<div class="row"><span>Semanas ${esc(f.semanas)}</span><span>${esc(f.foco)}</span></div>`).join("")}
+      ${pl.treinos.map((t) => `<h3 class="adm-sub">${esc(t.id)} – ${esc(t.nome)}</h3>
+        <ul class="adm-hist">${t.exercicios.map((e) => `<li><b>${esc(e[0])}</b><span class="muted">${e[2]} × ${esc(e[3])} · descanso ${e[5]} s${e[6] ? " · " + esc(e[6]) : ""}</span></li>`).join("")}</ul>`).join("")}
+      ${g.cuidados ? `<h3 class="adm-sub">Cuidados</h3><p class="adm-obs">${esc(g.cuidados)}</p>` : ""}
+      ${g.avaliacao_fotos ? `<h3 class="adm-sub">Avaliação das fotos</h3><p class="adm-obs">${esc(g.avaliacao_fotos)}</p>` : ""}
+    </div>`;
+  }
+  async function acaoPedido(op, msg, botao) {
+    const id = pedId;
+    botao.disabled = true;
+    try {
+      const r = await api("admin", { op, id });
+      toast(msg);
+      carregarResumo();
+      const item = pedLista.itens.find((x) => x.id === id);
+      if (item) { item.status = r.status; pintarPedLista(); }
+      if (id !== pedId) return;
+      await carregarPedido(id, r.status === "pago");
+      const t = $("#admDetTit"); if (t) t.focus();
+    } catch (e) {
+      toast(e.message);
+      if (botao.isConnected) botao.disabled = false;
+    }
+  }
+  function cliquePedido(ev) {
+    const b = ev.target.closest("button");
+    if (!b || !app.contains(b)) return;
+    const ds = b.dataset;
+    if (ds.tentar === "pedLista") return carregarPedLista(pedLista.pagina > 0 && pedLista.itens.length > 0);
+    if (ds.tentar === "pedido") return carregarPedido(pedId);
+    if (ds.tentar === "resumo") { resumo = null; pintarResumo(); return carregarResumo(); }
+    if (ds.pedMais !== undefined) return carregarPedLista(true);
+    if (ds.pedPago !== undefined) {
+      const efeito = ped.tipo === "inicial" ? "Libera 30 dias de acesso e gera o treino." : ped.tipo === "mensalidade" ? "Soma 30 dias ao acesso." : "Gera o novo treino (o acesso não muda).";
+      if (confirm(`Confirmar o pagamento de ${reais(ped.valor)} de ${ped.nome}? ${efeito}`)) acaoPedido("pedido_pago", "Pagamento confirmado.", b);
+      return;
+    }
+    if (ds.pedGerar !== undefined) {
+      if (confirm(`Gerar o treino de ${ped.nome} de novo? ${ped.status === "pronto" ? "O treino atual dele será substituído." : ""}`)) acaoPedido("pedido_gerar_de_novo", "Pedido voltou para a fila de geração.", b);
+      return;
+    }
+    if (ds.pedCancelar !== undefined) {
+      if (confirm(`Cancelar este pedido de ${ped.nome}? Não há reembolso automático, e os dias de acesso já dados continuam valendo.`)) acaoPedido("pedido_cancelar", "Pedido cancelado.", b);
+      return;
+    }
+    if (ds.pedFoto) { fotoGrande = ds.pedFoto; pintarPedido(); const f = $("[data-ped-fechar-foto]"); if (f) f.focus(); return; }
+    if (ds.pedFecharFoto) { fotoGrande = ""; pintarPedido(); const f = $(`[data-ped-foto="${ds.pedFecharFoto}"]`); if (f) f.focus(); return; }
+    if (ds.pedTermo) {
+      b.disabled = true;
+      api("termo", { versao: ds.pedTermo }).then((t) => { termoVisto = t; pintarPedido(); const r = app.querySelector(".adm-det .ped-termo"); if (r) r.focus(); },
+        (e) => { toast(e.message); b.disabled = false; });
+    }
+  }
 
   window.FitWayAdmin = { render };
 })();

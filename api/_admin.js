@@ -3,8 +3,12 @@
 
 import { DIA, escaparLike, limpar, validarPlano } from "./_dados.js";
 import { NOMES_FOTOS, lerPdf } from "./_treino.js";
+import { PARQ, limparPedidos } from "./_pedido.js";
+import { ABERTOS, PRECOS, efeitoDoPagamento } from "./_precos.js";
 
-export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover"];
+export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
+  "pedidos", "pedido", "pedido_pago", "pedido_gerar_de_novo", "pedido_cancelar"];
+const STATUS = ["aguardando_pagamento", "pago", "gerando", "pronto", "erro", "cancelado"];
 
 // Lido a cada chamada: tirar alguém da variável na Vercel vale sem depender do navegador.
 export function ehAdmin(email) {
@@ -18,9 +22,11 @@ const emailAlvo = (v) => (typeof v === "string" && v.length >= 3 && v.length <= 
 
 // Campos de lista, calculados no SQL para não trazer o "dados" inteiro (plano + histórico) de cada linha.
 // shortcut: conta check-ins dentro do JSON "dados"; mover check-ins para uma tabela própria se passar de alguns milhares de usuários.
+const paginaValida = (p) => p === undefined || (Number.isInteger(p) && p >= 0 && p <= 100000);
 const linha = (x) => ({ nome: x.nome, email: x.email, criado: x.criado, acessoAte: x.acesso_ate, checkins: x.checkins, ultimoCheckin: x.ultimo || null, temTreino: x.tem_treino });
 
-export async function acaoAdmin(sql, u, b) {
+// opc.gerar(id): gera o treino de um pedido pago (gerarSeDevido); injetado para o teste não chamar a IA.
+export async function acaoAdmin(sql, u, b, opc = {}) {
   if (!ehAdmin(u && u.email)) return falha(403, "Acesso restrito.");
   if (!OPS.includes(b.op)) return falha(400, "Operação desconhecida.");
 
@@ -37,19 +43,99 @@ export async function acaoAdmin(sql, u, b) {
           where dia >= to_char((select d - extract(dow from d)::int from hoje), 'YYYY-MM-DD'))), 0)::int as checkins_semana,
         col_description('usuarios'::regclass, (select attnum from pg_attribute where attrelid = 'usuarios'::regclass and attname = 'criado')) as cadastro_antes
       from usuarios`;
+    await limparPedidos(sql, null); // prazos de pedidos e fotos (sem cron: roda aqui e no pedido_status)
+    const [p] = await sql`select count(*) filter (where status = 'aguardando_pagamento')::int as aguardando,
+        coalesce(sum(valor) filter (where pago_em >= date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'), 0)::int as receita_mes,
+        (select count(*) from usuarios where acesso_ate > now() and acesso_ate <= now() + interval '7 days')::int as vencendo7d
+      from pedidos`;
     return ok({ usuarios: r.usuarios, novos7d: r.novos7d, comTreino: r.com_treino, comAcesso: r.com_acesso,
-      checkinsHoje: r.checkins_hoje, checkinsSemana: r.checkins_semana, cadastroAntes: r.cadastro_antes || "" });
+      checkinsHoje: r.checkins_hoje, checkinsSemana: r.checkins_semana, cadastroAntes: r.cadastro_antes || "",
+      aguardando: p.aguardando, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d });
   }
 
   if (b.op === "usuarios") {
     const busca = typeof b.busca === "string" ? b.busca.trim().slice(0, 80) : "";
-    if (b.pagina !== undefined && !(Number.isInteger(b.pagina) && b.pagina >= 0 && b.pagina <= 100000)) return falha(400, "Página inválida.");
+    if (!paginaValida(b.pagina)) return falha(400, "Página inválida.");
     const pagina = b.pagina || 0;
     const q = "%" + escaparLike(busca) + "%";
     const xs = await sql`select nome, email, criado, acesso_ate, coalesce(jsonb_array_length(dados->'checkins'), 0)::int as checkins, dados->'checkins'->>-1 as ultimo, dados->'plano' is not null as tem_treino from usuarios
       where nome ilike ${q} or email ilike ${q}
       order by criado desc nulls last, email limit 21 offset ${pagina * 20}`;
     return ok({ itens: xs.slice(0, 20).map(linha), temMais: xs.length > 20 });
+  }
+
+  if (b.op === "pedidos") {
+    const status = b.status === undefined ? "" : b.status, tipo = b.tipo === undefined ? "" : b.tipo;
+    if (status !== "" && !STATUS.includes(status)) return falha(400, "Status inválido.");
+    if (tipo !== "" && !(typeof tipo === "string" && Object.hasOwn(PRECOS, tipo))) return falha(400, "Tipo inválido.");
+    if (!paginaValida(b.pagina)) return falha(400, "Página inválida.");
+    const xs = await sql`select p.id, p.tipo, p.status, p.valor, p.criado, p.email, u.nome from pedidos p join usuarios u on u.email = p.email
+      where (${status} = '' or p.status = ${status}) and (${tipo} = '' or p.tipo = ${tipo})
+      order by p.criado desc, p.id limit 21 offset ${(b.pagina || 0) * 20}`;
+    return ok({ itens: xs.slice(0, 20), temMais: xs.length > 20 });
+  }
+
+  if (b.op.startsWith("pedido")) {
+    const id = typeof b.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(b.id) ? b.id : "";
+    if (!id) return falha(400, "Informe o pedido.");
+    // Cada escrita e o seu registro no admin_log vão numa única instrução.
+    const log = (acao) => JSON.stringify({ pedido: id, acao });
+    if (b.op === "pedido") {
+      if (b.gerar === true && opc.gerar) await opc.gerar(id); // logo depois de marcar como pago: gera sem esperar o aluno abrir o app
+      // Ver dados de saúde ou fotos fica registrado.
+      const [x] = await sql`with p as (select p.*, u.nome, u.acesso_ate from pedidos p join usuarios u on u.email = p.email where p.id = ${id}),
+          l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
+            select ${u.email}, 'pedido_ver', email, jsonb_build_object('pedido', id) from p where respostas is not null or fotos is not null)
+        select * from p`;
+      if (!x) return falha(404, "Pedido não encontrado.");
+      return ok({ id: x.id, email: x.email, nome: x.nome, acessoAte: x.acesso_ate, tipo: x.tipo, status: x.status, valor: x.valor,
+        criado: x.criado, pagoEm: x.pago_em, geradoEm: x.gerado_em, atualizado: x.atualizado, erro: x.erro, tentativas: x.tentativas,
+        modelo: x.modelo, respostas: x.respostas, fotos: x.fotos, aceite: x.aceite, plano: x.plano_gerado, parq: PARQ });
+    }
+    let x;
+    if (b.op === "pedido_pago") {
+      const [p] = await sql`select p.tipo, coalesce(u.acesso_ate > now(), false) as ativo from pedidos p join usuarios u on u.email = p.email
+        where p.id = ${id} and p.status = 'aguardando_pagamento'`;
+      if (!p) return falha(400, "Este pedido não está aguardando pagamento.");
+      // Novo treino não mexe no acesso: com o acesso vencido, o treino pago ficaria escondido.
+      if (p.tipo === "novo_treino" && !p.ativo) return falha(400, "O acesso deste usuário venceu. Ele precisa renovar (mensalidade) antes do novo treino.");
+      const ef = efeitoDoPagamento(p.tipo);
+      // Os dias somam a partir de greatest(now(), acesso_ate): renovar antes do vencimento não perde dias.
+      [x] = await sql`with p as (update pedidos set status = ${ef.gerar ? "pago" : "pronto"}, pago_em = now(), atualizado = now()
+            where id = ${id} and status = 'aguardando_pagamento' and tipo = ${p.tipo}
+              and (tipo <> 'novo_treino' or exists (select 1 from usuarios where email = pedidos.email and acesso_ate > now()))
+            returning id, email, tipo, valor, status),
+          a as (update usuarios set acesso_ate = greatest(now(), acesso_ate) + make_interval(days => ${ef.dias}::int)
+            where email = (select email from p) and ${ef.dias}::int > 0 returning acesso_ate),
+          l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
+            select ${u.email}, 'pedido_pago', email, jsonb_build_object('pedido', id, 'tipo', tipo, 'valor', valor, 'dias', ${ef.dias}::int) from p)
+        select p.status, (select acesso_ate from a) as acesso_ate from p`;
+    } else if (b.op === "pedido_gerar_de_novo") {
+      // Pronto só se ainda é o treino atual do usuário: não sobrescreve um treino mais novo nem um PDF.
+      const recusa = "Só dá para gerar de novo um pedido com erro, ou o pronto que ainda é o treino atual do usuário, sem outro pedido em andamento.";
+      try {
+        [x] = await sql`with p as (update pedidos set status = 'pago', tentativas = 0, erro = null, atualizado = now()
+              where id = ${id} and tipo <> 'mensalidade'
+                and (status = 'erro' or (status = 'pronto' and (select dados->'plano'->>'pedido' from usuarios where email = pedidos.email) = pedidos.id))
+                and not exists (select 1 from pedidos o where o.email = pedidos.email and o.id <> pedidos.id and o.status = any(${ABERTOS}))
+              returning email, status),
+            l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, 'pedido_gerar_de_novo', email, ${log("gerar_de_novo")}::jsonb from p)
+          select status from p`;
+      } catch (e) {
+        if (e && e.code === "23505") return falha(400, recusa); // outro pedido abriu ao mesmo tempo (índice pedidos_um_aberto)
+        throw e;
+      }
+      if (!x) return falha(400, recusa);
+    } else if (b.op === "pedido_cancelar") {
+      // Cancelar não devolve dinheiro nem tira os dias de acesso já dados.
+      [x] = await sql`with p as (update pedidos set status = 'cancelado', atualizado = now()
+            where id = ${id} and status in ('aguardando_pagamento', 'pago', 'erro') returning email, status),
+          l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, 'pedido_cancelar', email, ${log("cancelar")}::jsonb from p)
+        select status from p`;
+      if (!x) return falha(400, "Este pedido não pode mais ser cancelado.");
+    } else return falha(400, "Operação desconhecida.");
+    if (!x) return falha(400, "Este pedido não está aguardando pagamento.");
+    return ok({ status: x.status, acessoAte: x.acesso_ate });
   }
 
   const alvo = emailAlvo(b.email);
@@ -113,7 +199,10 @@ export async function acaoAdmin(sql, u, b) {
   if (plano) {
     const ids = plano.treinos.map((t) => t.id);
     const det = { treinos: ids.length, exercicios: plano.treinos.reduce((s, t) => s + t.exercicios.length, 0) };
-    [x] = await sql`with a as (update usuarios set dados = jsonb_set(dados, '{plano}', ${JSON.stringify(plano)}::jsonb)
+    // Editar um plano de IA (decisão D4) mantém origem, criado, semanas, pedido e guia: continua pago e a contagem das 8 semanas não zera.
+    // Já o PDF do admin substitui o plano de IA por inteiro (o painel avisa antes).
+    [x] = await sql`with a as (update usuarios set dados = jsonb_set(dados, '{plano}', ${JSON.stringify(plano)}::jsonb
+            || case when ${b.op === "plano_salvar"}::boolean and dados->'plano'->>'origem' = 'ia' then (dados->'plano') - 'nome' - 'treinos' else '{}'::jsonb end)
           || case when dados->>'proximo' = any(${ids}::text[]) then '{}'::jsonb else jsonb_build_object('proximo', ${ids[0]}::text) end
           where email = ${alvo} returning email),
         l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, ${b.op}, email, ${JSON.stringify(det)}::jsonb from a)
