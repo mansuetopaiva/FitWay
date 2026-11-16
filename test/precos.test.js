@@ -1,0 +1,71 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { PRECOS, podePedir, efeitoDoPagamento, acessoAtivo, planoVisivel } from "../api/_precos.js";
+
+const AGORA = new Date("2026-11-15T12:00:00Z");
+const diasAtras = (n) => new Date(AGORA - n * 864e5).toISOString();
+const diasDepois = (n) => new Date(+AGORA + n * 864e5).toISOString();
+const treinos = [{ id: "A", nome: "A", exercicios: [["Leg press", "", 3, "10", 0, 60, ""]] }];
+const ia = (criadoHa, acesso) => ({ acesso_ate: acesso, dados: { plano: { nome: "P", origem: "ia", criado: diasAtras(criadoHa), treinos } } });
+const pdf = (acesso) => ({ acesso_ate: acesso, dados: { plano: { nome: "P", treinos } } });
+
+test("PRECOS em centavos, num lugar só", () => {
+  assert.deepEqual(PRECOS, { inicial: 999, mensalidade: 999, novo_treino: 499 });
+});
+
+test("podePedir inicial: só sem plano de IA (PDF não conta)", () => {
+  assert.ok(podePedir("inicial", { dados: {} }, AGORA, false).ok);
+  assert.ok(podePedir("inicial", pdf(null), AGORA, false).ok);
+  assert.ok(podePedir("inicial", ia(10, diasDepois(5)), AGORA, false).erro);
+  assert.ok(podePedir("inicial", ia(10, diasAtras(5)), AGORA, false).erro, "IA vencido continua sendo plano de IA");
+});
+
+test("podePedir mensalidade: com plano de IA ativo ou vencido", () => {
+  assert.ok(podePedir("mensalidade", ia(10, diasDepois(5)), AGORA, false).ok);
+  assert.ok(podePedir("mensalidade", ia(10, diasAtras(5)), AGORA, false).ok);
+  assert.ok(podePedir("mensalidade", ia(10, null), AGORA, false).ok);
+  assert.ok(podePedir("mensalidade", pdf(diasDepois(5)), AGORA, false).erro);
+  assert.ok(podePedir("mensalidade", { dados: {} }, AGORA, false).erro);
+});
+
+test("podePedir novo_treino: 56 dias ou mais e acesso ativo", () => {
+  assert.ok(podePedir("novo_treino", ia(55, diasDepois(5)), AGORA, false).erro, "55 dias ainda não");
+  assert.ok(podePedir("novo_treino", ia(56, diasDepois(5)), AGORA, false).ok, "56 dias pode");
+  assert.ok(podePedir("novo_treino", ia(90, diasAtras(1)), AGORA, false).erro, "acesso vencido");
+  assert.ok(podePedir("novo_treino", ia(90, null), AGORA, false).erro, "sem acesso");
+  assert.ok(podePedir("novo_treino", pdf(diasDepois(5)), AGORA, false).erro, "PDF não é plano de IA");
+  for (const criado of [undefined, "lixo", null]) {
+    const u = ia(90, diasDepois(5)); u.dados.plano.criado = criado;
+    assert.ok(podePedir("novo_treino", u, AGORA, false).erro, `criado ${criado}`);
+  }
+});
+
+test("podePedir: pedido aberto bloqueia qualquer tipo; tipo desconhecido é recusado", () => {
+  for (const tipo of ["inicial", "mensalidade", "novo_treino"])
+    assert.ok(podePedir(tipo, ia(90, diasDepois(5)), AGORA, true).erro, tipo);
+  assert.ok(podePedir("inicial", { dados: {} }, AGORA, true).erro);
+  for (const t of ["gratis", "toString", "__proto__", "", undefined]) assert.ok(podePedir(t, { dados: {} }, AGORA, false).erro, String(t));
+});
+
+test("efeitoDoPagamento", () => {
+  assert.deepEqual(efeitoDoPagamento("inicial"), { dias: 30, gerar: true });
+  assert.deepEqual(efeitoDoPagamento("mensalidade"), { dias: 30, gerar: false });
+  assert.deepEqual(efeitoDoPagamento("novo_treino"), { dias: 0, gerar: true });
+  assert.equal(efeitoDoPagamento("toString"), undefined);
+});
+
+test("acessoAtivo: estritamente depois de agora", () => {
+  assert.equal(acessoAtivo({ acesso_ate: diasDepois(1) }, AGORA), true);
+  assert.equal(acessoAtivo({ acesso_ate: AGORA.toISOString() }, AGORA), false);
+  assert.equal(acessoAtivo({ acesso_ate: null }, AGORA), false);
+  assert.equal(acessoAtivo({ acesso_ate: new Date(+AGORA + 1000) }, AGORA), true, "aceita Date vindo do banco");
+});
+
+test("planoVisivel: IA vencido some; PDF e admin ficam sempre", () => {
+  assert.ok(planoVisivel(ia(10, diasDepois(1)), AGORA));
+  assert.equal(planoVisivel(ia(10, diasAtras(1)), AGORA), null);
+  assert.equal(planoVisivel(ia(10, null), AGORA), null);
+  assert.ok(planoVisivel(pdf(null), AGORA), "PDF sem acesso");
+  assert.ok(planoVisivel({ acesso_ate: null, dados: { plano: { nome: "P", origem: "admin", treinos } } }, AGORA), "admin sem acesso");
+  assert.equal(planoVisivel({ dados: {} }, AGORA), null);
+});
