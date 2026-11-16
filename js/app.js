@@ -176,7 +176,7 @@
       </nav>`;
   }
 
-  // ---------- telas baixadas só quando abertas: js/admin.js (só admin) e js/pedido.js (formulário) ----------
+  // ---------- telas baixadas só quando abertas: js/admin.js (só admin), js/pedido.js (formulário) e js/pagamento.js ----------
   const scripts = {};
   const carregar = (src) => scripts[src] ||= new Promise((ok, falhou) => {
     const el = document.createElement("script");
@@ -195,8 +195,14 @@
       () => { if (location.hash.split("/")[1] === "pedido") window.FitWayPedido.render(tipo); },
       () => toast("Não consegui abrir o formulário. Tente de novo."));
   }
-  // O painel e o formulário usam estas peças do app; ficam expostas só depois do login.
-  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, get email() { return email; } }; };
+  function viewPagamento(id) {
+    shell("Pagamento", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
+    carregar("js/pagamento.js").then(
+      () => { if (location.hash.split("/")[1] === "pagamento") window.FitWayPagamento.render(id); },
+      () => toast("Não consegui abrir o pagamento. Tente de novo."));
+  }
+  // O painel, o formulário e o pagamento usam estas peças do app; ficam expostas só depois do login.
+  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, get email() { return email; }, get nome() { return nomeUser; } }; };
 
   // ---------- início: check-in + gráfico ----------
   let chartMode = "semana", diaRender = "";
@@ -655,10 +661,16 @@
     let h = `<h2>Treino personalizado</h2>`;
     if (!ia) return h + `<p class="muted">Carregando…</p>`;
     const p = ia.pedido, agora = Date.now();
-    const botao = (tipo, txt) => `<button class="btn" data-pedir="${tipo}">${txt} — ${reais(ia.precos[tipo])}</button>`;
+    // Preço do Pix (o menor); o cartão aparece na tela de pagamento.
+    const botao = (tipo, txt) => `<button class="btn" data-pedir="${tipo}">${txt} — a partir de ${reais(ia.precos[tipo])}</button>`;
     if (p && p.status === "aguardando_pagamento") {
       h += `<p class="ia-status">${NOME_PEDIDO[p.tipo]} — ${reais(p.valor)}</p>
-        <p class="muted">Aguardando pagamento. Assim que ele for confirmado, ${p.tipo === "mensalidade" ? "seu acesso é renovado" : "seu treino começa a ser montado"}.</p>`;
+        ${p.mensagem_usuario ? `<p class="err" role="alert">${esc(p.mensagem_usuario)}</p>` : ""}
+        <p class="muted" style="margin-bottom:10px">Aguardando pagamento. Assim que ele for confirmado, ${p.tipo === "mensalidade" ? "seu acesso é renovado" : "seu treino começa a ser montado"}.</p>
+        <a class="btn pag-link" href="#/pagamento/${encodeURIComponent(p.id)}">Pagar</a>`;
+    } else if (p && p.status === "aguardando_confirmacao") {
+      h += `<p class="ia-status">${NOME_PEDIDO[p.tipo]} — ${reais(p.valor)}</p>
+        <p class="muted">Recebemos seu aviso. Estamos conferindo o Pix (até 24 horas).</p>`;
     } else if (p && (p.status === "pago" || p.status === "gerando")) {
       h += `<p class="ia-status">Gerando seu treino…</p>
         <p class="muted">Isso leva até 1 minuto. Pode sair desta tela: o treino aparece na aba Treinos quando ficar pronto.</p>`;
@@ -690,9 +702,9 @@
     app.querySelectorAll("[data-pedir]").forEach((b) => b.onclick = async () => {
       const tipo = b.dataset.pedir;
       if (tipo !== "mensalidade") return (location.hash = "#/pedido/" + tipo);
-      if (!confirm(`Pedir a renovação do acesso por ${reais(ia.precos.mensalidade)}? O pedido fica aguardando pagamento.`)) return;
+      if (!confirm(`Pedir a renovação do acesso (a partir de ${reais(ia.precos.mensalidade)})? Em seguida você escolhe como pagar.`)) return;
       b.disabled = true;
-      try { await api("pedido_criar", { tipo }); toast("Pedido de renovação enviado."); }
+      try { const r = await api("pedido_criar", { tipo }); location.hash = "#/pagamento/" + encodeURIComponent(r.pedido.id); return; }
       catch (e) { toast(e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }
       atualizarIA();
     });
@@ -805,6 +817,7 @@
     else if (rota === "ranking") viewRanking();
     else if (rota === "admin" && adminUser) { expor(); viewAdmin(arg); }
     else if (rota === "pedido") { expor(); viewPedido(arg); }
+    else if (rota === "pagamento") { expor(); viewPagamento(arg); }
     else if (rota === "termo") viewTermo();
     else viewInicio();
     window.scrollTo(0, 0);
@@ -815,7 +828,7 @@
     if (document.hidden || !email) return;
     tickRest();
     const rota = location.hash.split("/")[1];
-    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "termo"].includes(rota) && diaRender !== dayKey(today())) render();
+    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "pagamento", "termo"].includes(rota) && diaRender !== dayKey(today())) render();
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });

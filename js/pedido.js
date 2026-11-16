@@ -23,7 +23,7 @@
     try { st = await api("pedido_status", { form: true }); if (st.pode[tipo]) termo = await api("termo"); }
     catch (e) { return shell("Treino personalizado", `<p class="err" role="alert" style="margin-top:16px">${esc(e.message)}</p><a class="btn-sec" href="#/perfil">Voltar ao perfil</a>`, "perfil"); }
     if (location.hash.split("/")[1] !== "pedido") return;
-    if (!st.pode[tipo]) { toast(st.pedido && ["aguardando_pagamento", "pago", "gerando"].includes(st.pedido.status) ? "Você já tem um pedido em andamento." : "Este pedido não está disponível agora."); location.hash = "#/perfil"; return; }
+    if (!st.pode[tipo]) { toast(st.pedido && ["aguardando_pagamento", "aguardando_confirmacao", "pago", "gerando"].includes(st.pedido.status) ? "Você já tem um pedido em andamento." : "Este pedido não está disponível agora."); location.hash = "#/perfil"; return; }
     chave = "fw_pedido_" + tipo + "_" + (window.FitWay.email || "");
     const rasc = store.get(chave);
     // Rascunho sem fotos; no novo treino, começa com as últimas respostas. Os consentimentos são sempre marcados de novo.
@@ -75,12 +75,12 @@
         ...TEXTOS.filter(([k]) => f[k]).map(([k, rot]) => [rot, f[k]])])
       + item(3, [["Fotos", Object.keys(fotos).length ? FOTOS.filter(([k]) => fotos[k]).map(([, r]) => r).join(", ") : "Nenhuma"]])
       + item(4, [["Observações", f.observacoes || "Nenhuma"]])
-      + `<div class="row ped-total"><span>Valor do pedido</span><b>${reais(st.precos[tipo])}</b></div>
+      + `<div class="row ped-total"><span>Valor do pedido</span><b>a partir de ${reais(st.precos[tipo])}</b></div>
       <h3 class="ped-termo-tit" id="termoTit">Termo de Responsabilidade e Uso</h3>
       <div class="ped-termo" tabindex="0" role="region" aria-labelledby="termoTit">${esc(termo.texto)}</div>
       ${caixa("termo", "Li e aceito o Termo de Responsabilidade e Uso", f.termo)}
       ${caixa("cdados", "Autorizo guardar meus dados de saúde e fotos para montar e ajustar meu treino (LGPD: dado de saúde é dado sensível).", f.consentimentos.dados)}
-      <p class="muted">O pedido fica aguardando pagamento. Assim que o pagamento for confirmado, o treino é montado e aparece na aba Treinos.</p>`;
+      <p class="muted">Depois de enviar, você escolhe como pagar (Pix ou cartão). Assim que o pagamento for confirmado, o treino é montado e aparece na aba Treinos.</p>`;
   }
 
   function pintar(foco = true) {
@@ -162,9 +162,10 @@
     enviando = true; pintar(false);
     const respostas = { ...f, consentimentos: { dados: f.consentimentos.dados, fotos: !!Object.keys(fotos).length && f.consentimentos.fotos } };
     delete respostas.termo;
+    let r;
     try {
       // O hash prova que o aceite foi deste texto exato.
-      await api("pedido_criar", { tipo, respostas, fotos: Object.keys(fotos).length ? fotos : undefined, termo: termo.versao, termoHash: termo.hash });
+      r = await api("pedido_criar", { tipo, respostas, fotos: Object.keys(fotos).length ? fotos : undefined, termo: termo.versao, termoHash: termo.hash });
     } catch (e) {
       enviando = false;
       if (location.hash.split("/")[1] !== "pedido") return toast(e.message);
@@ -173,8 +174,8 @@
     }
     enviando = false;
     store.del(chave);
-    toast("Pedido enviado. Ele fica aguardando pagamento.");
-    location.hash = "#/perfil";
+    toast("Pedido enviado. Agora é só pagar.");
+    location.hash = "#/pagamento/" + encodeURIComponent(r.pedido.id);
   }
 
   // Reduz no aparelho: JPEG com lado maior de até 768 px. Se ainda passar de ~300 KB, baixa a qualidade.
