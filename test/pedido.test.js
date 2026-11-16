@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { PARQ, limparRespostas, limparFotos, limparPedidos } from "../api/_pedido.js";
 import { CAMPOS, TERMOS, TERMO_VERSAO, montarTermo, registrarAceite, termoFaltando } from "../api/_termo.js";
 import { ENV_TERMO, comTermo } from "./_fixtures.js";
+import { PRECOS } from "../api/_precos.js";
 comTermo();
 
 const AGORA = new Date("2026-11-15T12:00:00Z");
@@ -97,8 +98,8 @@ test("limparFotos: só JPEG base64, 4 chaves conhecidas, até 300 KB cada", () =
 });
 
 test("termo: marcadores trocados pelas variáveis, nenhum sobrando no texto mostrado; versão desconhecida dá null", () => {
-  assert.deepEqual(TERMOS.map((t) => t.versao), ["2026-11-16"], "só a versão atual (a 2026-11-15 nunca foi usada)");
-  assert.equal(TERMO_VERSAO, "2026-11-16");
+  assert.deepEqual(TERMOS.map((t) => t.versao), ["2026-11-16-2", "2026-11-16"], "a atual no topo; a anterior continua para consulta (a 2026-11-15 nunca foi usada)");
+  assert.equal(TERMO_VERSAO, "2026-11-16-2");
   const m = TERMOS[0].modelo;
   for (const k of Object.keys(CAMPOS)) assert.ok(m.includes(`{{${k}}}`), `modelo tem {{${k}}}`);
   assert.doesNotMatch(m, /\[[^\]]*\]/, "nenhum campo entre colchetes");
@@ -110,7 +111,22 @@ test("termo: marcadores trocados pelas variáveis, nenhum sobrando no texto most
   assert.match(t.texto, /comarca de Cidade\/UF, ressalvado/);
   assert.match(t.texto, /4\.3\. .*aguardando pagamento por mais de 30 dias.*cancelado.*fotos são apagadas/);
   assert.equal(montarTermo("2026-11-15"), null);
+  assert.match(montarTermo("2026-11-16").texto, /5\.1\. O primeiro treino custa R\$ 9,99 e inclui/, "a versão anterior continua com o texto aceito");
   assert.equal(montarTermo({}), null);
+});
+
+test("termo 2026-11-16-2: só o item 5 muda, e os valores do texto batem com PRECOS", () => {
+  const [nova, antiga] = TERMOS.map((t) => t.modelo);
+  const sem5 = (m) => m.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, "");
+  assert.notEqual(nova, antiga);
+  assert.equal(sem5(nova), sem5(antiga), "o resto do texto é igual");
+  const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
+  const item5 = nova.match(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/)[0];
+  assert.match(item5, new RegExp(`primeiro treino custa ${reais(PRECOS.pix.inicial)} no Pix ou ${reais(PRECOS.cartao.inicial)} no cartão`.replace(/\$/g, "\\$")));
+  assert.match(item5, new RegExp(`a cada 30 dias ${reais(PRECOS.pix.mensalidade)} no Pix ou ${reais(PRECOS.cartao.mensalidade)} no cartão`.replace(/\$/g, "\\$")));
+  assert.match(item5, new RegExp(`novo treino por ${reais(PRECOS.pix.novo_treino)} no Pix ou ${reais(PRECOS.cartao.novo_treino)} no cartão`.replace(/\$/g, "\\$")));
+  const todos = new Set(Object.values(PRECOS).flatMap((m) => Object.values(m)).map(reais));
+  for (const v of item5.match(/R\$ \d+,\d\d/g)) assert.ok(todos.has(v), `${v} está em PRECOS`);
 });
 
 test("termo: variável faltando aparece na lista e o marcador fica visível; valor com $& não vira padrão de troca", () => {

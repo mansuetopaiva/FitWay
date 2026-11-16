@@ -12,7 +12,7 @@ Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda 
     - sem o link do valor do pedido, o Pix não aparece para aquele tipo;
     - URL fora de `https://nubank.com.br/cobrar/` é recusada;
     - inicial e mensalidade usam `PIX_LINK_999`, novo_treino usa `PIX_LINK_499`.
-- [ ] **T3. Termo nova versão** (`api/_termo.js`, testes)
+- [x] **T3. Termo nova versão** (`api/_termo.js`, testes)
   - Aceite: o item 5 com o texto novo, os valores do texto batendo com `PRECOS`, e a versão anterior ainda na lista.
 
 **Checkpoint 1:** `npm test` verde.

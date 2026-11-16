@@ -42,7 +42,16 @@ Ao marcar "Li e aceito", eu declaro que li, entendi e concordo com o que segue.
 6.1. Este termo pode ser atualizado. Quando isso acontecer, vou precisar aceitar a nova versão no próximo pedido.
 6.2. Fica eleito o foro da comarca de {{foro}}, ressalvado o meu direito, como consumidor, de propor ação no foro do meu domicílio.`;
 
-export const TERMOS = [{ versao: "2026-11-16", modelo: V_2026_11_16 }];
+// 2026-11-16-2: o item 5 passa a ter os dois meios de pagamento (Pix e cartão), com os valores de PRECOS.
+const ITEM_5_PAGAMENTO = `5. Pagamento e acesso
+5.1. O primeiro treino custa R$ 9,99 no Pix ou R$ 11,99 no cartão e inclui 30 dias de acesso. Para continuar vendo o treino depois disso, pago a cada 30 dias R$ 9,99 no Pix ou R$ 11,99 no cartão. Sem o pagamento, o treino deixa de aparecer no app até eu renovar. Meus check-ins e meu histórico continuam guardados.
+5.2. Depois de 8 semanas do plano, com o acesso em dia, posso pedir um novo treino por R$ 4,99 no Pix ou R$ 5,99 no cartão.
+5.3. O Pix é pago por um link de cobrança e conferido manualmente em até 24 horas depois que eu envio o comprovante. O comprovante serve só para essa conferência e é apagado junto com as fotos.
+5.4. O cartão é processado pela InfinitePay, que recebe meu nome e email para o pagamento. O parcelamento pode ter juros, cobrados pela InfinitePay. O FitWay não recebe nem guarda os dados do cartão.
+5.5. Valores e condições podem mudar. Mudanças valem para os próximos pagamentos, nunca para o que já foi pago, e serão avisadas no app.`;
+const V_2026_11_16_2 = V_2026_11_16.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, ITEM_5_PAGAMENTO);
+
+export const TERMOS = [{ versao: "2026-11-16-2", modelo: V_2026_11_16_2 }, { versao: "2026-11-16", modelo: V_2026_11_16 }];
 export const TERMO_VERSAO = TERMOS[0].versao;
 
 const valor = (k) => (process.env[CAMPOS[k]] || "").trim();
