@@ -1,9 +1,9 @@
 // Backend do FitWay: uma função Vercel, POST /api/app com { acao, ... }.
-// Ações: criar, entrar, privacidade (pública), eu, salvar, sair, perfil, foto, treino, ranking, admin, termo, pedido_criar, pedido_status
+// Ações: criar, entrar, privacidade e senha_* (públicas; docs/senha.md), senha_alterar, eu, salvar, sair, perfil, foto, treino, ranking, admin, termo, pedido_criar, pedido_status
 // e as de pagamento (api/_pagamento.js) e de suporte (api/_suporte.js). O webhook do InfinitePay é outra função: api/infinitepay.js.
 // Banco: Postgres (Neon) via DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { acaoAdmin, ehAdmin } from "./_admin.js";
 import { DIA, juntar, limpar } from "./_dados.js";
 import { gerarSeDevido } from "./_ia.js";
@@ -13,6 +13,8 @@ import { ABERTOS, PRECOS, iaAtiva, planoVisivel, podePedir } from "./_precos.js"
 import { TERMO_VERSAO, montarTermo, termoFaltando } from "./_termo.js";
 import { montarPrivacidade } from "./_privacidade.js";
 import { ACOES as ACOES_SUPORTE, acaoSuporte, naoLido } from "./_suporte.js";
+import { ERRO_SENHA, alterarSenha, avisarTroca, confere, pedirLink, senhaHash, senhaValida, trocarPorToken } from "./_senha.js";
+import { emailDisponivel, mensagemIndisponivel, transporteGmail } from "./_email.js";
 import { lerPdf } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
@@ -122,17 +124,32 @@ const schema = () => pronto ||= (async () => {
     criado timestamptz not null default now()
   )`;
   await sql`create index if not exists chamado_mensagens_chamado on chamado_mensagens (chamado_id, id)`;
+  // Esqueci a senha (docs/senha.md): só o hash do token; os pedidos guardam o hash do email digitado (limites).
+  await sql`create table if not exists senha_tokens (
+    id bigint generated always as identity primary key,
+    email text not null references usuarios on delete cascade,
+    hash text not null unique,
+    criado timestamptz not null default now(),
+    expira timestamptz not null,
+    usado_em timestamptz,
+    ip text
+  )`;
+  await sql`create index if not exists senha_tokens_email on senha_tokens (email)`;
+  await sql`create table if not exists senha_pedidos (
+    id bigint generated always as identity primary key,
+    email_hash text not null,
+    ip text not null,
+    criado timestamptz not null default now()
+  )`;
+  await sql`create index if not exists senha_pedidos_email on senha_pedidos (email_hash, criado)`;
+  await sql`create index if not exists senha_pedidos_ip on senha_pedidos (ip, criado)`;
   await sql`create unique index if not exists admin_log_devolvido on admin_log ((detalhes->>'transaction_nsu')) where acao = 'devolvido'`;
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
 const cookie = (t, idade) => `mt=${t}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${idade}`;
-const senhaHash = (senha, salt = randomBytes(16).toString("hex")) => `${salt}:${scryptSync(senha, salt, 32).toString("hex")}`;
-const confere = (senha, guardada) => {
-  const feita = Buffer.from(senhaHash(senha, guardada.split(":")[0])), certa = Buffer.from(guardada);
-  return feita.length === certa.length && timingSafeEqual(feita, certa);
-};
 const texto = (v, min, max) => typeof v === "string" && v.length >= min && v.length <= max;
+const ipDe = (req) => { const h = (k) => (typeof req.headers[k] === "string" ? req.headers[k] : ""); return (h("x-real-ip") || h("x-forwarded-for").split(",")[0]).trim().slice(0, 64); };
 
 // O banco guarda só o hash do token: um vazamento do banco não entrega sessões abertas.
 async function abrirSessao(res, email) {
@@ -167,7 +184,7 @@ export default async function handler(req, res) {
     if (b.acao === "criar" || b.acao === "entrar") {
       const email = texto(b.email, 3, 120) ? b.email.trim().toLowerCase() : "";
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ erro: "Digite um email válido, como nome@exemplo.com." });
-      if (!texto(b.senha, 6, 100)) return res.status(400).json({ erro: "A senha precisa ter pelo menos 6 caracteres." });
+      if (!senhaValida(b.senha)) return res.status(400).json({ erro: ERRO_SENHA });
       let u;
       if (b.acao === "criar") {
         const nome = texto(b.nome, 1, 40) ? b.nome.trim() : "";
@@ -187,6 +204,17 @@ export default async function handler(req, res) {
     }
 
     if (b.acao === "privacidade") return res.json(montarPrivacidade()); // pública: vale para o app inteiro
+
+    // Esqueci a senha (sem login). A resposta do pedido é sempre a mesma, com ou sem conta.
+    if (b.acao === "senha_disponivel") return res.json(emailDisponivel() ? { disponivel: true } : { disponivel: false, mensagem: mensagemIndisponivel() });
+    if (b.acao === "senha_pedir") return res.json(await pedirLink(sql, { email: b.email, ip: ipDe(req) }, { transporte: transporteGmail() }));
+    if (b.acao === "senha_nova") {
+      const r = await trocarPorToken(sql, { token: b.token, senha: b.senha });
+      if (!r.usuario) return res.status(r.status).json({ erro: r.erro });
+      await abrirSessao(res, r.usuario.email); // todas as sessões antigas já foram apagadas; esta é a do aparelho atual
+      await avisarTroca(r.usuario.email, { transporte: transporteGmail() });
+      return res.json({ ...publico(r.usuario), suporteNaoLido: await naoLido(sql, r.usuario.email) });
+    }
 
     if (b.acao === "termo") { // versão antiga serve para o admin conferir o que foi aceito
       // Com a função desligada o termo não é público (tem dados pessoais do responsável): só o admin lê.
@@ -220,6 +248,12 @@ export default async function handler(req, res) {
           || case when dados->'plano' is not null then jsonb_build_object('plano', dados->'plano') else '{}'::jsonb end
         where email = ${u.email} returning dados`;
       return res.json({ dados: visivel(u, x.dados) });
+    }
+    if (b.acao === "senha_alterar") {
+      const r = await alterarSenha(sql, u, { atual: b.atual, nova: b.nova }, sha(req.cookies.mt));
+      if (r.status !== 200) return res.status(r.status).json({ erro: r.erro });
+      await avisarTroca(u.email, { transporte: transporteGmail() });
+      return res.json({});
     }
     if (b.acao === "perfil") {
       const nome = texto(b.nome, 1, 40) ? b.nome.trim() : "";
