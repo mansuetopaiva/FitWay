@@ -10,4 +10,4 @@
 - [x] S7. Painel: aba Suporte, conversa com contexto, botões; "Excluir conta" no detalhe do usuário.
 - [x] S8. Política de privacidade `2026-11-16-2`.
 - [x] S9. README "Suporte"; PGlite + jsdom fora do repositório.
-- [ ] S10. 4 agentes (código, segurança, testes, UI), correções, push.
+- [x] S10. 4 agentes (código, segurança, testes, UI), correções, push.

@@ -181,3 +181,9 @@ test("excluir conta: uma instrução, recusa com pedido pago ou gerando, log só
   const n = sqlFalso((q) => (q.includes("delete from usuarios") ? [] : [{ existe: false, andamento: false }]));
   assert.equal((await acaoAdmin(n.sql, dono, { op: "usuario_excluir", email: "al@x.com", confirmacao: "al@x.com" })).status, 404);
 });
+
+test("anexo: limite exato de 410000 caracteres", () => {
+  const base = "data:image/jpeg;base64,/9j/";
+  assert.equal(anexoValido(base + "A".repeat(410000 - base.length)), true);
+  assert.equal(anexoValido(base + "A".repeat(410001 - base.length)), false);
+});

@@ -60,3 +60,9 @@ test("marcar como devolvido: valida o transaction_nsu, grava no log uma vez e so
   assert.ok(s.chamadas.some((c) => /acao = 'cartao_sem_pedido'.*not exists .*acao = 'devolvido'/s.test(c.q)), "a lista tira os devolvidos");
   assert.ok(s.chamadas.some((c) => /estornado_em is null/.test(c.q)), "a receita do mês não conta pedido estornado");
 });
+
+test("devolucao_marcar: conflito do índice único (23505) vira 400; outro erro sobe", async () => {
+  const lanca = (code) => async () => { throw Object.assign(new Error("x"), { code }); };
+  assert.equal((await acaoAdmin(lanca("23505"), dono, { op: "devolucao_marcar", transaction_nsu: "tx1" })).status, 400);
+  await assert.rejects(acaoAdmin(lanca("57P01"), dono, { op: "devolucao_marcar", transaction_nsu: "tx1" }));
+});
