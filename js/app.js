@@ -201,28 +201,58 @@
     };
   }
   // #/nova-senha/<token>: o token já saiu do endereço (veja o início do app) e fica só na memória.
+  // O token sai do endereço (e do histórico) e fica só na memória. Roda na carga e a cada troca de rota (link colado numa aba aberta).
+  function tirarToken() {
+    const m = /^#\/nova-senha\/([A-Za-z0-9_-]{1,100})$/.exec(location.hash);
+    if (!m) return;
+    tokenSenha = m[1];
+    history.replaceState(null, "", location.pathname + location.search + "#/nova-senha");
+  }
+  // Igual ao MSG_LINK de api/_senha.js (test/senha.test.js confere).
   const MSG_LINK_APP = "Este link não vale mais. Peça um novo em Esqueci a senha.";
-  function viewNovaSenha(motivo) {
+  let contaToken = { token: "", email: "" }; // de que conta é o link (consultado uma vez por token)
+  async function viewNovaSenha(motivo) {
     const fora = !email;
-    const semToken = motivo === "vencido" ? `<p class="ia-status" role="alert">${esc(MSG_LINK_APP)}</p>`
-      : `<p class="ia-status">Abra de novo o link que enviamos por email. Se ele já foi usado ou passou de 30 minutos, peça um novo.</p>`;
-    const corpo = tokenSenha ? `<form novalidate id="novaForm">
+    const casca = (corpo) => {
+      app.innerHTML = `<main class="login">
+        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
+        <h2 class="esq-tit" id="esqTit" tabindex="-1">Criar uma senha nova</h2>${corpo}
+        <p class="login-links">${fora ? `<a class="link-alto" href="#/">Voltar para Entrar</a>` : `<a class="link-alto" href="#/perfil">Voltar ao app</a>`}</p></main>`;
+      $("#esqTit").focus();
+    };
+    const semToken = (vencido) => casca((vencido ? `<p class="ia-status" role="alert">${esc(MSG_LINK_APP)}</p>`
+      : `<p class="ia-status">Abra de novo o link que enviamos por email. Se ele já foi usado ou passou de 30 minutos, peça um novo.</p>`)
+      + (fora ? `<button type="button" class="btn" id="pedirNovo" style="margin-top:12px">Pedir um link novo</button>`
+        : `<p class="login-links"><a class="link-alto" href="#/perfil">Trocar a senha no Perfil</a></p>`));
+    const ligarPedir = () => { if (fora) $("#pedirNovo").onclick = () => { loginMode = "esqueci"; history.replaceState(null, "", location.pathname + "#/"); render(); }; };
+    if (!tokenSenha) { semToken(motivo === "vencido"); return ligarPedir(); }
+    if (contaToken.token !== tokenSenha) {
+      casca(`<p class="muted" role="status">Conferindo o link…</p>`);
+      const t = tokenSenha;
+      try { contaToken = { token: t, email: (await api("senha_conta", { token: t })).email }; }
+      catch (e) {
+        if (location.hash.split("/")[1] !== "nova-senha") return;
+        if (e.status === 400) { tokenSenha = ""; semToken(true); return ligarPedir(); }
+        return casca(`<p class="err" role="alert">${esc(e.status ? e.message : "Sem conexão com o servidor. Tente de novo.")}</p>`);
+      }
+      if (location.hash.split("/")[1] !== "nova-senha" || t !== tokenSenha) return;
+    }
+    const conta = contaToken.email;
+    // Logado em outra conta: o link não é desta pessoa (ou ela precisa sair antes). Nunca troca de conta sem ela ver.
+    if (email && email !== conta) {
+      casca(`<p class="ia-status" role="alert">Este link é da conta ${esc(conta)}, mas você está conectado como ${esc(email)}. Saia da conta para usar este link.</p>
+        <button type="button" class="btn" id="sairParaLink" style="margin-top:12px">Sair e continuar</button>`);
+      $("#sairParaLink").onclick = () => { const t = tokenSenha; sair(); tokenSenha = t; history.replaceState(null, "", location.pathname + "#/nova-senha"); render(); };
+      return;
+    }
+    casca(`<p class="muted" style="margin-bottom:12px">Conta: <b>${esc(conta)}</b></p>
+      <form novalidate id="novaForm">
+        ${campoUsuario(conta)}
         ${campoSenha("nova1", "Nova senha", "new-password", "novaDica")}${campoSenha("nova2", "Repetir a nova senha", "new-password", "novaDica")}
         <p class="muted" id="novaDica" style="margin:-6px 0 10px">Pelo menos 6 caracteres.</p>
         ${mostrarSenhas("novaVer")}
         <p class="err" role="alert"></p>
-        <button class="btn" type="submit">Salvar senha nova</button></form>`
-      : semToken + (fora ? `<button type="button" class="btn" id="pedirNovo" style="margin-top:12px">Pedir um link novo</button>`
-        : `<p class="login-links"><a class="link-alto" href="#/perfil">Trocar a senha no Perfil</a></p>`);
-    app.innerHTML = `<main class="login">
-        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
-        <h2 class="esq-tit" id="esqTit" tabindex="-1">Criar uma senha nova</h2>${corpo}
-        <p class="login-links">${fora ? `<a class="link-alto" href="#/">Voltar para Entrar</a>` : `<a class="link-alto" href="#/perfil">Voltar ao app</a>`}</p></main>`;
-    $("#esqTit").focus();
-    if (!tokenSenha) {
-      if (fora) $("#pedirNovo").onclick = () => { loginMode = "esqueci"; location.hash = ""; render(); };
-      return;
-    }
+        <button class="btn" type="submit">Salvar senha nova</button></form>`);
     ligarMostrar("novaVer", $("#novaForm"));
     $("#novaForm").onsubmit = async (ev) => {
       ev.preventDefault();
@@ -238,10 +268,11 @@
         err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return;
       }
       tokenSenha = "";
+      if (u.semSessao) { toast(u.mensagem); history.replaceState(null, "", location.pathname + "#/"); loginMode = "entrar"; return render(); }
       await entrou(u);
       restoreSessao();
-      toast("Senha trocada. Você entrou na sua conta.");
-      location.hash = data.plano ? "#/inicio" : "#/perfil";
+      toast(`Senha trocada. Você entrou como ${u.email}.`);
+      history.replaceState(null, "", location.pathname + (data.plano ? "#/inicio" : "#/perfil")); // Voltar não leva à tela da senha
       render();
     };
   }
@@ -977,6 +1008,7 @@
 
   // ---------- rotas ----------
   function render() {
+    tirarToken();
     clearInterval(tickTimer);
     clearTimeout(iaTimer);
     const [, rota, arg] = location.hash.split("/");
@@ -1011,13 +1043,8 @@
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });
-  // Link de troca de senha: o token sai do endereço antes de qualquer requisição e fica só na memória.
-  (() => {
-    const m = /^#\/nova-senha\/([A-Za-z0-9_-]{1,100})$/.exec(location.hash);
-    if (!m) return;
-    tokenSenha = m[1];
-    history.replaceState(null, "", location.pathname + location.search + "#/nova-senha");
-  })();
+  // Link de troca de senha aberto na carga da página: o token sai do endereço antes da primeira requisição.
+  tirarToken();
   // Volta do checkout do InfinitePay (Pix ou cartão): guarda o retorno, limpa a URL e abre o pagamento, que confere.
   (() => {
     const q = new URLSearchParams(location.search), o = q.get("order_nsu"), t = q.get("transaction_nsu"), s = q.get("slug");

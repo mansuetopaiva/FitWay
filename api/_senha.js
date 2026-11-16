@@ -2,6 +2,7 @@
 // O "_" impede a Vercel de expor como rota. Recebe sql e o transporte de email por parâmetro para o teste.
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { emailDisponivel, enviarEmail, mensagemIndisponivel } from "./_email.js";
+import { ehAdmin } from "./_admin.js";
 
 export const senhaHash = (senha, salt = randomBytes(16).toString("hex")) => `${salt}:${scryptSync(senha, salt, 32).toString("hex")}`;
 export const confere = (senha, guardada) => {
@@ -19,6 +20,8 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/; // 32 bytes em base64url
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const site = () => (process.env.SITE_URL || "").trim().replace(/\/+$/, "");
+// IPv6: um atacante tem um /64 inteiro; conta o bloco, não o endereço.
+const grupoIp = (ip) => { ip = typeof ip === "string" ? ip.trim().slice(0, 64) : ""; return ip.includes(":") ? ip.split(":").slice(0, 4).join(":") + "::/64" : ip; };
 const PISO = 2500; // ms: a resposta do "Esqueci a senha" leva sempre isso, com ou sem conta
 
 // "Esqueci a senha". A resposta é sempre MSG_PEDIDO: com ou sem conta, dentro ou fora do limite, email válido ou não,
@@ -29,18 +32,24 @@ export async function pedirLink(sql, { email, ip }, { transporte, esperar = (ms)
   const inicio = agora();
   try {
     const e = typeof email === "string" ? email.trim().toLowerCase().slice(0, 120) : "";
-    ip = typeof ip === "string" ? ip.slice(0, 64) : "";
-    // Registra antes de contar (também email sem conta). O registro guarda o hash do email digitado, não o email.
-    const [l] = await sql`with r as (insert into senha_pedidos (email_hash, ip) values (${sha(e)}, ${ip}) returning id),
+    ip = grupoIp(ip);
+    // 1º registra (também email sem conta; guarda o hash do email digitado, não o email), depois conta só os pedidos de
+    // até este id: com pedidos em paralelo, a ordem de chegada decide e o limite não estoura.
+    const [r] = await sql`with r as (insert into senha_pedidos (email_hash, ip) values (${sha(e)}, ${ip}) returning id),
         d as (delete from senha_pedidos where criado < now() - interval '1 day')
-      select (select count(*) from senha_pedidos where email_hash = ${sha(e)} and criado > now() - interval '1 hour')::int as por_email,
-        (select count(*) from senha_pedidos where ip = ${ip} and criado > now() - interval '1 hour')::int as por_ip`;
-    if (!EMAIL.test(e) || !l || l.por_email >= 3 || l.por_ip >= 10) return { mensagem: MSG_PEDIDO };
+      select id from r`;
+    const [l] = await sql`select (select count(*) from senha_pedidos where email_hash = ${sha(e)} and criado > now() - interval '1 hour' and id < ${r.id})::int as por_email,
+        (select count(*) from senha_pedidos where ip = ${ip} and criado > now() - interval '1 hour' and id < ${r.id})::int as por_ip`;
+    // Conta de admin não recupera por email (um fator só é pouco para o painel): a mesma resposta, sem enviar.
+    const bloqueado = !EMAIL.test(e) || !l || l.por_email >= 3 || l.por_ip >= 10 || ehAdmin(e);
     const token = randomBytes(32).toString("base64url");
     // Numa instrução: vence os links anteriores não usados e grava o novo (só o hash). Sem conta, o insert não acha linha.
-    const [u] = await sql`with v as (update senha_tokens set expira = least(expira, now()) where email = ${e} and usado_em is null and expira > now()),
+    // Teto global de 100 links por hora (cota do Gmail). Bloqueado ou não, a mesma instrução roda (sem atalho no tempo).
+    const [u] = await sql`with v as (update senha_tokens set expira = least(expira, now())
+          where email = ${e} and usado_em is null and expira > now() and not ${bloqueado}::boolean),
         t as (insert into senha_tokens (email, hash, expira, ip) select email, ${sha(token)}, now() + interval '30 minutes', ${ip}
-          from usuarios where email = ${e} returning email)
+          from usuarios where email = ${e} and not ${bloqueado}::boolean
+            and (select count(*) from senha_tokens where criado > now() - interval '1 hour') < 100 returning email)
       select u.nome from usuarios u where u.email = (select email from t)`;
     if (u) {
       const link = `${site()}/#/nova-senha/${token}`;
@@ -66,17 +75,26 @@ export async function avisarTroca(para, { transporte }) {
   catch (err) { console.error("email de aviso de troca:", err && err.message); }
 }
 
+// A tela de nova senha mostra de que conta é o link (contra quem manda o próprio link para outra pessoa). Não gasta o token.
+export async function verToken(sql, token) {
+  if (typeof token !== "string" || !TOKEN.test(token)) return null;
+  const [t] = await sql`select email from senha_tokens where hash = ${sha(token)} and usado_em is null and expira > now()`;
+  return t ? t.email : null;
+}
+
 // #/nova-senha/<token>. Numa instrução: usa o token (uma vez, dentro dos 30 min), grava a senha, vence os outros tokens,
 // apaga TODAS as sessões e registra no admin_log (sem token nem senha). Devolve o usuário para o app abrir uma sessão nova.
 export async function trocarPorToken(sql, { token, senha }) {
   if (typeof token !== "string" || !TOKEN.test(token)) return { status: 400, erro: MSG_LINK };
   if (!senhaValida(senha)) return { status: 400, erro: ERRO_SENHA };
   const h = sha(token);
+  // Token que não existe (ou já não vale) é recusado sem o scrypt.
+  if (!(await sql`select 1 from senha_tokens where hash = ${h} and usado_em is null and expira > now()`).length) return { status: 400, erro: MSG_LINK };
   const [u] = await sql`with t as (update senha_tokens set usado_em = now() where hash = ${h} and usado_em is null and expira > now() returning email),
       u as (update usuarios set senha = ${senhaHash(senha)} where email = (select email from t) returning email, nome, dados, foto, acesso_ate),
       o as (update senha_tokens set expira = least(expira, now()) where email = (select email from t) and hash <> ${h} and usado_em is null),
       s as (delete from sessoes where email = (select email from t)),
-      l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select email, 'senha_trocada', email, '{"via":"email"}'::jsonb from u)
+      l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select 'usuario', 'senha_trocada', email, '{"via":"email"}'::jsonb from u)
     select * from u`;
   return u ? { status: 200, usuario: u } : { status: 400, erro: MSG_LINK };
 }
@@ -90,14 +108,14 @@ export async function alterarSenha(sql, u, { atual, nova }, sessaoHash) {
   if (!r) return { status: 401, erro: "Entre na sua conta." };
   if (r.erros >= 5) return { status: 429, erro: "Muitas tentativas com a senha errada. Espere uma hora ou use Esqueci a senha." };
   if (!confere(atual, r.senha)) {
-    await sql`insert into admin_log (admin_email, acao, alvo_email, detalhes) values (${u.email}, 'senha_errada', ${u.email}, '{}'::jsonb)`;
+    await sql`insert into admin_log (admin_email, acao, alvo_email, detalhes) values ('usuario', 'senha_errada', ${u.email}, '{}'::jsonb)`;
     return { status: 400, erro: "A senha atual está incorreta." };
   }
   // "and senha = guardada": se outra troca entrou no meio, esta não sobrescreve.
   const [x] = await sql`with a as (update usuarios set senha = ${senhaHash(nova)} where email = ${u.email} and senha = ${r.senha} returning email),
       s as (delete from sessoes where email = ${u.email} and token <> ${sessaoHash} and exists (select 1 from a)),
       o as (update senha_tokens set expira = least(expira, now()) where email = ${u.email} and usado_em is null and exists (select 1 from a)),
-      l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select email, 'senha_trocada', email, '{"via":"perfil"}'::jsonb from a)
+      l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select 'usuario', 'senha_trocada', email, '{"via":"perfil"}'::jsonb from a)
     select email from a`;
   return x ? { status: 200 } : { status: 400, erro: "A senha mudou enquanto você trocava. Tente de novo." }; // não 409: o app reserva 409 para "outra conta entrou"
 }

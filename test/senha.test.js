@@ -16,8 +16,10 @@ const falso = () => { const enviados = []; return { enviados, transporte: { send
 const relogio = () => { const r = { esperas: [], esperar: async (ms) => { r.esperas.push(ms); } }; return r; };
 // Banco: limites folgados; a conta existe se o email for ana@x.com.
 const banco = (limites = { por_email: 0, por_ip: 0 }) => (q, v) => {
-  if (q.includes("insert into senha_pedidos")) return [limites];
-  if (q.includes("insert into senha_tokens")) return v.includes("ana@x.com") ? [{ nome: "Ana <b>" }] : [];
+  if (q.includes("insert into senha_pedidos")) return [{ id: 7 }];
+  if (q.includes("as por_email")) return [limites];
+  // a instrução do token roda sempre; com bloqueado = true ela não grava nada
+  if (q.includes("insert into senha_tokens")) return v.includes("ana@x.com") && !v.includes(true) ? [{ nome: "Ana <b>" }] : [];
   return [];
 };
 
@@ -49,7 +51,7 @@ test("pedir: só o hash do token vai ao banco; o link leva o token depois do #; 
   const s = sqlFalso(banco()), t = falso();
   await pedirLink(s.sql, { email: " Ana@X.com ", ip: "1.2.3.4" }, { transporte: t.transporte, esperar: async () => {} });
   const m = t.enviados[0];
-  assert.equal(m.to, "ana@x.com"); assert.equal(m.subject, "Trocar sua senha do FitWay");
+  assert.deepEqual(m.to, { address: "ana@x.com" }); assert.equal(m.subject, "Trocar sua senha do FitWay");
   const token = /\/#\/nova-senha\/([A-Za-z0-9_-]{43})(\s|$)/.exec(m.text)[1];
   assert.ok(m.text.startsWith("Olá, Ana <b>. Recebemos um pedido para trocar a senha da sua conta no FitWay."));
   assert.match(m.text, /Ele vale por 30 minutos e só pode ser usado uma vez\./);
@@ -59,7 +61,7 @@ test("pedir: só o hash do token vai ao banco; o link leva o token depois do #; 
   const ins = s.chamadas.find((c) => c.q.includes("insert into senha_tokens"));
   assert.ok(ins.valores.includes(sha(token)), "grava o hash");
   for (const c of s.chamadas) assert.ok(!c.valores.some((v) => String(v).includes(token)), "o token nunca vai ao banco");
-  assert.match(ins.q, /update senha_tokens set expira = least\(expira, now\(\)\) where email = \? and usado_em is null/, "pedido novo invalida os anteriores");
+  assert.match(ins.q, /update senha_tokens set expira = least\(expira, now\(\)\)\s+where email = \? and usado_em is null/, "pedido novo invalida os anteriores");
   assert.match(ins.q, /interval '30 minutes'/);
   const ped = s.chamadas.find((c) => c.q.includes("insert into senha_pedidos"));
   assert.ok(ped.valores.includes(sha("ana@x.com")) && !ped.valores.includes("ana@x.com"), "o registro dos limites guarda o hash do email");
@@ -70,7 +72,9 @@ test("pedir: limite por email (3/h) e por IP (10/h): mesma mensagem, sem token n
     const s = sqlFalso(banco(lim)), t = falso(), r = relogio();
     const out = await pedirLink(s.sql, { email: "ana@x.com", ip: "1.2.3.4" }, { transporte: t.transporte, esperar: r.esperar });
     assert.deepEqual(out, { mensagem: MSG_PEDIDO });
-    assert.equal(t.enviados.length, 0); assert.ok(!s.chamadas.some((c) => c.q.includes("insert into senha_tokens")));
+    assert.equal(t.enviados.length, 0);
+    const tok = s.chamadas.find((c) => c.q.includes("insert into senha_tokens"));
+    assert.ok(tok.valores.includes(true), "bloqueado: a mesma instrução roda, sem gravar");
     assert.equal(r.esperas.length, 1, "o piso vale também no limite");
   }
   const s = sqlFalso(banco({ por_email: 2, por_ip: 9 })), t = falso();
@@ -82,7 +86,7 @@ test("pedir: email inválido dá a mesma mensagem (conta no limite do IP, sem to
   const s = sqlFalso(banco()), r = relogio();
   assert.deepEqual(await pedirLink(s.sql, { email: "x", ip: "1.2.3.4" }, { transporte: falso().transporte, esperar: r.esperar }), { mensagem: MSG_PEDIDO });
   assert.ok(s.chamadas.some((c) => c.q.includes("insert into senha_pedidos")));
-  assert.ok(!s.chamadas.some((c) => c.q.includes("insert into senha_tokens")));
+  assert.ok(s.chamadas.find((c) => c.q.includes("insert into senha_tokens")).valores.includes(true), "email inválido: bloqueado");
   const quebrado = { sendMail: async () => { throw new Error("smtp fora"); } };
   const erro = console.error; console.error = () => {};
   try { assert.deepEqual(await pedirLink(sqlFalso(banco()).sql, { email: "ana@x.com", ip: "" }, { transporte: quebrado, esperar: async () => {} }), { mensagem: MSG_PEDIDO }); }
@@ -113,11 +117,14 @@ test("trocar por token: formato e senha fraca recusados sem banco; numa instruç
   let r = await trocarPorToken(s.sql, { token: tok, senha: "nova123" });
   assert.equal(r.status, 400); assert.equal(r.erro, MSG_LINK);
   assert.equal(MSG_LINK, "Este link não vale mais. Peça um novo em Esqueci a senha.");
+  const { readFileSync } = await import("node:fs");
+  assert.ok(readFileSync(new URL("../js/app.js", import.meta.url), "utf8").includes(`const MSG_LINK_APP = "${MSG_LINK}"`), "o app reconhece o mesmo texto");
+  assert.equal(s.chamadas.length, 1, "token que não existe: só a consulta barata, sem scrypt");
   s = sqlFalso(() => [{ email: "ana@x.com", nome: "Ana" }]);
   r = await trocarPorToken(s.sql, { token: tok, senha: "nova123" });
   assert.equal(r.usuario.email, "ana@x.com");
-  assert.equal(s.chamadas.length, 1);
-  const { q, valores } = s.chamadas[0];
+  assert.equal(s.chamadas.length, 2);
+  const { q, valores } = s.chamadas[1];
   assert.match(q, /update senha_tokens set usado_em = now\(\) where hash = \? and usado_em is null and expira > now\(\)/);
   assert.match(q, /delete from sessoes where email = \(select email from t\)/, "todas as sessões");
   assert.match(q, /hash <> \?/, "vence os outros tokens");
@@ -146,4 +153,17 @@ test("alterar (Perfil): confere a atual, limite de erros, mantém só a sessão 
   assert.ok(up.valores.includes("hashDaSessao"));
   assert.match(up.q, /and senha = \?/, "só troca se a senha não mudou no meio");
   assert.match(up.q, /'senha_trocada'.*'\{"via":"perfil"\}'/s);
+});
+
+test("pedir: conta de admin não recebe link (mesma resposta); IPv6 conta por /64; limites contam só os pedidos anteriores", async () => {
+  process.env.ADMIN_EMAILS = "ana@x.com";
+  try {
+    const s = sqlFalso(banco()), t = falso();
+    assert.deepEqual(await pedirLink(s.sql, { email: "ana@x.com", ip: "2001:db8:1:2:3:4:5:6" }, { transporte: t.transporte, esperar: async () => {} }), { mensagem: MSG_PEDIDO });
+    assert.equal(t.enviados.length, 0);
+    assert.ok(s.chamadas.find((c) => c.q.includes("insert into senha_pedidos")).valores.includes("2001:db8:1:2::/64"));
+    const cont = s.chamadas.find((c) => c.q.includes("as por_email"));
+    assert.match(cont.q, /id < \?/); assert.ok(cont.valores.includes(7));
+    assert.match(s.chamadas.find((c) => c.q.includes("insert into senha_tokens")).q, /from senha_tokens where criado > now\(\) - interval '1 hour'\) < 100/, "teto global");
+  } finally { delete process.env.ADMIN_EMAILS; }
 });

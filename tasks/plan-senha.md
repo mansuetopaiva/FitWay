@@ -7,4 +7,4 @@
 - [x] P5. `senha_alterar` no Perfil (TDD).
 - [x] P6. Telas: "Esqueci a senha", `#/nova-senha/<token>` (limpa o endereço), "Trocar senha" no Perfil.
 - [x] P7. Política `2026-11-16-3`, README (variáveis), PGlite + jsdom.
-- [ ] P8. 4 agentes (segurança focada em roubo de conta), correções, push.
+- [x] P8. 4 agentes (segurança focada em roubo de conta), correções, push.

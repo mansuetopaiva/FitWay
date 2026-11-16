@@ -29,7 +29,7 @@ test("disponível só com SMTP_USER, SMTP_SENHA_APP e SITE_URL; mensagem usa o T
 test("enviarEmail: remetente FitWay <SMTP_USER>, texto e HTML, pelo transporte recebido", () => comEnv(SMTP, async () => {
   const enviados = [];
   await enviarEmail({ para: "ana@x.com", assunto: "Oi", texto: "t", html: "<p>h</p>" }, { transporte: { sendMail: async (m) => { enviados.push(m); return {}; } } });
-  assert.deepEqual(enviados, [{ from: { name: "FitWay", address: SMTP.SMTP_USER }, to: "ana@x.com", subject: "Oi", text: "t", html: "<p>h</p>" }]);
+  assert.deepEqual(enviados, [{ from: { name: "FitWay", address: SMTP.SMTP_USER }, to: { address: "ana@x.com" }, subject: "Oi", text: "t", html: "<p>h</p>" }]);
 }));
 
 test("enviarEmail: desiste em 10 s e falha sem transporte", () => comEnv(SMTP, async () => {

@@ -26,8 +26,9 @@ export async function enviarEmail({ para, assunto, texto, html }, { transporte, 
   let timer;
   const tempo = new Promise((_, falhou) => { timer = setTimeout(() => falhou(new Error("Envio de email passou do tempo.")), limite); });
   try {
+    // "to" como objeto: o texto do endereço nunca é lido como lista de destinatários.
     return await Promise.race([tempo, transporte.sendMail({
-      from: { name: "FitWay", address: env("SMTP_USER") }, to: para, subject: assunto, text: texto, ...(html ? { html } : {}),
+      from: { name: "FitWay", address: env("SMTP_USER") }, to: { address: para }, subject: assunto, text: texto, ...(html ? { html } : {}),
     })]);
   } finally { clearTimeout(timer); }
 }

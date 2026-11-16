@@ -13,7 +13,7 @@ import { ABERTOS, PRECOS, iaAtiva, planoVisivel, podePedir } from "./_precos.js"
 import { TERMO_VERSAO, montarTermo, termoFaltando } from "./_termo.js";
 import { montarPrivacidade } from "./_privacidade.js";
 import { ACOES as ACOES_SUPORTE, acaoSuporte, naoLido } from "./_suporte.js";
-import { ERRO_SENHA, alterarSenha, avisarTroca, confere, pedirLink, senhaHash, senhaValida, trocarPorToken } from "./_senha.js";
+import { ERRO_SENHA, alterarSenha, avisarTroca, confere, pedirLink, senhaHash, senhaValida, trocarPorToken, verToken } from "./_senha.js";
 import { emailDisponivel, mensagemIndisponivel, transporteGmail } from "./_email.js";
 import { lerPdf } from "./_treino.js";
 
@@ -148,6 +148,7 @@ const schema = () => pronto ||= (async () => {
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
 const cookie = (t, idade) => `mt=${t}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${idade}`;
+const HASH_FALSO = senhaHash(randomBytes(16).toString("hex"));
 const texto = (v, min, max) => typeof v === "string" && v.length >= min && v.length <= max;
 const ipDe = (req) => { const h = (k) => (typeof req.headers[k] === "string" ? req.headers[k] : ""); return (h("x-real-ip") || h("x-forwarded-for").split(",")[0]).trim().slice(0, 64); };
 
@@ -196,7 +197,8 @@ export default async function handler(req, res) {
         if (!u) return res.status(409).json({ erro: "Já existe uma conta com este email. Use a aba Entrar." });
       } else {
         [u] = await sql`select email, nome, senha, dados, foto, acesso_ate from usuarios where email = ${email}`;
-        if (!u || !confere(b.senha, u.senha)) return res.status(401).json({ erro: "Email ou senha incorretos." });
+        // Sem conta, confere contra um hash falso: o tempo é o mesmo do email com conta.
+        if (!confere(b.senha, u ? u.senha : HASH_FALSO) || !u) return res.status(401).json({ erro: "Email ou senha incorretos." });
         await sql`delete from sessoes where expira < now()`;
       }
       await abrirSessao(res, u.email);
@@ -208,11 +210,14 @@ export default async function handler(req, res) {
     // Esqueci a senha (sem login). A resposta do pedido é sempre a mesma, com ou sem conta.
     if (b.acao === "senha_disponivel") return res.json(emailDisponivel() ? { disponivel: true } : { disponivel: false, mensagem: mensagemIndisponivel() });
     if (b.acao === "senha_pedir") return res.json(await pedirLink(sql, { email: b.email, ip: ipDe(req) }, { transporte: transporteGmail() }));
+    if (b.acao === "senha_conta") { const e = await verToken(sql, b.token); return e ? res.json({ email: e }) : res.status(400).json({ erro: "Este link não vale mais. Peça um novo em Esqueci a senha." }); }
     if (b.acao === "senha_nova") {
       const r = await trocarPorToken(sql, { token: b.token, senha: b.senha });
       if (!r.usuario) return res.status(r.status).json({ erro: r.erro });
-      await abrirSessao(res, r.usuario.email); // todas as sessões antigas já foram apagadas; esta é a do aparelho atual
       await avisarTroca(r.usuario.email, { transporte: transporteGmail() });
+      // A senha já mudou e o link já foi usado: se a sessão nova falhar, avisa para entrar com a senha nova.
+      try { await abrirSessao(res, r.usuario.email); } // as sessões antigas já foram apagadas; esta é a do aparelho atual
+      catch (e) { console.error(e); return res.json({ semSessao: true, mensagem: "Senha trocada. Entre com a senha nova." }); }
       return res.json({ ...publico(r.usuario), suporteNaoLido: await naoLido(sql, r.usuario.email) });
     }
 

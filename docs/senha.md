@@ -36,8 +36,11 @@ senha_pedidos (id identity, email_hash (SHA-256 do email digitado), ip, criado) 
 - **`senha_disponivel`** → `{ disponivel, mensagem? }`.
 - **`senha_pedir { email }`** → sempre `{ mensagem: "Se houver uma conta com esse email, enviamos um link para trocar a senha. Ele vale
   por 30 minutos. Confira também o spam." }`, exista a conta ou não, e também quando o limite estoura ou o email tem formato inválido.
-  - Limites: 3 por email por hora e 10 por IP por hora, contados em `senha_pedidos` (registrado antes de contar, inclusive para email
-    sem conta). Acima disso: a mesma mensagem, sem enviar. Linhas de mais de 1 dia são apagadas.
+  - Limites: 3 por email por hora e 10 por IP por hora, contados em `senha_pedidos`. Primeiro registra (inclusive email sem conta),
+    depois conta só os pedidos de id menor: com pedidos em paralelo, a ordem de chegada decide. IPv6 conta pelo bloco /64. Teto global
+    de 100 links por hora (cota do Gmail). Acima disso: a mesma mensagem, sem enviar. Linhas de mais de 1 dia são apagadas.
+  - **Conta de admin** (`ADMIN_EMAILS`) não recebe link: a mesma mensagem, sem enviar (um fator só é pouco para o painel; o admin
+    recupera pela Vercel/banco).
   - Token: `randomBytes(32)` em base64url (43 caracteres); no banco só o SHA-256. Numa instrução: os tokens anteriores não usados do
     email vencem (`expira = now()`) e o novo é gravado — `insert … select from usuarios where email = …` (sem conta, nada é gravado,
     mas a instrução é a mesma).
@@ -46,7 +49,9 @@ senha_pedidos (id identity, email_hash (SHA-256 do email digitado), ip, criado) 
     se medir diferença.
   - Email (texto + HTML simples, sem imagem externa nem rastreamento), assunto "Trocar sua senha do FitWay", com o texto pedido e o
     link `SITE_URL + "/#/nova-senha/" + token` (depois do `#`: não vai a log de servidor nem a outro site).
-- **`senha_nova { token, senha }`**: token no formato (43 caracteres base64url) e senha com as regras do cadastro (6 a 100 caracteres).
+- **`senha_conta { token }`** → `{ email }` de um link válido, sem gastá-lo: a tela mostra de que conta é a senha e, se outra conta
+  estiver conectada no aparelho, pede para sair antes (contra quem manda o próprio link para outra pessoa).
+- **`senha_nova { token, senha }`**: token inexistente é recusado numa consulta barata, antes do scrypt. token no formato (43 caracteres base64url) e senha com as regras do cadastro (6 a 100 caracteres).
   Numa instrução: marca o token usado (só se `usado_em is null` e `expira > now()`), grava a senha (`senhaHash`, o mesmo scrypt do
   cadastro, movido para `_senha.js`), vence os outros tokens do email, **apaga todas as sessões** e grava `admin_log`
   `senha_trocada` (`{ via: "email" }`, sem token nem senha). Depois abre uma sessão nova no aparelho atual e manda o email de aviso.
@@ -57,6 +62,18 @@ senha_pedidos (id identity, email_hash (SHA-256 do email digitado), ip, criado) 
 
 Email de aviso: assunto "Sua senha do FitWay foi trocada", texto "A senha da sua conta foi trocada agora há pouco. Se não foi você,
 responda este email ou abra um chamado no suporte." Falha no envio não desfaz a troca (só `console.error`).
+
+Login sem conta confere contra um hash falso (mesmo tempo do login com conta).
+
+## Limites conhecidos (decisão do dono)
+
+- **Tempo do envio:** se o Gmail demorar mais que o piso de 2,5 s, a resposta com conta sai depois e revela que ela existe. Resolver
+  sem esperar o envio pede `waitUntil` do pacote `@vercel/functions` (dependência nova, não adicionada sem autorização).
+- **O cadastro revela que o email tem conta** ("Já existe uma conta com este email"), anterior a esta mudança. A resposta única do
+  "Esqueci a senha" não esconde isso de quem tentar cadastrar o email. Fechar exige confirmação de email no cadastro.
+- **Nome no email:** o texto pedido começa com "Olá, {nome}." e o nome é escolhido no cadastro (sem confirmação de email): dá para
+  pôr um endereço no nome e o email oficial sair com ele (phishing). O nome vai escapado no HTML.
+- Login (`entrar`) sem limite de tentativas.
 
 ## Telas
 
