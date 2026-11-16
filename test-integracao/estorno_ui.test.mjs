@@ -1,0 +1,38 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { abrir } from "./harness.mjs";
+import { navegador } from "./navegador.mjs";
+process.env.ADMIN_EMAILS = "dono@x.com";
+const { sql, chamar } = await abrir();
+
+test("admin registra a devolução de um pedido pronto e marca um pagamento como devolvido", async () => {
+  await sql`insert into usuarios (email, nome, senha) values ('dono@x.com', 'Dono', 'x')`;
+  await sql`insert into usuarios (email, nome, senha, acesso_ate, dados) values ('al@x.com', 'Aluna', 'x', now() + interval '40 days', '{"plano":{"pedido":"P1","origem":"ia","treinos":[]}}')`;
+  await sql`insert into pedidos (id, email, tipo, status, valor, pago_em) values ('P1', 'al@x.com', 'inicial', 'pronto', 999, now())`;
+  await sql`insert into admin_log (admin_email, acao, alvo_email, detalhes) values ('infinitepay', 'cartao_sem_pedido', 'al@x.com', '{"transaction_nsu":"tx7","paid_amount":499,"motivo":"pedido_fechado"}')`;
+  const t = "a".repeat(64);
+  const { createHash } = await import("node:crypto");
+  await sql`insert into sessoes (token, email, expira) values (${createHash("sha256").update(t).digest("hex")}, 'dono@x.com', now() + interval '1 day')`;
+  const n = await navegador(chamar, { hash: "#/admin/pedido.P1", token: t });
+  await n.espera(() => n.$("[data-ped-estornar]"));
+  n.clicar("[data-ped-estornar]");
+  await n.espera(() => n.$("#pedEstorno"));
+  assert.match(n.texto(), /perde 30 dias, contados do fim do acesso atual/);
+  n.$("#pedEstorno [type=submit]").click();
+  assert.match(n.$("#pedEstornoErr").textContent, /motivo/);
+  n.$("[name=motivo][value=outro]").click();
+  n.$("#pedEstorno [type=submit]").click();
+  assert.match(n.$("#pedEstornoErr").textContent, /Descreva/);
+  n.$("#pedEstornoTxt").value = "pediu por email";
+  n.$("#pedEstorno [type=submit]").click();
+  await n.espera(() => /Estornado em/.test(n.texto()));
+  assert.ok(!n.$("[data-ped-estornar]"));
+  const [u] = await sql`select dados, acesso_ate from usuarios where email = 'al@x.com'`;
+  assert.equal(u.dados.plano, undefined);
+  assert.equal(Math.round((new Date(u.acesso_ate) - Date.now()) / 864e5), 10);
+  await n.espera(() => n.$("[data-devolvido]"));
+  n.clicar("[data-devolvido]");
+  await n.espera(() => !n.$("[data-devolvido]"));
+  assert.equal((await sql`select count(*)::int as n from admin_log where acao = 'devolvido'`)[0].n, 1);
+  assert.deepEqual(n.erros.map(String), []);
+});
