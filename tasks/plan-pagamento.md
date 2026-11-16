@@ -35,7 +35,7 @@ Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda 
     - ID da transação em formato inválido é recusado; ID já usado em outro pedido é recusado com "Este Pix já confirmou o pedido X"; a confirmação grava o ID;
     - "Não encontrei" volta o status com a mensagem e grava o log;
     - só admin (403).
-- [ ] **T6. Cartão** (`api/_pagamento.js`, `api/infinitepay.js`, `api/app.js`, `api/_admin.js`, `vercel.json`, testes)
+- [x] **T6. Cartão** (`api/_pagamento.js`, `api/infinitepay.js`, `api/app.js`, `api/_admin.js`, `vercel.json`, testes)
   - Ações `pagar_cartao`, `confirmar_cartao` e `cartao_verificar`; o webhook.
   - Aceite:
     - corpo forjado (o `payment_check` diz que não foi pago) é ignorado;

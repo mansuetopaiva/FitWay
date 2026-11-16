@@ -6,10 +6,10 @@ import { NOMES_FOTOS, lerPdf } from "./_treino.js";
 import { PARQ, limparPedidos } from "./_pedido.js";
 import { termoFaltando } from "./_termo.js";
 import { ABERTOS, efeitoDoPagamento, tipoValido } from "./_precos.js";
-import { MSG_NAO_ENCONTRADO, aplicarPagamento, lerE2E } from "./_pagamento.js";
+import { MSG_NAO_ENCONTRADO, aplicarPagamento, confirmarCartao, lerE2E } from "./_pagamento.js";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
-  "pedidos", "pedido", "pix_confirmar", "pix_nao_encontrado", "pedido_gerar_de_novo", "pedido_cancelar"];
+  "pedidos", "pedido", "pix_confirmar", "pix_nao_encontrado", "cartao_verificar", "pedido_gerar_de_novo", "pedido_cancelar"];
 const STATUS = ["aguardando_pagamento", "aguardando_confirmacao", "pago", "gerando", "pronto", "erro", "cancelado"];
 
 // Lido a cada chamada: tirar alguém da variável na Vercel vale sem depender do navegador.
@@ -28,6 +28,7 @@ const paginaValida = (p) => p === undefined || (Number.isInteger(p) && p >= 0 &&
 const linha = (x) => ({ nome: x.nome, email: x.email, criado: x.criado, acessoAte: x.acesso_ate, checkins: x.checkins, ultimoCheckin: x.ultimo || null, temTreino: x.tem_treino });
 
 // opc.gerar(id): gera o treino de um pedido pago (gerarSeDevido); injetado para o teste não chamar a IA.
+// opc.fetch: chamada ao InfinitePay (cartao_verificar); injetado no teste.
 export async function acaoAdmin(sql, u, b, opc = {}) {
   if (!ehAdmin(u && u.email)) return falha(403, "Acesso restrito.");
   if (!OPS.includes(b.op)) return falha(400, "Operação desconhecida.");
@@ -79,7 +80,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     return ok({ itens: xs.slice(0, 20), temMais: xs.length > 20 });
   }
 
-  if (b.op.startsWith("pedido") || b.op.startsWith("pix_")) {
+  if (b.op.startsWith("pedido") || b.op.startsWith("pix_") || b.op.startsWith("cartao_")) {
     const id = typeof b.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(b.id) ? b.id : "";
     if (!id) return falha(400, "Informe o pedido.");
     // Cada escrita e o seu registro no admin_log vão numa única instrução.
@@ -131,6 +132,18 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
           l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, 'pix_nao_encontrado', email, ${log("pix_nao_encontrado")}::jsonb from p)
         select status from p`;
       if (!x) return falha(400, "Este pedido não está aguardando a conferência do Pix.");
+    } else if (b.op === "cartao_verificar") {
+      // Roda o payment_check de novo com o último retorno recebido (volta do checkout ou webhook), guardado em checkout_ref.
+      const [p] = await sql`select checkout_ref from pedidos where id = ${id}`;
+      if (!p) return falha(404, "Pedido não encontrado.");
+      if (!p.checkout_ref) return falha(400, "Não há o que verificar: o InfinitePay ainda não mandou o retorno deste pagamento.");
+      const r = await confirmarCartao(sql, { order_nsu: id, ...p.checkout_ref }, { fetch: opc.fetch });
+      if (r !== "pago") return falha(400, {
+        ignorado: "Nada mudou: o pedido não está aguardando o cartão (ou já foi pago).",
+        recusado: "O InfinitePay diz que este pagamento não foi feito ou veio com valor menor.",
+        temporario: "O InfinitePay não respondeu. Tente de novo em alguns minutos.",
+      }[r]);
+      [x] = await sql`select status from pedidos where id = ${id}`;
     } else if (b.op === "pedido_gerar_de_novo") {
       if (!process.env.ANTHROPIC_API_KEY) return falha(400, "Chave da IA não configurada.");
       // Pronto só se ainda é o treino atual do usuário: não sobrescreve um treino mais novo nem um PDF.

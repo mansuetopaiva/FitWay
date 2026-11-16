@@ -49,9 +49,11 @@ async function postar(fetch, caminho, corpo) {
 
 // Webhook, volta do checkout e "Verificar no InfinitePay". Nunca usa valor nem "paid" vindos de fora:
 // só o payment_check, com o handle do servidor. Devolve "pago", "ignorado", "recusado" ou "temporario".
-export async function confirmarCartao(sql, { order_nsu, transaction_nsu, slug }, { fetch = globalThis.fetch } = {}) {
+export async function confirmarCartao(sql, ref, { fetch = globalThis.fetch } = {}) {
   const handle = process.env.INFINITEPAY_HANDLE;
-  if (!handle || !idValido(order_nsu) || !REF.test(transaction_nsu || "") || !REF.test(slug || "")) return "ignorado";
+  const txt = (v) => (typeof v === "string" || (typeof v === "number" && Number.isSafeInteger(v)) ? String(v) : "");
+  const order_nsu = txt(ref.order_nsu), transaction_nsu = txt(ref.transaction_nsu), slug = txt(ref.slug);
+  if (!handle || !idValido(order_nsu) || !REF.test(transaction_nsu) || !REF.test(slug)) return "ignorado";
   // Aceita pedido que tem ou teve link de cartão (P3): quem trocou para Pix e pagou o cartão mesmo assim não perde o acesso.
   const [p] = await sql`update pedidos set checkout_ref = ${JSON.stringify({ slug, transaction_nsu })}::jsonb
     where id = ${order_nsu} and status in ('aguardando_pagamento', 'aguardando_confirmacao') and (metodo = 'cartao' or checkout_url is not null)
