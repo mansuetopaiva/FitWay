@@ -28,7 +28,7 @@ Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda 
     - o usuário não consegue chegar a `pago` por nenhuma ação;
     - a regra dos 30 dias não cancela `aguardando_confirmacao`;
     - o comprovante é apagado em 90 dias.
-- [ ] **T5. Admin Pix** (`api/_admin.js`, testes)
+- [x] **T5. Admin Pix** (`api/_admin.js`, testes)
   - O que muda: `pix_confirmar` (com o ID da transação obrigatório, gravado em `pix_e2e`) e `pix_nao_encontrado`, e o resumo com `pixAguardando`.
   - Aceite:
     - confirmar duas vezes não soma 60 dias;

@@ -4,6 +4,8 @@ import { acaoAdmin } from "../api/_admin.js";
 
 process.env.ADMIN_EMAILS = "dono@x.com";
 process.env.ANTHROPIC_API_KEY = "sk-teste"; // só para passar da checagem da chave; nenhum teste chama a IA
+const E2E = "E" + "1234567890ABCDEFGHIJabcdefghij1";
+const pix = { op: "pix_confirmar", id: "p1", pix_e2e: E2E };
 const dono = { email: "dono@x.com" };
 function sqlFalso(responder = () => []) {
   const chamadas = [];
@@ -12,7 +14,7 @@ function sqlFalso(responder = () => []) {
 }
 
 test("pedido ops: não-admin recebe 403 sem consultar o banco", async () => {
-  for (const op of ["pedidos", "pedido", "pedido_pago", "pedido_gerar_de_novo", "pedido_cancelar"]) {
+  for (const op of ["pedidos", "pedido", "pix_confirmar", "pix_nao_encontrado", "pedido_gerar_de_novo", "pedido_cancelar"]) {
     const { sql, chamadas } = sqlFalso();
     let gerou = false;
     const r = await acaoAdmin(sql, { email: "aluno@x.com" }, { op, id: "abc", gerar: true }, { gerar: async () => { gerou = true; } });
@@ -24,7 +26,7 @@ test("pedido ops: não-admin recebe 403 sem consultar o banco", async () => {
 
 test("pedido ops: id inválido dá 400 sem consulta", async () => {
   for (const id of [undefined, "a b", "x".repeat(41), 5, "x'; drop table pedidos; --", ""]) {
-    for (const op of ["pedido", "pedido_pago", "pedido_gerar_de_novo", "pedido_cancelar"]) {
+    for (const op of ["pedido", "pix_confirmar", "pix_nao_encontrado", "pedido_gerar_de_novo", "pedido_cancelar"]) {
       const { sql, chamadas } = sqlFalso();
       const r = await acaoAdmin(sql, dono, { op, id });
       assert.equal(r.status, 400, `${op} ${id}`);
@@ -47,25 +49,26 @@ test("pedidos: filtros e página inválidos dão 400 sem consulta; válidos cheg
   assert.doesNotMatch(chamadas[0].q, /fotos|respostas/, "lista nunca traz fotos nem respostas");
 });
 
-test("pedido_pago: efeito do tipo, log na mesma instrução, novo_treino com acesso vencido recusado", async () => {
+test("pix_confirmar: efeito do tipo, log na mesma instrução, novo_treino com acesso vencido recusado", async () => {
   const casos = [["inicial", true, "pago", 30], ["mensalidade", false, "pronto", 30], ["novo_treino", true, "pago", 0]];
   for (const [tipo, ativo, status, dias] of casos) {
     const { sql, chamadas } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo, ativo }] : q.startsWith("with p as") ? [{ status }] : []));
-    const r = await acaoAdmin(sql, dono, { op: "pedido_pago", id: "p1" });
+    const r = await acaoAdmin(sql, dono, pix);
     assert.equal(r.status, 200, tipo);
-    const w = chamadas[1];
+    const w = chamadas[2];
     assert.match(w.q, /update pedidos set status = .*update usuarios set acesso_ate = greatest\(now\(\), acesso_ate\).*insert into admin_log/s);
     assert.equal(w.valores[0], status, tipo);
     assert.ok(w.valores.filter((v) => v === dias).length >= 2, `${tipo}: dias ${dias}`);
-    assert.equal(chamadas.length, 2);
+    assert.equal(chamadas.length, 3, "pedido, ID já usado? e a escrita");
+    assert.ok(w.valores.includes(E2E), "a confirmação grava o ID");
   }
   const { sql, chamadas } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo: "novo_treino", ativo: false }] : []));
-  const r = await acaoAdmin(sql, dono, { op: "pedido_pago", id: "p1" });
+  const r = await acaoAdmin(sql, dono, pix);
   assert.equal(r.status, 400);
   assert.match(r.corpo.erro, /venceu/);
   assert.equal(chamadas.length, 1, "nada é gravado");
   const s2 = sqlFalso();
-  assert.equal((await acaoAdmin(s2.sql, dono, { op: "pedido_pago", id: "p1" })).status, 400, "não está aguardando pagamento");
+  assert.equal((await acaoAdmin(s2.sql, dono, pix)).status, 400, "não está aguardando pagamento");
   assert.equal(s2.chamadas.length, 1);
 });
 
@@ -94,14 +97,14 @@ test("gerar de novo e cancelar: recusas com mensagem própria; corrida no índic
   assert.match(chamadas[0].q, /status = 'erro' or \(status = 'pronto' and .*dados->'plano'->>'pedido'/s, "pronto só se ainda é o treino atual");
 });
 
-test("sem ANTHROPIC_API_KEY: marcar como pago (e gerar de novo) um pedido que gera treino avisa e não muda nada; mensalidade segue", async () => {
+test("sem ANTHROPIC_API_KEY: confirmar o Pix (e gerar de novo) um pedido que gera treino avisa e não muda nada; mensalidade segue", async () => {
   const chave = process.env.ANTHROPIC_API_KEY;
   try {
     for (const v of [undefined, ""]) {
       if (v === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = v;
       for (const tipo of ["inicial", "novo_treino"]) {
         const { sql, chamadas } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo, ativo: true }] : [{ status: "pago" }]));
-        const r = await acaoAdmin(sql, dono, { op: "pedido_pago", id: "p1" });
+        const r = await acaoAdmin(sql, dono, pix);
         assert.equal(r.status, 400, tipo);
         assert.equal(r.corpo.erro, "Chave da IA não configurada.");
         assert.equal(chamadas.length, 1, "só a leitura do pedido; nenhuma escrita");
@@ -111,11 +114,70 @@ test("sem ANTHROPIC_API_KEY: marcar como pago (e gerar de novo) um pedido que ge
       assert.equal(r.corpo.erro, "Chave da IA não configurada.");
       assert.equal(g.chamadas.length, 0);
       const m = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo: "mensalidade", ativo: false }] : q.startsWith("with p as") ? [{ status: "pronto" }] : []));
-      const rm = await acaoAdmin(m.sql, dono, { op: "pedido_pago", id: "p1" });
+      const rm = await acaoAdmin(m.sql, dono, pix);
       assert.equal(rm.status, 200, "mensalidade não precisa da IA");
-      assert.equal(m.chamadas.length, 2);
+      assert.equal(m.chamadas.length, 3);
     }
   } finally {
     process.env.ANTHROPIC_API_KEY = chave;
   }
+});
+
+test("pix_confirmar: ID da transação em formato inválido é recusado sem consultar o banco", async () => {
+  for (const pix_e2e of [undefined, "", "E123", "e" + E2E.slice(1), E2E.slice(1), E2E + "1", E2E.slice(0, 31), E2E.slice(0, 9) + " " + E2E.slice(10), E2E.slice(0, 31) + "%", 5]) {
+    const { sql, chamadas } = sqlFalso(() => [{ tipo: "inicial", ativo: true }]);
+    const r = await acaoAdmin(sql, dono, { ...pix, pix_e2e });
+    assert.equal(r.status, 400, String(pix_e2e));
+    assert.match(r.corpo.erro, /ID da transação inválido/);
+    assert.equal(chamadas.length, 0);
+  }
+  const { sql, chamadas } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo: "inicial", ativo: true }] : q.startsWith("with p as") ? [{ status: "pago" }] : []));
+  assert.equal((await acaoAdmin(sql, dono, { ...pix, pix_e2e: "  " + E2E + " " })).status, 200, "espaços nas pontas (cópia) são tirados");
+  assert.ok(chamadas[2].valores.includes(E2E));
+});
+
+test("pix_confirmar: ID já usado em outro pedido é recusado com o código dele, antes e na corrida", async () => {
+  const { sql, chamadas } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo: "inicial", ativo: true }] : q.startsWith("select coalesce(codigo") ? [{ codigo: "FWXYZ234" }] : []));
+  const r = await acaoAdmin(sql, dono, pix);
+  assert.equal(r.status, 400);
+  assert.equal(r.corpo.erro, "Este Pix já confirmou o pedido FWXYZ234.");
+  assert.ok(!chamadas.some((c) => c.q.startsWith("with p as")), "nada gravado");
+  assert.deepEqual(chamadas[1].valores, [E2E, "p1"], "procura o ID em outro pedido");
+  // Dois pedidos confirmados com o mesmo ID ao mesmo tempo: o índice único barra o segundo.
+  let vez = 0;
+  const corrida = async (partes) => {
+    const q = partes.join("?");
+    if (q.startsWith("select p.tipo")) return [{ tipo: "inicial", ativo: true }];
+    if (q.startsWith("select coalesce(codigo")) return vez++ ? [{ codigo: "FWOUTRO2" }] : [];
+    if (q.startsWith("with p as")) throw Object.assign(new Error("duplicate key"), { code: "23505" });
+    return [];
+  };
+  const r2 = await acaoAdmin(corrida, dono, pix);
+  assert.equal(r2.status, 400);
+  assert.equal(r2.corpo.erro, "Este Pix já confirmou o pedido FWOUTRO2.");
+});
+
+test("pix_confirmar: aceita aguardando_confirmacao e aguardando_pagamento, só Pix ou sem meio", async () => {
+  const { sql, chamadas } = sqlFalso();
+  await acaoAdmin(sql, dono, pix);
+  assert.match(chamadas[0].q, /p\.status in \('aguardando_confirmacao', 'aguardando_pagamento'\) and \(p\.metodo is null or p\.metodo = 'pix'\)/);
+});
+
+test("pix_nao_encontrado: volta para aguardando_pagamento com a mensagem e grava o log; fora de aguardando_confirmacao, 400", async () => {
+  const { sql, chamadas } = sqlFalso(() => [{ status: "aguardando_pagamento" }]);
+  const r = await acaoAdmin(sql, dono, { op: "pix_nao_encontrado", id: "p1" });
+  assert.equal(r.status, 200);
+  assert.equal(chamadas.length, 1);
+  assert.match(chamadas[0].q, /update pedidos set status = 'aguardando_pagamento', mensagem_usuario = \?.*where id = \? and status = 'aguardando_confirmacao'.*insert into admin_log.*'pix_nao_encontrado'/s);
+  assert.equal(chamadas[0].valores[0], "Não encontramos seu Pix. Confira o valor e o código e avise de novo.");
+  assert.equal((await acaoAdmin(sqlFalso().sql, dono, { op: "pix_nao_encontrado", id: "p1" })).status, 400);
+});
+
+test("pedido: abrir um pedido com comprovante também fica no log; resumo conta os Pix aguardando confirmação", async () => {
+  const { sql, chamadas } = sqlFalso();
+  await acaoAdmin(sql, dono, { op: "pedido", id: "p1" });
+  assert.match(chamadas[0].q, /or comprovante is not null\)/);
+  const r = sqlFalso(() => [{ pix_aguardando: 2, aguardando: 1, receita_mes: 0, vencendo7d: 0 }]);
+  const x = await acaoAdmin(r.sql, dono, { op: "resumo" });
+  assert.equal(x.corpo.pixAguardando, 2);
 });
