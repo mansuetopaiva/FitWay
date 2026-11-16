@@ -24,8 +24,15 @@ index.html          página única
 css/style.css       visual (tema escuro + verde)
 js/app.js           telas, check-in, gráfico, ranking e chamadas ao servidor
 js/admin.js         painel de administração (só é baixado por quem é admin)
-api/app.js          backend: criar conta, entrar, sair, carregar e salvar dados
-api/_admin.js       ações do painel de administração
+js/pedido.js        formulário do treino personalizado (só é baixado ao abrir o formulário)
+api/app.js          backend: criar conta, entrar, sair, carregar e salvar dados, pedidos
+api/_admin.js       ações do painel de administração, inclusive pedidos
+api/_precos.js      preços e regras de cobrança e acesso
+api/_pedido.js      validação do formulário e das fotos, criação do pedido
+api/_ia.js          chamada à IA, validação do plano gerado e geração do pedido
+api/_prompt.js      texto do prompt da IA
+api/_material_apoio.md  material de apoio que entra no prompt
+api/_termo.js       Termo de Responsabilidade e Uso (versão atual e antigas)
 api/_dados.js       validação e fusão dos dados, validarPlano e escaparLike (testado em test/)
 api/_treino.js      leitura do PDF de treino e escolha da foto de cada exercício
 img/fitway-logo.png     logo da tela de login
@@ -38,7 +45,9 @@ img/fitway-favicon.png  ícone da aba e da tela inicial do celular
 - `usuarios.grupo`: código do grupo do ranking (o mesmo código para todos do grupo).
 - `usuarios.criado`: data de cadastro. Contas criadas antes do painel ficam vazias (o banco não guardava a data);
   o dia em que a coluna foi criada fica no comentário da coluna.
-- `usuarios.acesso_ate`: até quando o admin liberou o acesso. Por enquanto só o admin mexe nela e ela não bloqueia nada.
+- `usuarios.acesso_ate`: até quando o acesso está pago ou liberado pelo admin. Sem acesso ativo, o treino feito pela IA não aparece (PDF e admin aparecem sempre).
+- `pedidos`: cada pedido de treino com IA ou mensalidade (tipo, status, valor, respostas, fotos, aceite do termo, plano gerado, modelo da IA, erro).
+  Um índice único impede dois pedidos abertos para a mesma pessoa.
 - `admin_log`: cada alteração feita pelo admin (quem, o quê, em quem, detalhes e quando).
 - `sessoes`: hash do token de login, email e validade de 30 dias. O token fica em um cookie `HttpOnly`.
 
@@ -90,6 +99,35 @@ para quem souber o endereço, por isso não guarda nenhum segredo.
     nome. Ao salvar, o servidor valida tudo e recalcula as fotos; check-ins, cargas e sessões do usuário não mudam.
     Também dá para enviar um PDF pela conta do usuário (mesma leitura do Perfil) ou remover o treino.
   - **Histórico:** as últimas 20 ações do admin com esse usuário.
+
+## Treino com IA
+
+Fluxo: a pessoa pede o treino no Perfil e preenche o formulário (Você, Rotina, Saúde com PAR-Q, Fotos, Observações e Resumo com o termo).
+O pedido fica **aguardando pagamento**. Ainda não há meio de pagamento: o admin confere o pagamento por fora e clica em **Marcar como pago**
+na aba Pedidos do painel. Aí a IA monta um plano de 8 semanas, que aparece na aba Treinos com o cartão "Como funciona seu plano".
+
+| Pedido | Preço | O que libera |
+|---|---|---|
+| Treino inicial | R$ 9,99 | 30 dias de acesso e o treino |
+| Mensalidade | R$ 9,99 | +30 dias de acesso (a partir do fim do acesso atual) |
+| Novo treino | R$ 4,99 | um plano novo; só depois de 8 semanas do atual e com acesso ativo |
+
+Os preços ficam em `api/_precos.js`. Regras de saúde: qualquer "Sim" no PAR-Q exige a caixa de liberação médica (o servidor confere),
+e o pedido é só para maiores de 18 anos. As fotos são apagadas 90 dias depois do treino pronto; as respostas ficam.
+Pedido aguardando pagamento há mais de 30 dias é cancelado e perde as fotos (roda na consulta de status e no resumo do admin, sem cron).
+
+Variáveis na Vercel (**Settings → Environment Variables**):
+- `ANTHROPIC_API_KEY`: chave da API da Anthropic (console.anthropic.com). Fica só no servidor.
+- `IA_MODELO` (opcional): modelo usado; o padrão é `claude-sonnet-5-5`.
+
+Onde editar:
+- o prompt: `api/_prompt.js` (a parte fixa vai no system com cache; a parte do aluno, na mensagem);
+- o material de apoio: `api/_material_apoio.md`;
+- o termo: `api/_termo.js`. Para mudar o texto, acrescente uma versão nova no topo da lista; quem já aceitou a antiga continua com ela registrada,
+  e o próximo pedido exige o aceite da nova.
+
+Cada geração custa por volta de US$ 0,05 a 0,10. A geração roda dentro da consulta de status (do aluno ou do admin), sem fila nem cron;
+se falhar, o pedido tenta mais uma vez e, na segunda falha, fica como **Erro** para o admin clicar em **Gerar de novo**.
 
 ## Testes
 
