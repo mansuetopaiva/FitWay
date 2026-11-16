@@ -8,7 +8,7 @@ import { termoFaltando } from "./_termo.js";
 import { ABERTOS, PRECOS, efeitoDoPagamento, tipoValido } from "./_precos.js";
 import { confirmarPagamento } from "./_pagamento.js";
 import { OPS_ADMIN as OPS_SUPORTE, acaoAdminSuporte, limparChamados } from "./_suporte.js";
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
   "pedidos", "pedido", "pedido_verificar", "pedido_gerar_de_novo", "pedido_cancelar",
@@ -23,6 +23,11 @@ export function ehAdmin(email) {
   if (typeof email !== "string" || !email) return false;
   return (process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean).includes(email.toLowerCase());
 }
+
+// HMAC-SHA256 do email com HASH_SEGREDO (32+ caracteres): sem o segredo, ninguém confirma um email por dicionário.
+// Sem a variável, devolve "" e a exclusão de conta é recusada.
+const segredo = () => ((process.env.HASH_SEGREDO || "").length >= 32 ? process.env.HASH_SEGREDO : "");
+export const hmacEmail = (email) => (segredo() ? createHmac("sha256", segredo()).update(email).digest("hex") : "");
 
 const ok = (corpo) => ({ status: 200, corpo });
 const falha = (status, erro) => ({ status, corpo: { erro } });
@@ -96,7 +101,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     if (status !== "" && !STATUS.includes(status)) return falha(400, "Status inválido.");
     if (tipo !== "" && !tipoValido(tipo)) return falha(400, "Tipo inválido.");
     if (!paginaValida(b.pagina)) return falha(400, "Página inválida.");
-    const xs = await sql`select p.id, p.tipo, p.status, p.valor, p.criado, p.email, u.nome from pedidos p join usuarios u on u.email = p.email
+    const xs = await sql`select p.id, p.tipo, p.status, p.valor, p.criado, p.email, coalesce(u.nome, 'Conta excluída') as nome from pedidos p left join usuarios u on u.email = p.email
       where (${status} = '' or p.status = ${status}) and (${tipo} = '' or p.tipo = ${tipo})
       order by p.criado desc, p.id limit 21 offset ${(b.pagina || 0) * 20}`;
     return ok({ itens: xs.slice(0, 20), temMais: xs.length > 20 });
@@ -139,12 +144,12 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
           p.checkout_url, p.checkout_url_pix, p.estornado_em, p.estornado_por, u.nome, u.acesso_ate,
           -- Pix manual antigo ainda não conferido: o que a pessoa mandou, só para o admin decidir (cancelar e devolver, ou não).
           case when p.status = 'aguardando_confirmacao' then jsonb_build_object('pagador', p.pagador_nome, 'aviso', p.aviso_em,
-            'e2e', p.pix_e2e_informado, 'comprovante', p.comprovante) end as pix_antigo from pedidos p join usuarios u on u.email = p.email where p.id = ${id}),
+            'e2e', p.pix_e2e_informado, 'comprovante', p.comprovante) end as pix_antigo from pedidos p left join usuarios u on u.email = p.email where p.id = ${id}),
           l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
             select ${u.email}, 'pedido_ver', email, jsonb_build_object('pedido', id) from p where respostas is not null or fotos is not null or pix_antigo is not null)
         select * from p`;
       if (!x) return falha(404, "Pedido não encontrado.");
-      return ok({ id: x.id, email: x.email, nome: x.nome, acessoAte: x.acesso_ate, tipo: x.tipo, status: x.status, valor: x.valor,
+      return ok({ id: x.id, email: x.email, nome: x.nome || "Conta excluída", contaExcluida: !x.nome, acessoAte: x.acesso_ate, tipo: x.tipo, status: x.status, valor: x.valor,
         criado: x.criado, pagoEm: x.pago_em, geradoEm: x.gerado_em, atualizado: x.atualizado, erro: x.erro, tentativas: x.tentativas,
         modelo: x.modelo, respostas: x.respostas, fotos: x.fotos, aceite: x.aceite, plano: x.plano_gerado, parq: PARQ,
         metodo: x.metodo, codigo: x.codigo, confirmadoPor: x.confirmado_por,
@@ -225,17 +230,25 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     // Duas etapas: o painel pede para digitar o email, e o servidor confere de novo. Conta de admin (inclusive a própria) não.
     if (typeof b.confirmacao !== "string" || b.confirmacao.trim().toLowerCase() !== alvo) return falha(400, "Digite o email da conta para confirmar.");
     if (ehAdmin(alvo)) return falha(400, "Conta de admin não pode ser excluída por aqui.");
-    // Numa instrução: apaga (cascata: sessões, pedidos, chamados e mensagens) e registra só o SHA-256 do email, não o email.
-    const hash = createHash("sha256").update(alvo).digest("hex");
-    // Os registros antigos dessa conta no admin_log perdem o email (fica o mesmo hash): quem se cadastrar depois com o
-    // mesmo email não vê o histórico da conta excluída. Pedido aberto também impede: o link dele ainda pode ser pago.
+    const h = hmacEmail(alvo);
+    if (!h) return falha(400, "Configure a variável HASH_SEGREDO (32 ou mais caracteres aleatórios) na Vercel antes de excluir contas.");
+    // Numa instrução:
+    // - pedidos pagos, prontos ou estornados ficam (registro de pagamento exigido por lei), anonimizados: o email vira
+    //   "excluida:<HMAC>" e saem respostas, fotos, plano, mensagem e os dados do aceite e do Pix manual;
+    // - os outros pedidos saem; a conta sai (cascata: sessões, chamados, mensagens, links de senha);
+    // - os registros antigos do admin_log perdem o email (fica o HMAC): quem se cadastrar depois com o mesmo email não vê o histórico.
+    // Pedido aberto impede: o link dele ainda pode ser pago.
     const [x] = await sql`with a as (select email from usuarios where email = ${alvo}
           and not exists (select 1 from pedidos where email = ${alvo} and status in ('pago', 'gerando', 'aguardando_pagamento', 'aguardando_confirmacao'))),
+        pk as (update pedidos set email = ${"excluida:" + h}, respostas = null, fotos = null, plano_gerado = null, mensagem_usuario = null,
+            aceite = null, comprovante = null, pagador_nome = null, pix_e2e_informado = null, erro = null, checkout_ref = null
+          where email in (select email from a) and (pago_em is not null or estornado_em is not null)),
+        pd as (delete from pedidos where email in (select email from a) and pago_em is null and estornado_em is null),
         d as (delete from usuarios where email in (select email from a) returning email),
-        h as (update admin_log set alvo_email = null, detalhes = coalesce(detalhes, '{}'::jsonb) - 'texto' || jsonb_build_object('email_sha256', ${hash}::text)
+        hl as (update admin_log set alvo_email = null, detalhes = coalesce(detalhes, '{}'::jsonb) - 'texto' - 'email_sha256' || jsonb_build_object('email_hmac', ${h}::text)
           where alvo_email = ${alvo} and exists (select 1 from d)),
         l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
-          select ${u.email}, 'conta_excluida', null, jsonb_build_object('email_sha256', ${hash}::text) from d)
+          select ${u.email}, 'conta_excluida', null, jsonb_build_object('email_hmac', ${h}::text) from d)
       select true as ok from d`;
     if (x) return ok({});
     const [d] = await sql`select exists (select 1 from usuarios where email = ${alvo}) as existe,
@@ -252,7 +265,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     if (!x) return falha(404, "Usuário não encontrado.");
     const historico = await sql`select criado, admin_email, acao, detalhes from admin_log where alvo_email = ${alvo} order by criado desc limit 20`;
     const d = limpar(x.dados);
-    return ok({ ...linha(x), plano: d.plano || null, sessoes: d.sessoes, grupo: x.grupo || null, historico, nomes: NOMES_FOTOS });
+    return ok({ ...linha(x), plano: d.plano || null, sessoes: d.sessoes, grupo: x.grupo || null, historico, nomes: NOMES_FOTOS, podeExcluir: !!segredo() });
   }
 
   // Cada escrita e o seu registro no admin_log vão numa única instrução: nunca há alteração sem log.

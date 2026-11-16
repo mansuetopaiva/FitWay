@@ -221,9 +221,17 @@ Spec: [docs/suporte.md](docs/suporte.md). Vale para o app inteiro, mesmo com `TR
 - **Prazos** (sem cron, junto dos prazos dos pedidos): chamado respondido sem retorno do aluno em 7 dias é encerrado; imagens são
   apagadas 90 dias depois do encerramento. As mensagens ficam enquanto a conta existir.
 - **Excluir conta** (detalhe do usuário, para pedidos de "Conta e dados"): digite o email da pessoa para confirmar. Recusa se houver
-  pedido pago ou gerando, e nunca exclui conta de admin. Apaga a conta, sessões, pedidos, chamados e mensagens; no histórico fica só
-  a ação, a data, quem excluiu e o SHA-256 do email.
+  pedido pago, gerando ou aguardando pagamento, e nunca exclui conta de admin. Apaga a conta, sessões, chamados, mensagens e os pedidos
+  não pagos. Os pedidos pagos, prontos ou estornados ficam (registro de pagamento exigido por lei), sem dados pessoais: o email vira
+  `excluida:<HMAC>` e saem respostas, fotos, plano e mensagem; ficam tipo, valor, meio, datas, transação e status. No histórico, o
+  email vira o HMAC.
+- **`HASH_SEGREDO`** (obrigatória para excluir contas): 32 ou mais caracteres aleatórios, por exemplo
+  `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. É segredo (só na Vercel e no `.env.local`) e
+  **não pode mudar** depois de usada: o HMAC de antes deixaria de bater. Sem ela, o painel avisa e a exclusão é recusada.
 
 ## Testes
 
-`npm test`
+- `npm test`: testes rápidos, com banco e email simulados.
+- `npm run test:integracao` (pasta `test-integracao/`, fora do deploy pelo `.vercelignore`): o servidor com Postgres de verdade em
+  memória (PGlite) e as telas no jsdom. Leva alguns minutos e nunca envia email (o transporte é falso). Dependências só de
+  desenvolvimento: `@electric-sql/pglite` e `jsdom`.

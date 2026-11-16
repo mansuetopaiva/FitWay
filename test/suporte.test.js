@@ -6,6 +6,7 @@ import { ACOES, acaoSuporte, anexoValido, limparChamados } from "../api/_suporte
 import { acaoAdmin } from "../api/_admin.js";
 
 process.env.ADMIN_EMAILS = "dono@x.com";
+process.env.HASH_SEGREDO = "segredo-de-teste-com-mais-de-32-caracteres!";
 const aluno = { email: "al@x.com" }, dono = { email: "dono@x.com" };
 function sqlFalso(responder = () => []) {
   const chamadas = [];
@@ -160,16 +161,34 @@ test("excluir conta: confirmação igual ao email, nunca a própria conta, sem c
   }
 });
 
-test("excluir conta: uma instrução, recusa com pedido pago ou gerando, log só com o hash do email", async () => {
-  const { createHash } = await import("node:crypto");
+test("excluir conta: sem HASH_SEGREDO (ou curto) recusa com aviso, sem consultar", async () => {
+  const antes = process.env.HASH_SEGREDO;
+  try {
+    for (const v of [undefined, "", "curto-demais"]) {
+      if (v === undefined) delete process.env.HASH_SEGREDO; else process.env.HASH_SEGREDO = v;
+      const s = sqlFalso();
+      const r = await acaoAdmin(s.sql, dono, { op: "usuario_excluir", email: "al@x.com", confirmacao: "al@x.com" });
+      assert.equal(r.status, 400); assert.match(r.corpo.erro, /HASH_SEGREDO/);
+      assert.equal(s.chamadas.length, 0);
+    }
+  } finally { process.env.HASH_SEGREDO = antes; }
+});
+
+test("excluir conta: uma instrução, recusa com pedido pago ou gerando, log só com o HMAC do email, pedidos pagos anonimizados", async () => {
+  const { createHash, createHmac } = await import("node:crypto");
+  const hmac = createHmac("sha256", process.env.HASH_SEGREDO).update("al@x.com").digest("hex");
   const s = sqlFalso((q) => (q.includes("delete from usuarios") ? [{ ok: true }] : []));
   const r = await acaoAdmin(s.sql, dono, { op: "usuario_excluir", email: "Al@X.com", confirmacao: "al@x.com" });
   assert.equal(r.status, 200);
   const del = s.chamadas.find((c) => c.q.includes("delete from usuarios"));
   assert.match(del.q, /status in \('pago', 'gerando', 'aguardando_pagamento', 'aguardando_confirmacao'\)/);
-  assert.match(del.q, /update admin_log set alvo_email = null, .*'email_sha256'.*where alvo_email = \? and exists \(select 1 from d\)/s, "histórico antigo perde o email");
-  assert.match(del.q, /insert into admin_log .*'conta_excluida', null, jsonb_build_object\('email_sha256'/s);
-  assert.ok(del.valores.includes(createHash("sha256").update("al@x.com").digest("hex")));
+  assert.match(del.q, /update admin_log set alvo_email = null, .*'email_hmac'.*where alvo_email = \? and exists \(select 1 from d\)/s, "histórico antigo perde o email");
+  assert.match(del.q, /insert into admin_log .*'conta_excluida', null, jsonb_build_object\('email_hmac'/s);
+  assert.ok(del.valores.includes(hmac));
+  assert.ok(!del.valores.includes(createHash("sha256").update("al@x.com").digest("hex")), "não é mais o SHA-256 simples");
+  assert.match(del.q, /update pedidos set email = \?, respostas = null, fotos = null, plano_gerado = null, mensagem_usuario = null.*pago_em is not null or estornado_em is not null/s, "pagos ficam anonimizados");
+  assert.match(del.q, /delete from pedidos where email in \(select email from a\) and pago_em is null and estornado_em is null/, "não pagos saem");
+  assert.ok(del.valores.includes("excluida:" + hmac));
   const det = del.valores.filter((v) => typeof v === "string" && v.includes("al@x.com"));
   assert.ok(det.every((v) => v === "al@x.com"), "o email só aparece como filtro, nunca em texto de log");
   const p = sqlFalso((q) => (q.includes("delete from usuarios") ? [] : [{ existe: true, andamento: true }]));

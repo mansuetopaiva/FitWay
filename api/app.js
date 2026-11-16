@@ -55,9 +55,11 @@ const schema = () => pronto ||= (async () => {
     criado timestamptz not null default now()
   )`;
   await sql`create index if not exists admin_log_alvo on admin_log (alvo_email, criado desc)`;
+  // pedidos.email sem chave estrangeira: na exclusão da conta os pedidos pagos ficam, anonimizados (email = "excluida:<HMAC>"),
+  // e os outros são apagados explicitamente (usuario_excluir em api/_admin.js).
   await sql`create table if not exists pedidos (
     id text primary key,
-    email text not null references usuarios on delete cascade,
+    email text not null,
     tipo text not null check (tipo in ('inicial', 'mensalidade', 'novo_treino')),
     status text not null check (status in ('aguardando_pagamento', 'aguardando_confirmacao', 'pago', 'gerando', 'pronto', 'erro', 'cancelado')),
     valor int not null,
@@ -74,6 +76,11 @@ const schema = () => pronto ||= (async () => {
     gerado_em timestamptz,
     atualizado timestamptz
   )`;
+  await sql`do $$ declare c text; begin
+    for c in select conname from pg_constraint where conrelid = 'pedidos'::regclass and contype = 'f' and confrelid = 'usuarios'::regclass loop
+      execute format('alter table pedidos drop constraint %I', c);
+    end loop;
+  end $$`;
   await sql`create index if not exists pedidos_email_criado on pedidos (email, criado desc)`;
   await sql`create index if not exists pedidos_status on pedidos (status)`;
   // Pagamento (docs/pagamento.md). Os "unique" ficam em índices próprios: "add column if not exists ... unique" não é idempotente em todo Postgres.

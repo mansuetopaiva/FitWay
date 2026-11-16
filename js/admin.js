@@ -252,7 +252,8 @@
             <p class="err" role="alert" id="admExErr"></p>
             <div class="adm-botoes"><button class="btn-perigo" type="submit">Excluir definitivamente</button><button class="btn-sec" type="button" data-excluir-voltar>Voltar</button></div>
           </form>` : `<p class="muted">Use para atender um pedido de exclusão (LGPD). Não é possível com pedido pago ou gerando o treino.</p>
-          <button class="btn-perigo" data-excluir>Excluir conta</button>`}
+          ${d.podeExcluir ? `<button class="btn-perigo" data-excluir>Excluir conta</button>`
+            : `<p class="adm-erro" role="note">Para excluir contas, configure a variável <b>HASH_SEGREDO</b> na Vercel (32 ou mais caracteres aleatórios) e publique de novo.</p>`}`}
       </section>
       <datalist id="admNomes">${d.nomes.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>`;
     if (focar) { const t = $("#admDetTit"); if (t) t.focus(); }
@@ -595,7 +596,7 @@
     el.innerHTML = `${voltar}
       <div class="card">
         <h2 id="admDetTit" tabindex="-1">${esc(TIPOS[p.tipo])} · ${reais(p.valor)}</h2>
-        <p class="muted"><a href="#/admin/${encodeURIComponent(p.email)}">${esc(p.nome)} · ${esc(p.email)}</a></p>
+        <p class="muted">${p.contaExcluida ? "Conta excluída (pedido guardado sem dados pessoais)" : `<a href="#/admin/${encodeURIComponent(p.email)}">${esc(p.nome)} · ${esc(p.email)}</a>`}</p>
         <div class="row"><span>Status</span><span>${selo(p.status)}</span></div>
         ${linha("Código", p.codigo || "—")}${linha("Meio", METODOS[p.metodo] || "Não escolhido")}
         ${linha("Pedido em", quando(p.criado))}${p.pagoEm ? linha("Pago em", quando(p.pagoEm)) : ""}${p.geradoEm ? linha("Treino gerado em", quando(p.geradoEm)) : ""}

@@ -60,13 +60,17 @@ Todas exigem login e filtram por `email = u.email` dentro da própria instruçã
 - `confirmacao` precisa ser igual ao email (o painel pede para digitar). A conta do próprio admin → 400.
 - Pedido em `pago` ou `gerando` → 400 (resolver antes). Pedido em `aguardando_pagamento` ou `aguardando_confirmacao` → 400 (cancelar
   antes): o link dele ainda pode ser pago, e depois da exclusão esse pagamento não deixaria rastro.
-- Numa instrução: `delete from usuarios` (cascata: sessões, pedidos, chamados, mensagens) e `admin_log` `conta_excluida` com
-  `alvo_email = null` e `detalhes = { email_sha256 }` (SHA-256 do email em minúsculas). A data e quem excluiu ficam nas colunas do log.
+- Exige `HASH_SEGREDO` (32+ caracteres); sem ela, 400 com o aviso, e o painel mostra o aviso no lugar do botão.
+- Numa instrução: pedidos com `pago_em` ou `estornado_em` ficam anonimizados (`email = "excluida:" + HMAC`; `respostas`, `fotos`,
+  `plano_gerado`, `mensagem_usuario`, `aceite`, `comprovante`, `pagador_nome`, `pix_e2e_informado`, `erro`, `checkout_ref` = null);
+  os outros pedidos são apagados; `delete from usuarios` (cascata: sessões, chamados, mensagens, links de senha); `admin_log`
+  `conta_excluida` com `alvo_email = null` e `detalhes = { email_hmac }` (HMAC-SHA256 do email com `HASH_SEGREDO`).
+- `pedidos.email` não tem mais chave estrangeira para `usuarios` (a migração tira a antiga): a exclusão é explícita. A lista e o
+  detalhe de pedidos mostram "Conta excluída" para esses pedidos.
 - Na mesma instrução, os registros antigos da conta no `admin_log` ficam com `alvo_email = null`, sem o `texto` livre do estorno e com o
-  mesmo `email_sha256`: quem se cadastrar depois com o mesmo email não vê o histórico, e o registro continua ligável pelo hash.
-- **Limite conhecido:** o SHA-256 de um email sem segredo é pseudônimo (quem tem o banco e uma lista de emails reverte). Trocar por HMAC
-  com uma variável secreta, se for preciso mais que isso. Pedidos pagos somem na cascata (decisão do dono): o comprovante da venda fica
-  no InfinitePay.
+  mesmo `email_hmac`: quem se cadastrar depois com o mesmo email não vê o histórico, e o registro continua ligável pelo hash.
+- Com o HMAC, quem tem só o banco não confirma um email por dicionário; quem tem também o `HASH_SEGREDO` consegue. Os links de
+  pagamento (`checkout_url*`) ficam no pedido guardado (não têm dado pessoal): um pagamento tardio ainda vira "sobra" para devolver.
 
 ## Prazos (`limparChamados`, sem cron: roda na lista do aluno, no resumo do admin e na lista do suporte do admin; fora do `pedido_status`, que é consultado a cada 4 s)
 
@@ -97,7 +101,7 @@ Acrescenta o 2.6 (mensagens e imagens dos chamados), a linha dos anexos no item 
 | Pedir pelo chamado algo sobre outra conta | Regra escrita no painel: só a conta do chamado; nunca trocar email ou senha a pedido |
 | Anexo com dado pessoal visto sem rastro | `suporte_anexo_ver` no `admin_log` |
 | Exclusão por engano | duas etapas (digitar o email) conferidas também no servidor; recusa com pedido pago ou gerando; nunca a própria conta |
-| Exclusão deixar o email no log | o registro da exclusão e os antigos da conta guardam só o SHA-256 |
+| Exclusão deixar o email no log | o registro da exclusão e os antigos da conta guardam só o HMAC (com `HASH_SEGREDO`) |
 
 ## Testes
 
