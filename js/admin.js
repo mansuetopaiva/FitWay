@@ -32,7 +32,8 @@
   function render(arg) {
     let a = "";
     try { a = arg ? decodeURIComponent(arg) : ""; } catch (e) { a = ""; }
-    const ped_ = a === "pedidos" || a.startsWith("pedido."), sup_ = a === "suporte" || a.startsWith("chamado.");
+    const id_ = !a.includes("@"); // email tem @; id de pedido e de chamado não
+    const ped_ = a === "pedidos" || (id_ && a.startsWith("pedido.")), sup_ = a === "suporte" || (id_ && a.startsWith("chamado."));
     if (ped_ || sup_) {
       if (sujo && !confirm("O treino tem alterações não salvas. Sair e descartar?")) {
         history.replaceState(null, "", "#/admin/" + encodeURIComponent(detEmail));
@@ -50,9 +51,10 @@
     <a href="#/admin" ${qual === "usuarios" ? 'aria-current="page" class="on"' : ""}>Usuários</a>
     <a href="#/admin/pedidos" ${qual === "pedidos" ? 'aria-current="page" class="on"' : ""}>Pedidos</a>
     <a href="#/admin/suporte" ${qual === "suporte" ? 'aria-current="page" class="on"' : ""}>Suporte${resumo && resumo.suporteAguardando
-      ? ` <span class="adm-conta" aria-label="${resumo.suporteAguardando} aguardando resposta">${resumo.suporteAguardando}</span>` : ""}</a>
+      ? ` <span class="adm-conta" aria-hidden="true">${resumo.suporteAguardando}</span><span class="sr"> (${resumo.suporteAguardando} aguardando resposta)</span>` : ""}</a>
   </nav>`;
-  const secaoAtual = () => (/\/(pedidos|pedido\.)/.test(location.hash) ? "pedidos" : /\/(suporte|chamado\.)/.test(location.hash) ? "suporte" : "usuarios");
+  const secaoAtual = () => (/^#\/admin\/(pedidos$|pedido\.[^@%]+$)/.test(location.hash) ? "pedidos"
+    : /^#\/admin\/(suporte$|chamado\.[^@%]+$)/.test(location.hash) ? "suporte" : "usuarios");
   function renderUsuarios(arg) {
     const antes = detEmail; // usuário aberto até agora (para devolver o foco à linha dele)
     let alvo = "";
@@ -125,7 +127,9 @@
       b.disabled = true;
       try { await api("admin", { op: "devolucao_marcar", transaction_nsu: b.dataset.devolvido }); toast("Marcado como devolvido."); }
       catch (e) { toast(e.message); b.disabled = false; return; }
-      carregarResumo();
+      await carregarResumo();
+      const prox = app.querySelector("[data-devolvido]") || app.querySelector("#admResumo .stat");
+      if (prox) { if (!prox.matches("button")) prox.tabIndex = -1; prox.focus(); }
     };
   }
 
@@ -238,17 +242,18 @@
           <span class="muted">${esc(new Date(h.criado).toLocaleString("pt-BR", { timeZone: TZ, dateStyle: "short", timeStyle: "short" }))} · ${esc(h.admin_email)}</span></li>`).join("")}</ul>`
           : estado("Nenhuma ação do admin com este usuário ainda.")}
       </div>
-      <div class="card" aria-labelledby="admExTit">
+      <section class="card" aria-labelledby="admExTit">
         <h2 id="admExTit" class="adm-tit">Excluir conta</h2>
         ${excluindo ? `<form id="admExcluir" novalidate>
             <p class="adm-erro" role="note">Isto apaga para sempre a conta de ${esc(d.nome)}: check-ins, treino, pedidos, chamados e mensagens.
               No histórico fica só que uma conta foi excluída, quando e por quem (com um código do email, não o email). Não dá para desfazer.</p>
             <div class="field"><label for="admExEmail">Para confirmar, digite o email da conta (${esc(d.email)})</label>
-              <input id="admExEmail" type="email" autocomplete="off" maxlength="120" required></div>
+              <input id="admExEmail" type="email" autocomplete="off" maxlength="120" required aria-describedby="admExErr"></div>
+            <p class="err" role="alert" id="admExErr"></p>
             <div class="adm-botoes"><button class="btn-perigo" type="submit">Excluir definitivamente</button><button class="btn-sec" type="button" data-excluir-voltar>Voltar</button></div>
           </form>` : `<p class="muted">Use para atender um pedido de exclusão (LGPD). Não é possível com pedido pago ou gerando o treino.</p>
           <button class="btn-perigo" data-excluir>Excluir conta</button>`}
-      </div>
+      </section>
       <datalist id="admNomes">${d.nomes.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>`;
     if (focar) { const t = $("#admDetTit"); if (t) t.focus(); }
   }
@@ -431,7 +436,7 @@
     if (ev.target.id === "admExcluir") {
       ev.preventDefault();
       const alvo = det.email, conf = $("#admExEmail").value.trim().toLowerCase(), b = ev.target.querySelector("[type=submit]");
-      if (conf !== alvo.toLowerCase()) return toast("O email digitado não é o desta conta.");
+      if (conf !== alvo.toLowerCase()) { $("#admExErr").textContent = "O email digitado não é o desta conta."; $("#admExEmail").setAttribute("aria-invalid", "true"); return $("#admExEmail").focus(); }
       if (!confirm(`Excluir a conta de ${det.nome} para sempre?`)) return;
       b.disabled = true;
       try { await api("admin", { op: "usuario_excluir", email: alvo, confirmacao: conf }); }
@@ -440,6 +445,7 @@
       excluindo = false; det = null; detEmail = ""; resumo = null;
       lista.itens = lista.itens.filter((x) => x.email !== alvo);
       location.hash = "#/admin";
+      setTimeout(() => { const t = $("#admListaTit"); if (t) t.focus(); }, 0);
       return;
     }
     if (ev.target.id !== "admData") return;
@@ -568,15 +574,16 @@
 
       ["erro", "pronto"].includes(p.status) && p.tipo !== "mensalidade" ? `<button class="btn-sec" data-ped-gerar>Gerar de novo</button>` : "",
       ["aguardando_pagamento", "aguardando_confirmacao", "pago", "erro"].includes(p.status) ? `<button class="btn-perigo" data-ped-cancelar>Cancelar pedido</button>` : "",
-      ["pago", "pronto", "erro"].includes(p.status) && !p.estornadoEm && !estornando ? `<button class="btn-perigo" data-ped-estornar>Registrar devolução e cancelar</button>` : "",
+      (["pago", "pronto", "erro"].includes(p.status) || (p.status === "cancelado" && p.pagoEm)) && !p.estornadoEm && !estornando ? `<button class="btn-perigo" data-ped-estornar>Registrar devolução e cancelar</button>` : "",
     ].join("");
-    const dias = p.tipo === "novo_treino" ? 0 : 30;
+    const dias = p.diasDoPedido || 0; // do servidor (efeitoDoPagamento)
     // O que acontece no app; o dinheiro é devolvido à parte, no app do InfinitePay.
     const estorno = estornando ? `<form class="ped-estorno" id="pedEstorno" novalidate>
         <h3 class="adm-sub" id="pedEstornoTit" tabindex="-1">Registrar devolução e cancelar</h3>
         <p class="muted">Devolva o dinheiro (${reais(p.valor)}) no app do InfinitePay. Aqui o pedido fica cancelado e marcado como estornado,
-          ${dias ? `o acesso perde os ${dias} dias que este pedido deu (sem mexer em outros pagamentos)` : "os dias de acesso não mudam (novo treino não dá dias)"}
-          e, se o treino atual da conta veio deste pedido, ele sai da conta.</p>
+          ${dias ? `o acesso perde ${dias} dias, contados do fim do acesso atual (nunca antes de hoje)` : "os dias de acesso não mudam (novo treino não dá dias)"}${
+            p.tipo === "mensalidade" ? "." : " e, se o treino atual da conta veio deste pedido, ele sai da conta (volta o treino anterior, se houver)."}</p>
+        <p class="muted">Pagou duas vezes o mesmo pedido? O segundo pagamento aparece em "Pagamentos para devolver", no resumo: use "Marcar como devolvido" lá, sem estornar este pedido.</p>
         <fieldset><legend>Motivo</legend>
           ${Object.entries(MOTIVOS_ESTORNO).map(([k, v]) => `<label class="ped-op"><input type="radio" name="motivo" value="${k}" required> ${v}</label>`).join("")}
         </fieldset>
@@ -615,9 +622,9 @@
     if (f) f.onsubmit = (ev) => {
       ev.preventDefault();
       const m = f.querySelector("[name=motivo]:checked"), texto = $("#pedEstornoTxt").value.trim(), err = $("#pedEstornoErr");
-      if (!m) return (err.textContent = "Escolha o motivo.");
-      if (m.value === "outro" && !texto) return (err.textContent = "Descreva o motivo.");
-      if (!confirm(`Confirmar a devolução deste pedido de ${ped.nome}? O pedido será cancelado${p.tipo === "novo_treino" ? "" : ", o acesso perde 30 dias"} e o treino gerado por ele sai da conta. Isso não devolve o dinheiro: faça a devolução no app do InfinitePay.`)) return;
+      if (!m) { err.textContent = "Escolha o motivo."; return f.querySelector("[name=motivo]").focus(); }
+      if (m.value === "outro" && !texto) { err.textContent = "Descreva o motivo."; return $("#pedEstornoTxt").focus(); }
+      if (!confirm(`Confirmar a devolução deste pedido de ${ped.nome}? O pedido será cancelado${dias ? `, o acesso perde ${dias} dias` : ""}${p.tipo === "mensalidade" ? "" : " e, se o treino atual veio dele, o treino sai da conta (volta o anterior, se houver)"}. Isso não devolve o dinheiro: faça a devolução no app do InfinitePay.`)) return;
       estornando = false;
       acaoPedido("pedido_estornar", "Devolução registrada e pedido cancelado.", f.querySelector("[type=submit]"), { motivo: m.value, ...(m.value === "outro" ? { texto } : {}) });
     };
@@ -829,8 +836,8 @@
     const c = ch.chamado, fechado = c.status === "fechado";
     const linha = (k, v) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
     const plano = c.plano_nome ? esc(c.plano_nome) + (c.plano_origem === "ia" ? " (IA)" : "") : "Nenhum";
-    const pedido = c.pedido_id ? `<a href="#/admin/pedido.${encodeURIComponent(c.pedido_id)}">${esc(c.pedido_codigo || c.pedido_id.slice(0, 8))} · ${esc(TIPOS[c.pedido_tipo] || "")} · ${
-      c.pedido_valor ? reais(c.pedido_valor) : ""} · ${esc(c.pedido_status ? STATUS[c.pedido_status][0] : "")}</a>` : "Nenhum";
+    const pedido = c.pedido_id ? `<a href="#/admin/pedido.${encodeURIComponent(c.pedido_id)}">${esc([c.pedido_codigo || c.pedido_id.slice(0, 8), TIPOS[c.pedido_tipo],
+      c.pedido_valor ? reais(c.pedido_valor) : "", STATUS[c.pedido_status] && STATUS[c.pedido_status][0]].filter(Boolean).join(" · "))}</a>` : "Nenhum";
     const msgs = ch.mensagens.map((m) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
         <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte" + (m.admin_email ? " (" + esc(m.admin_email) + ")" : "") : esc(c.nome)}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
         <div class="sup-texto">${esc(m.texto)}</div>
@@ -844,14 +851,15 @@
           ${linha("Acesso", esc(acessoTxt(c.acesso_ate)))}
           ${linha("Plano atual", plano)}
           ${linha("Pedido", pedido)}
+          <p class="muted sup-regra">Pedidos sobre conta e dados valem só para esta conta (o email acima). Nunca troque email ou senha nem exclua outra conta a pedido de um chamado.</p>
         </aside>
         <div class="card sup-conv">
           <h2 id="admDetTit" tabindex="-1">${esc(ASSUNTOS[c.assunto])} ${seloCh(c.status)}</h2>
           <p class="muted">Aberto em ${esc(quando(c.criado))}${c.fechado_em ? " · encerrado em " + esc(quando(c.fechado_em)) : ""}</p>
           <ol class="sup-conversa" aria-label="Mensagens">${msgs}</ol>
           ${fechado ? `<p class="muted">Chamado encerrado. Reabra para responder.</p>`
-            : `<form id="chResp" novalidate><div class="field"><label for="chTexto">Responder</label><textarea id="chTexto" rows="4" maxlength="2000"></textarea></div>
-              <button class="btn" type="submit">Enviar resposta</button></form>`}
+            : `<form id="chResp" novalidate><div class="field"><label for="chTexto">Responder</label><textarea id="chTexto" rows="4" maxlength="2000" aria-describedby="chErr"></textarea></div>
+              <p class="err" role="alert" id="chErr"></p><button class="btn" type="submit">Enviar resposta</button></form>`}
           <div class="adm-botoes">${fechado ? `<button class="btn-sec" data-ch-reabrir>Reabrir</button>` : `<button class="btn-perigo" data-ch-encerrar>Encerrar</button>`}</div>
         </div>
       </div>`;
@@ -860,7 +868,7 @@
     if (f) f.onsubmit = (ev) => {
       ev.preventDefault();
       const texto = $("#chTexto").value.trim();
-      if (!texto) { toast("Escreva a resposta."); return $("#chTexto").focus(); }
+      if (!texto) { $("#chErr").textContent = "Escreva a resposta."; return $("#chTexto").focus(); }
       acaoChamado({ op: "suporte_responder", texto }, "Resposta enviada.", f.querySelector("[type=submit]"));
     };
   }
@@ -887,7 +895,9 @@
       b.disabled = true;
       api("admin", { op: "suporte_anexo", id: chId, msg: Number(ds.chAnexo) }).then((r) => {
         if (typeof r.anexo !== "string" || !r.anexo.startsWith("data:image/jpeg;base64,")) throw new Error("Imagem inválida.");
-        b.parentNode.innerHTML = `<img class="sup-previa" src="${esc(r.anexo)}" alt="Imagem anexada pelo aluno">`;
+        const box = b.parentNode;
+        box.innerHTML = `<img class="sup-previa" src="${esc(r.anexo)}" alt="Imagem anexada pelo aluno" tabindex="-1">`;
+        box.firstChild.focus();
       }).catch((e) => { toast(e.message); b.disabled = false; });
     }
   }

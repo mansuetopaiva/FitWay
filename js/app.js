@@ -109,8 +109,8 @@
             <button type="button" class="icon-btn" id="ver" aria-label="Mostrar senha" aria-pressed="false">${icon("eye")}</button></div>
           </div>
           <p class="err" role="alert"></p>
-          <button class="btn" type="submit">${criar ? "Criar conta" : "Entrar"}</button>
-          ${criar ? `<p class="muted login-aceite">Ao criar a conta, você concorda com a <a href="#/privacidade">Política de privacidade</a>.</p>` : ""}
+          ${criar ? `<p class="muted login-aceite" id="loginAceite">Ao criar a conta, você concorda com a <a href="#/privacidade">Política de privacidade</a>.</p>` : ""}
+          <button class="btn" type="submit" ${criar ? 'aria-describedby="loginAceite"' : ""}>${criar ? "Criar conta" : "Entrar"}</button>
         </form>
         <p class="muted" style="margin-top:16px;text-align:center">Seus dados ficam salvos na sua conta e aparecem em qualquer aparelho.</p>
         <p class="muted login-links"><a href="#/privacidade">Política de privacidade</a></p>
@@ -163,20 +163,21 @@
   }
 
   // ---------- aviso de resposta no suporte (aba Perfil e card do Perfil) ----------
-  const pontoAba = () => (suporteAviso ? `<i class="ponto" aria-hidden="true"></i><b class="sr"> (resposta nova no suporte)</b>` : "");
+  const ponto = () => (suporteAviso ? `<i class="ponto" aria-hidden="true"></i>` : "");
+  const pontoSr = () => (suporteAviso ? `<span class="sr"> (resposta nova no suporte)</span>` : "");
   function avisoSuporte(v) {
     suporteAviso = v === true;
-    const a = document.querySelector("[data-aba-perfil] span");
-    if (a) { a.querySelectorAll(".ponto, .sr").forEach((x) => x.remove()); a.insertAdjacentHTML("beforeend", pontoAba()); }
+    const a = document.querySelector("[data-aba-perfil]");
+    if (a) { a.querySelectorAll(".ponto, .sr").forEach((x) => x.remove()); a.firstElementChild.insertAdjacentHTML("beforeend", ponto()); a.insertAdjacentHTML("beforeend", pontoSr()); }
     const c = document.querySelector("#supCard .sup-card-ponto");
-    if (c) c.innerHTML = pontoAba();
+    if (c) c.innerHTML = ponto() + pontoSr();
   }
 
   // ---------- estrutura ----------
   function shell(title, body, tab) {
     // O ponto na aba Perfil avisa resposta nova no suporte.
     const item = (href, ic, label, id) =>
-      `<a href="${href}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${id === "perfil" ? "data-aba-perfil" : ""}><span>${icon(ic)}${id === "perfil" ? pontoAba() : ""}</span>${label}</a>`;
+      `<a href="${href}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${id === "perfil" ? "data-aba-perfil" : ""}><span>${icon(ic)}${id === "perfil" ? ponto() : ""}</span>${label}${id === "perfil" ? pontoSr() : ""}</a>`;
     app.classList.toggle("largo", tab === "admin"); // só o painel usa a tela larga no computador
     app.innerHTML = `
       <header class="topbar"><h1>${title}</h1></header>
@@ -212,7 +213,11 @@
   function viewSuporte(arg) {
     shell("Ajuda e suporte", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
     carregar("js/suporte.js").then(
-      () => { if (location.hash.split("/")[1] === "suporte") window.FitWaySuporte.render(arg ? decodeURIComponent(arg) : ""); },
+      () => {
+        if (location.hash.split("/")[1] !== "suporte") return;
+        let a = ""; try { a = arg ? decodeURIComponent(arg) : ""; } catch (e) { a = ""; }
+        window.FitWaySuporte.render(a);
+      },
       () => toast("Não consegui abrir o suporte. Tente de novo."));
   }
   function viewPagamento(id) {
@@ -222,7 +227,7 @@
       () => toast("Não consegui abrir o pagamento. Tente de novo."));
   }
   // O painel, o formulário e o pagamento usam estas peças do app; ficam expostas só depois do login.
-  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, avisoSuporte, get email() { return email; }, get nome() { return nomeUser; } }; };
+  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, avisoSuporte, linkPrivacidade, get email() { return email; }, get nome() { return nomeUser; } }; };
 
   // ---------- início: check-in + gráfico ----------
   let chartMode = "semana", diaRender = "";
@@ -573,7 +578,7 @@
             <div class="field"><label for="nome">Nome</label><input id="nome" autocomplete="given-name" maxlength="40" value="${esc(u.nome)}" required></div>
             <p class="err" role="alert"></p>
             <button class="btn" type="submit">Salvar</button>
-            <div class="tools"><button type="button" id="cancelar">Fechar</button></div>
+            <div class="tools"><button type="button" id="cancelar">Cancelar</button></div>
           </form>` : `<h2>${esc(u.nome)}</h2>`}
         <p class="muted" ${editandoPerfil ? 'style="margin-top:10px"' : ""}>${esc(email)}</p>
         ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar perfil</button></div>`}
@@ -594,7 +599,7 @@
       </section>
       <a class="card sup-card" id="supCard" href="#/suporte"><span class="sup-card-ic">${icon("help")}</span>
         <span class="sup-card-t"><b>Ajuda e suporte</b><span class="muted">Fale com a gente sobre pagamento, treino, conta ou o app.</span></span>
-        <span class="sup-card-ponto">${pontoAba()}</span></a>
+        <span class="sup-card-ponto">${ponto()}${pontoSr()}</span></a>
       <button class="btn" id="sair" style="margin-top:16px">Sair</button>
       <p class="muted login-links"><a href="#/privacidade">Política de privacidade</a></p>`, "perfil");
     $("#sair").onclick = sair;
@@ -755,11 +760,12 @@
 
   // ---------- política de privacidade (pública: abre também sem login) ----------
   // O texto já escapado ganha o link na expressão fixa (usado também no termo).
-  const linkPrivacidade = (h, alvo = "") => h.replace(/Política de privacidade/g, `<a href="#/privacidade"${alvo}>Política de privacidade</a>`);
+  const linkPrivacidade = (h, alvo = "") => h.replace(/Política de privacidade/g, `<a href="#/privacidade"${alvo}>Política de privacidade${alvo ? '<span class="sr"> (abre em nova aba)</span>' : ""}</a>`);
   async function viewPrivacidade() {
     const tela = (corpo) => {
       const voltar = email ? `<a class="adm-voltar" href="#/perfil">${icon("back")}Perfil</a>` : `<a class="adm-voltar" href="#/">${icon("back")}Entrar</a>`;
-      const html = `${voltar}<section class="card"><h2 id="privTit" tabindex="-1">Política de privacidade</h2>${corpo}</section>`;
+      const h = email ? "h2" : "h1"; // sem login, a página não tem outro título
+      const html = `${voltar}<section class="card"><${h} id="privTit" class="priv-tit" tabindex="-1">Política de privacidade</${h}>${corpo}</section>`;
       if (email) shell("Privacidade", html, "perfil"); else app.innerHTML = `<main class="login privacidade">${html}</main>`;
     };
     tela(`<p class="muted" style="margin-top:12px">Carregando…</p>`);
@@ -767,7 +773,8 @@
     try { t = await api("privacidade"); } catch (e) { erro = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; }
     if (location.hash.split("/")[1] !== "privacidade") return;
     tela(t ? `<p class="muted">Versão de ${esc(t.versao.slice(8, 10) + "/" + t.versao.slice(5, 7) + "/" + t.versao.slice(0, 4))}</p><div class="termo-texto">${esc(t.texto)}</div>`
-      : `<p class="err" role="alert">${esc(erro)}</p>`);
+      : `<div class="adm-estado" role="alert"><p>${esc(erro)}</p><button class="btn-sec" id="privTentar">Tentar de novo</button></div>`);
+    if ($("#privTentar")) $("#privTentar").onclick = viewPrivacidade;
     $("#privTit").focus();
   }
 
@@ -848,10 +855,10 @@
     clearInterval(tickTimer);
     clearTimeout(iaTimer);
     const [, rota, arg] = location.hash.split("/");
-    if (rota === "privacidade") { window.scrollTo(0, 0); return viewPrivacidade(); } // pública
-    if (!email) return viewLogin();
     editandoPerfil = false;
     if (rota !== "treino") stopRest();
+    if (rota === "privacidade") { window.scrollTo(0, 0); return viewPrivacidade(); } // pública
+    if (!email) return viewLogin();
     if (!plano() && (rota === "treinos" || rota === "treino")) { location.hash = "#/perfil"; return; }
     if (rota === "treinos") viewTreinos();
     else if (rota === "treino") {

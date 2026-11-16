@@ -23,10 +23,16 @@
   const rota = () => location.hash.split("/");
   const aqui = (arg) => rota()[1] === "suporte" && (rota()[2] || "") === (arg || "");
 
-  let pedidos = null, novo = null, anexo = "", enviando = false;
+  const erroTela = (topo, msg, de_novo) => {
+    shell(TIT, topo + `<div class="adm-estado" role="alert"><p>${esc(msg)}</p><button class="btn-sec" id="supTentar">Tentar de novo</button></div>`, "perfil");
+    $("#supTentar").onclick = de_novo;
+  };
+  let pedidos = null, novo = null, anexo = "", enviando = false, preparando = false;
 
+  let conta = "";
   async function render(arg) {
-    anexo = ""; enviando = false;
+    anexo = ""; enviando = false; preparando = false;
+    if (conta !== window.FitWay.email) { conta = window.FitWay.email; pedidos = null; novo = null; } // outra conta no mesmo aparelho
     if (!arg) return lista();
     if (arg === "novo") return formNovo();
     return conversa(arg);
@@ -36,7 +42,7 @@
   async function lista() {
     shell(TIT, `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
     let r;
-    try { r = await api("suporte"); } catch (e) { return aqui("") && shell(TIT, voltar("#/perfil", "Perfil") + `<p class="err" role="alert">${esc(sem(e))}</p>`, "perfil"); }
+    try { r = await api("suporte"); } catch (e) { return aqui("") && erroTela(voltar("#/perfil", "Perfil"), sem(e), lista); }
     if (!aqui("")) return;
     pedidos = r.pedidos;
     window.FitWay.avisoSuporte(r.naoLido);
@@ -78,13 +84,16 @@
       const f = ev.target.files[0];
       ev.target.value = "";
       if (!f) return;
-      try { anexo = await reduzir(f); } catch (e) { return toast(e.message === "grande" ? "Imagem grande demais. Tente um print menor." : "Não consegui abrir esta imagem."); }
-      pintar(); $("#supTirar").focus();
+      preparando = true; $("#supAnexo").innerHTML = `<p class="muted sup-preparando" role="status">Preparando imagem…</p>`;
+      try { anexo = await reduzir(f); } catch (e) { toast(e.message === "grande" ? "Imagem grande demais. Tente um print menor." : "Não consegui abrir esta imagem."); }
+      preparando = false;
+      if (!$("#supAnexo")) return;
+      pintar(); (anexo ? $("#supTirar") : $("#supAnexar")).focus();
     };
   }
   const campoTexto = (rot) => `<div class="field"><label for="supTexto">${rot}</label>
       <textarea id="supTexto" rows="5" maxlength="${MAX}" aria-describedby="supConta"></textarea>
-      <p class="muted sup-conta" id="supConta" aria-live="polite">0/${MAX}</p></div>`;
+      <p class="muted sup-conta" id="supConta">0/${MAX}</p></div>`;
   function ligarTexto() {
     const t = $("#supTexto");
     t.oninput = () => { $("#supConta").textContent = `${t.value.length}/${MAX}`; };
@@ -92,9 +101,10 @@
 
   // ---------- abrir chamado ----------
   async function formNovo() {
-    if (!pedidos) {
+    let lista_ = pedidos;
+    if (!lista_) {
       shell(TIT, `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
-      try { pedidos = (await api("suporte")).pedidos; } catch (e) { pedidos = []; }
+      try { pedidos = lista_ = (await api("suporte")).pedidos; } catch (e) { lista_ = []; } // sem a lista: seletor vazio agora, tenta de novo na próxima vez
       if (!aqui("novo")) return;
     }
     const pre = novo || {}; novo = null; // "Abrir novo chamado sobre isso" chega com assunto e pedido
@@ -105,7 +115,7 @@
           ${Object.entries(ASSUNTOS).map(([k, a]) => `<label class="sup-assunto"><input type="radio" name="assunto" value="${k}" ${pre.assunto === k ? "checked" : ""}>
             <span><b>${esc(a.nome)}</b><span class="muted">${esc(a.ajuda)}</span></span></label>`).join("")}
         </fieldset>
-        <div id="supExtra"></div>
+        <div id="supExtra" aria-live="polite"></div>
         ${campoTexto("Mensagem")}
         ${campoAnexo()}
         <p class="err" role="alert" id="supErr"></p>
@@ -116,7 +126,7 @@
       const atual = $("#supPedido") ? $("#supPedido").value : pre.pedido_id || "";
       el.innerHTML = v === "pagamento" ? `<div class="field"><label for="supPedido">Pedido (opcional)</label><select id="supPedido">
           <option value="">Nenhum pedido específico</option>
-          ${pedidos.map((p) => `<option value="${esc(p.id)}" ${p.id === atual ? "selected" : ""}>${esc(p.codigo || p.id.slice(0, 8))} · ${esc(TIPOS[p.tipo] || p.tipo)} · ${reais(p.valor)} · ${esc(ST_PEDIDO[p.status] || p.status)}</option>`).join("")}
+          ${lista_.map((p) => `<option value="${esc(p.id)}" ${p.id === atual ? "selected" : ""}>${esc(p.codigo || p.id.slice(0, 8))} · ${esc(TIPOS[p.tipo] || p.tipo)} · ${reais(p.valor)} · ${esc(ST_PEDIDO[p.status] || p.status)}</option>`).join("")}
         </select></div>`
         : v === "treino" ? `<p class="sup-saude" role="note">${esc(SAUDE)}</p>` : "";
     };
@@ -127,7 +137,8 @@
       ev.preventDefault();
       if (enviando) return;
       const m = app.querySelector("[name=assunto]:checked"), texto = $("#supTexto").value.trim(), err = $("#supErr");
-      if (!m) return (err.textContent = "Escolha o assunto.");
+      if (preparando) return (err.textContent = "Espere a imagem ficar pronta.");
+      if (!m) { err.textContent = "Escolha o assunto."; return app.querySelector("[name=assunto]").focus(); }
       if (!texto) { err.textContent = "Escreva a mensagem."; return $("#supTexto").focus(); }
       const pedido_id = m.value === "pagamento" && $("#supPedido").value ? $("#supPedido").value : undefined;
       enviando = true; $("#supForm .btn").disabled = true; err.textContent = "";
@@ -140,13 +151,13 @@
   }
 
   // ---------- conversa ----------
-  async function conversa(id) {
+  async function conversa(id, focoFim) {
     shell(TIT, `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
     let r;
     try { r = await api("chamado", { id }); }
-    catch (e) { return aqui(id) && shell(TIT, voltar("#/suporte", "Chamados") + `<p class="err" role="alert">${esc(sem(e))}</p>`, "perfil"); }
+    catch (e) { return aqui(id) && erroTela(voltar("#/suporte", "Chamados"), sem(e), () => conversa(id)); }
     if (!aqui(id)) return;
-    api("suporte").then((s) => window.FitWay.avisoSuporte(s.naoLido), () => {}); // abrir marcou como lido
+    window.FitWay.avisoSuporte(r.naoLido); // abrir marcou como lido
     const c = r.chamado, fechado = c.status === "fechado";
     const msgs = r.mensagens.map((m) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
         <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte FitWay" : "Você"}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
@@ -161,13 +172,16 @@
             <button class="btn" type="submit">Enviar</button></form>
             <div class="tools"><button type="button" id="supEncerrar">Encerrar chamado</button></div>`}
       </section>`, "perfil");
-    $("#supTit").focus();
+    const ult = app.querySelector(".sup-msg:last-child");
+    if (focoFim && ult) { ult.tabIndex = -1; ult.focus(); } else $("#supTit").focus();
     app.querySelectorAll("[data-ver]").forEach((b) => b.onclick = async () => {
       b.disabled = true;
       try {
         const { anexo: src } = await api("chamado_anexo", { id, msg: Number(b.dataset.ver) });
         if (!src.startsWith("data:image/jpeg;base64,")) throw new Error();
-        b.parentNode.innerHTML = `<img class="sup-previa" src="${esc(src)}" alt="Imagem anexada à mensagem">`;
+        const box = b.parentNode;
+        box.innerHTML = `<img class="sup-previa" src="${esc(src)}" alt="Imagem anexada à mensagem" tabindex="-1">`;
+        box.firstChild.focus();
       } catch (e) { b.disabled = false; toast(e.status ? e.message : "Não consegui abrir a imagem."); }
     });
     if (fechado) {
@@ -185,9 +199,10 @@
       ev.preventDefault();
       if (enviando) return;
       const texto = $("#supTexto").value.trim(), err = $("#supErr");
+      if (preparando) return (err.textContent = "Espere a imagem ficar pronta.");
       if (!texto) { err.textContent = "Escreva a mensagem."; return $("#supTexto").focus(); }
       enviando = true; $("#supResp .btn").disabled = true; err.textContent = "";
-      try { await api("chamado_responder", { id, texto, anexo: anexo || undefined }); anexo = ""; enviando = false; toast("Mensagem enviada."); if (aqui(id)) conversa(id); }
+      try { await api("chamado_responder", { id, texto, anexo: anexo || undefined }); anexo = ""; enviando = false; toast("Mensagem enviada."); if (aqui(id)) conversa(id, true); }
       catch (e) { enviando = false; if ($("#supResp")) { $("#supResp .btn").disabled = false; err.textContent = sem(e); } }
     };
   }
