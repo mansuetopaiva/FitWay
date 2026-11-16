@@ -5,11 +5,15 @@ import { DIA, escaparLike, limpar, validarPlano } from "./_dados.js";
 import { NOMES_FOTOS, lerPdf } from "./_treino.js";
 import { PARQ, limparPedidos } from "./_pedido.js";
 import { termoFaltando } from "./_termo.js";
-import { ABERTOS, PRECOS, tipoValido } from "./_precos.js";
+import { ABERTOS, PRECOS, efeitoDoPagamento, tipoValido } from "./_precos.js";
 import { confirmarPagamento } from "./_pagamento.js";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
-  "pedidos", "pedido", "pedido_verificar", "pedido_gerar_de_novo", "pedido_cancelar"];
+  "pedidos", "pedido", "pedido_verificar", "pedido_gerar_de_novo", "pedido_cancelar",
+  "pedido_estornar", "devolucao_marcar"];
+// Estorno: o dinheiro o admin devolve no app do InfinitePay; aqui só se registra e se desfaz o efeito no app.
+const MOTIVOS = { desistencia: "Desistência em 7 dias", duplicado: "Pagamento duplicado", outro: "Outro" };
+const DIAS = Object.fromEntries(Object.keys(PRECOS.pix).map((t) => [t, efeitoDoPagamento(t).dias]));
 const STATUS = ["aguardando_pagamento", "aguardando_confirmacao", "pago", "gerando", "pronto", "erro", "cancelado"];
 
 // Lido a cada chamada: tirar alguém da variável na Vercel vale sem depender do navegador.
@@ -56,14 +60,16 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
       from usuarios`;
     await limparPedidos(sql, null); // prazos de pedidos e fotos (sem cron: roda aqui e no pedido_status)
     const [p] = await sql`select count(*) filter (where status = 'aguardando_pagamento')::int as aguardando,
-        coalesce(sum(valor) filter (where pago_em >= date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'), 0)::int as receita_mes,
+        coalesce(sum(valor) filter (where estornado_em is null and pago_em >= date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'), 0)::int as receita_mes,
         (select count(*) from usuarios where acesso_ate > now() and acesso_ate <= now() + interval '7 days')::int as vencendo7d
       from pedidos`;
     // Pago sem liberar o pedido (pedido já fechado, os dois links pagos, ou valor menor): devolver o dinheiro.
     const semPedido = await sql`select l.criado, l.alvo_email as email, l.detalhes->>'transaction_nsu' as transaction_nsu,
         (l.detalhes->>'paid_amount')::int as valor, l.detalhes->>'motivo' as motivo, coalesce(p.codigo, p.id) as codigo
       from admin_log l left join pedidos p on p.id = l.detalhes->>'pedido'
-      where l.acao = 'cartao_sem_pedido' and l.criado > now() - interval '30 days' order by l.criado desc limit 10`;
+      where l.acao = 'cartao_sem_pedido' and l.criado > now() - interval '30 days'
+        and not exists (select 1 from admin_log d where d.acao = 'devolvido' and d.detalhes->>'transaction_nsu' = l.detalhes->>'transaction_nsu')
+      order by l.criado desc limit 10`;
     return ok({ usuarios: r.usuarios, novos7d: r.novos7d, comTreino: r.com_treino, comAcesso: r.com_acesso,
       checkinsHoje: r.checkins_hoje, checkinsSemana: r.checkins_semana, cadastroAntes: r.cadastro_antes || "",
       aguardando: p.aguardando, cartaoSemPedido: semPedido, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d,
@@ -92,9 +98,28 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     return ok({ itens: xs.slice(0, 20), temMais: xs.length > 20 });
   }
 
+  if (b.op === "devolucao_marcar") {
+    const t = typeof b.transaction_nsu === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(b.transaction_nsu) ? b.transaction_nsu : "";
+    if (!t) return falha(400, "Informe o pagamento.");
+    // Só um item que está na lista "para devolver", e uma vez.
+    const [x] = await sql`insert into admin_log (admin_email, acao, alvo_email, detalhes)
+      select ${u.email}, 'devolvido', l.alvo_email, jsonb_build_object('transaction_nsu', ${t}::text, 'valor', l.detalhes->'paid_amount', 'pedido', l.detalhes->'pedido')
+      from admin_log l where l.acao = 'cartao_sem_pedido' and l.detalhes->>'transaction_nsu' = ${t}
+        and not exists (select 1 from admin_log d where d.acao = 'devolvido' and d.detalhes->>'transaction_nsu' = ${t})
+      limit 1 returning id`;
+    if (!x) return falha(400, "Este pagamento não está na lista para devolver (ou já foi marcado).");
+    return ok({});
+  }
+
   if (b.op.startsWith("pedido")) {
     const id = typeof b.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(b.id) ? b.id : "";
     if (!id) return falha(400, "Informe o pedido.");
+    let motivo = "", texto = null;
+    if (b.op === "pedido_estornar") {
+      motivo = typeof b.motivo === "string" && Object.hasOwn(MOTIVOS, b.motivo) ? MOTIVOS[b.motivo] : "";
+      if (b.motivo === "outro") texto = typeof b.texto === "string" ? b.texto.trim() : "";
+      if (!motivo || (texto !== null && (!texto || texto.length > 200))) return falha(400, "Escolha o motivo (em \"Outro\", escreva até 200 caracteres).");
+    }
     // Cada escrita e o seu registro no admin_log vão numa única instrução.
     const log = (acao) => JSON.stringify({ pedido: id, acao });
     if (b.op === "pedido") {
@@ -102,7 +127,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
       // Ver dados de saúde ou fotos fica registrado.
       const [x] = await sql`with p as (select p.id, p.email, p.tipo, p.status, p.valor, p.criado, p.pago_em, p.gerado_em, p.atualizado, p.erro, p.tentativas, p.modelo,
           p.respostas, p.fotos, p.aceite, p.plano_gerado, p.metodo, p.codigo, p.confirmado_por, p.transaction_nsu, p.capture_method, p.checkout_ref,
-          p.checkout_url, p.checkout_url_pix, u.nome, u.acesso_ate,
+          p.checkout_url, p.checkout_url_pix, p.estornado_em, p.estornado_por, u.nome, u.acesso_ate,
           -- Pix manual antigo ainda não conferido: o que a pessoa mandou, só para o admin decidir (cancelar e devolver, ou não).
           case when p.status = 'aguardando_confirmacao' then jsonb_build_object('pagador', p.pagador_nome, 'aviso', p.aviso_em,
             'e2e', p.pix_e2e_informado, 'comprovante', p.comprovante) end as pix_antigo from pedidos p join usuarios u on u.email = p.email where p.id = ${id}),
@@ -115,7 +140,8 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         modelo: x.modelo, respostas: x.respostas, fotos: x.fotos, aceite: x.aceite, plano: x.plano_gerado, parq: PARQ,
         metodo: x.metodo, codigo: x.codigo, confirmadoPor: x.confirmado_por,
         transactionNsu: x.transaction_nsu, captureMethod: x.capture_method, checkoutRef: x.checkout_ref,
-        links: { pix: !!x.checkout_url_pix, cartao: !!x.checkout_url }, meioEscolhido: meioEscolhido(x), pixAntigo: x.pix_antigo || null });
+        links: { pix: !!x.checkout_url_pix, cartao: !!x.checkout_url }, meioEscolhido: meioEscolhido(x), pixAntigo: x.pix_antigo || null,
+        estornadoEm: x.estornado_em || null, estornadoPor: x.estornado_por || null });
     }
     let x;
     if (b.op === "pedido_verificar") {
@@ -155,6 +181,23 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
           l as (insert into admin_log (admin_email, acao, alvo_email, detalhes) select ${u.email}, 'pedido_cancelar', email, ${log("cancelar")}::jsonb from p)
         select status from p`;
       if (!x) return falha(400, "Este pedido não pode mais ser cancelado.");
+    } else if (b.op === "pedido_estornar") {
+      // Numa instrução: cancela e marca o pedido, tira só os dias que ESTE pedido deu (sem passar de now() nem aumentar)
+      // e, se o treino atual da conta é o deste pedido, tira o treino (continua em pedidos.plano_gerado). A condição
+      // "estornado_em is null" faz o segundo clique não achar a linha: nunca desconta duas vezes.
+      [x] = await sql`with p as (update pedidos set status = 'cancelado', estornado_em = now(), estornado_por = ${u.email}, atualizado = now()
+            where id = ${id} and status in ('pago', 'pronto', 'erro') and estornado_em is null
+            returning id, email, tipo, valor, (${JSON.stringify(DIAS)}::jsonb->>tipo)::int as dias),
+          a as (update usuarios set
+              acesso_ate = case when (select dias from p) > 0 and acesso_ate is not null
+                then least(acesso_ate, greatest(now(), acesso_ate - make_interval(days => (select dias from p)))) else acesso_ate end,
+              dados = case when dados->'plano'->>'pedido' = (select id from p) then dados - 'plano' else dados end
+            where email = (select email from p) returning acesso_ate, (select dados->'plano'->>'pedido' from usuarios where email = (select email from p)) = (select id from p) as tirou),
+          l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
+            select ${u.email}, 'pedido_estornado', p.email, jsonb_build_object('pedido', p.id, 'tipo', p.tipo, 'valor', p.valor, 'dias', p.dias,
+              'motivo', ${motivo}::text, 'texto', ${texto}::text, 'treino_removido', coalesce((select tirou from a), false)) from p)
+        select 'cancelado' as status, (select acesso_ate from a) as acesso_ate from p`;
+      if (!x) return falha(400, "Só dá para registrar a devolução de um pedido pago, pronto ou com erro, e uma vez só (este já foi estornado ou não foi pago).");
     } else return falha(400, "Operação desconhecida.");
     if (!x) return falha(400, "Este pedido não está aguardando pagamento.");
     return ok({ status: x.status, acessoAte: x.acesso_ate });

@@ -111,6 +111,21 @@ e chama `confirmarPagamento`; 200 (processado ou ignorado) ou 400 (temporário).
 - **Removidas** (400 "Operação desconhecida."): `pix_confirmar`, `pix_nao_encontrado`, `cartao_verificar`. Sai também o aviso de Pix
   aguardando do topo do painel e do menu.
 
+### Devoluções (estorno e "Marcar como devolvido")
+
+O dinheiro é sempre devolvido pelo dono no app do InfinitePay; o app só registra e desfaz o efeito.
+
+- **`pedido_estornar { id, motivo, texto? }`** (botão "Registrar devolução e cancelar", em pedido `pago`, `pronto` ou `erro`):
+  `motivo` = `desistencia` ("Desistência em 7 dias"), `duplicado` ("Pagamento duplicado") ou `outro` (com `texto` de 1 a 200 caracteres).
+  Numa instrução: `status = 'cancelado'`, `estornado_em` e `estornado_por` (colunas novas); tira do acesso os dias que **este** pedido deu
+  (`inicial` e `mensalidade`: 30; `novo_treino`: 0), com `least(acesso_ate, greatest(now(), acesso_ate - dias))` (nunca antes de agora,
+  nunca aumenta); se `dados.plano.pedido` é este pedido, o treino sai da conta (continua em `pedidos.plano_gerado`); `admin_log`
+  `pedido_estornado` com valor, dias, motivo e se o treino saiu. Condição `estornado_em is null`: o segundo clique não desconta de novo.
+  `erro` entra porque também é pedido pago.
+- **`devolucao_marcar { transaction_nsu }`** (botão "Marcar como devolvido" na lista "para devolver"): grava `admin_log` `devolvido`
+  só se o pagamento está na lista e ainda não foi marcado; a lista do resumo deixa de mostrá-lo.
+- A receita do mês não conta pedidos estornados.
+
 ### Telas
 
 - **"Como quer pagar?"** (depois de enviar o pedido, no Renovar e no "Pagar" do Perfil): "Pix — R$ 9,99" e "Cartão de crédito — R$ 11,99"

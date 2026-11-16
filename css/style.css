@@ -355,3 +355,10 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 .pag-trocar { display: block; margin: 12px auto 0; }
 .pag-botoes { display: grid; gap: 8px; margin-top: 12px; }
 .pag-voltar { display: inline-flex; align-items: center; margin-top: 12px; text-decoration: none; }
+
+/* admin: registrar devolução (estorno) */
+.ped-estorno { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.ped-estorno fieldset { border: 0; padding: 0; margin: 10px 0; }
+.ped-estorno legend { font-size: 13px; margin-bottom: 6px; }
+.ped-op { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; }
+.adm-devolvido { display: block; margin: 6px 0 4px; }

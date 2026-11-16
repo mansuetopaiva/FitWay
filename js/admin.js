@@ -105,12 +105,21 @@
       : resumo.iaLigada ? "" : `<p class="muted adm-aviso-ia">Treino com IA desligado para os usuários (TREINO_IA_ATIVO). Você, como admin, pode pedir para testar.</p>`;
     const sp = resumo.cartaoSemPedido || [];
     const sobra = sp.length ? `<div class="adm-erro" role="note"><b>Pagamentos para devolver pelo InfinitePay (últimos 30 dias):</b>
-      <ul>${sp.map((x) => `<li>${esc(quando(x.criado))} · ${esc(x.email || "")} · pedido ${esc(x.codigo || "—")}${x.valor ? " · " + reais(x.valor) : ""}${x.motivo === "valor_menor" ? " · valor menor que o do pedido" : x.motivo === "pedido_fechado" ? " · pedido já fechado" : ""} · transação ${esc(x.transaction_nsu || "—")}</li>`).join("")}</ul></div>` : "";
+      <ul>${sp.map((x) => `<li>${esc(quando(x.criado))} · ${esc(x.email || "")} · pedido ${esc(x.codigo || "—")}${x.valor ? " · " + reais(x.valor) : ""}${x.motivo === "valor_menor" ? " · valor menor que o do pedido" : x.motivo === "pedido_fechado" ? " · pedido já fechado" : ""} · transação ${esc(x.transaction_nsu || "—")}
+        ${x.transaction_nsu ? `<button class="btn-sec adm-devolvido" data-devolvido="${esc(x.transaction_nsu)}">Marcar como devolvido</button>` : ""}</li>`).join("")}</ul></div>` : "";
     el.innerHTML = sobra + aviso + `<div class="adm-cards">
       ${c(resumo.usuarios, "usuários")}${c(resumo.novos7d, "novos em 7 dias")}${c(resumo.comTreino, "com treino")}
       ${c(resumo.comAcesso, "com acesso liberado")}${c(resumo.checkinsHoje, "check-ins hoje")}${c(resumo.checkinsSemana, "check-ins na semana")}
       ${c(resumo.aguardando, "pedidos aguardando pagamento")}${c(reais(resumo.receitaMes), "receita do mês")}${c(resumo.vencendo7d, "acessos vencem em 7 dias")}
     </div>`;
+    el.onclick = async (ev) => {
+      const b = ev.target.closest("[data-devolvido]");
+      if (!b || !confirm("Marcar este pagamento como devolvido? Faça isso só depois de devolver o dinheiro no app do InfinitePay.")) return;
+      b.disabled = true;
+      try { await api("admin", { op: "devolucao_marcar", transaction_nsu: b.dataset.devolvido }); toast("Marcado como devolvido."); }
+      catch (e) { toast(e.message); b.disabled = false; return; }
+      carregarResumo();
+    };
   }
 
   // ---------- lista ----------
@@ -232,7 +241,8 @@
     return ({ plano_salvar: "Treino editado", plano_pdf: "Treino enviado por PDF", plano_remover: "Treino removido", pedido_ver: "Pedido visto (saúde ou fotos)",
       cartao_sem_pedido: `Pagamento para devolver${x.paid_amount ? ` (${reais(x.paid_amount)})` : ""}`,
       pedido_pago: `Pagamento confirmado${x.metodo === "cartao" ? " (cartão)" : x.metodo === "pix" ? " (Pix)" : ""}${x.dias ? ` (+${x.dias} dias)` : ""}`,
-      pix_nao_encontrado: "Pix não encontrado (pedido voltou para aguardando pagamento)", pedido_gerar_de_novo: "Treino do pedido gerado de novo", pedido_cancelar: "Pedido cancelado" }[h.acao] || h.acao) + n + ped;
+      pix_nao_encontrado: "Pix não encontrado (pedido voltou para aguardando pagamento)", pedido_gerar_de_novo: "Treino do pedido gerado de novo", pedido_cancelar: "Pedido cancelado",
+      pedido_estornado: "Devolução registrada (pedido estornado)", devolvido: "Pagamento marcado como devolvido" }[h.acao] || h.acao) + n + ped;
   }
 
   // ---------- editor de treino ----------
@@ -422,7 +432,8 @@
   const TIPOS = { inicial: "Treino inicial", mensalidade: "Mensalidade", novo_treino: "Novo treino" };
   const selo = (st) => `<span class="selo ${STATUS[st][1]}">${STATUS[st][0]}</span>`;
   const pedLista = { status: "aguardando_pagamento", tipo: "", pagina: 0, itens: [], temMais: false, estado: "carregando", erro: "" };
-  let ped = null, pedId = "", pedEstado = "", pedErro = "", versaoPed = 0, versaoPedLista = 0, fotoGrande = "", termoVisto = null;
+  let ped = null, pedId = "", pedEstado = "", pedErro = "", versaoPed = 0, versaoPedLista = 0, fotoGrande = "", termoVisto = null, estornando = false;
+  const MOTIVOS_ESTORNO = { desistencia: "Desistência em 7 dias", duplicado: "Pagamento duplicado", outro: "Outro" };
   const METODOS = { pix: "Pix", cartao: "Cartão" }, FORMAS = { pix: "Pix", credit_card: "Cartão de crédito" };
 
   function renderPedidos(id) {
@@ -492,7 +503,7 @@
   // gerar: logo depois de marcar como pago, o servidor já monta o treino nesta chamada (até 1 minuto).
   async function carregarPedido(id, gerar) {
     const v = ++versaoPed;
-    pedId = id; fotoGrande = ""; termoVisto = null;
+    pedId = id; fotoGrande = ""; termoVisto = null; estornando = false;
     pedEstado = gerar ? "gerando" : "carregando"; ped = gerar ? ped : null;
     pintarPedido();
     try {
@@ -522,7 +533,23 @@
 
       ["erro", "pronto"].includes(p.status) && p.tipo !== "mensalidade" ? `<button class="btn-sec" data-ped-gerar>Gerar de novo</button>` : "",
       ["aguardando_pagamento", "aguardando_confirmacao", "pago", "erro"].includes(p.status) ? `<button class="btn-perigo" data-ped-cancelar>Cancelar pedido</button>` : "",
+      ["pago", "pronto", "erro"].includes(p.status) && !p.estornadoEm && !estornando ? `<button class="btn-perigo" data-ped-estornar>Registrar devolução e cancelar</button>` : "",
     ].join("");
+    const dias = p.tipo === "novo_treino" ? 0 : 30;
+    // O que acontece no app; o dinheiro é devolvido à parte, no app do InfinitePay.
+    const estorno = estornando ? `<form class="ped-estorno" id="pedEstorno" novalidate>
+        <h3 class="adm-sub" id="pedEstornoTit" tabindex="-1">Registrar devolução e cancelar</h3>
+        <p class="muted">Devolva o dinheiro (${reais(p.valor)}) no app do InfinitePay. Aqui o pedido fica cancelado e marcado como estornado,
+          ${dias ? `o acesso perde os ${dias} dias que este pedido deu (sem mexer em outros pagamentos)` : "os dias de acesso não mudam (novo treino não dá dias)"}
+          e, se o treino atual da conta veio deste pedido, ele sai da conta.</p>
+        <fieldset><legend>Motivo</legend>
+          ${Object.entries(MOTIVOS_ESTORNO).map(([k, v]) => `<label class="ped-op"><input type="radio" name="motivo" value="${k}" required> ${v}</label>`).join("")}
+        </fieldset>
+        <div class="field"><label for="pedEstornoTxt">Descreva (obrigatório em "Outro", até 200 caracteres)</label>
+          <textarea id="pedEstornoTxt" maxlength="200" rows="2"></textarea></div>
+        <p class="err" role="alert" id="pedEstornoErr"></p>
+        <div class="adm-botoes"><button class="btn-perigo" type="submit">Confirmar devolução</button><button class="btn-sec" type="button" data-ped-estornar-voltar>Voltar</button></div>
+      </form>` : "";
     el.innerHTML = `${voltar}
       <div class="card">
         <h2 id="admDetTit" tabindex="-1">${esc(TIPOS[p.tipo])} · ${reais(p.valor)}</h2>
@@ -540,13 +567,25 @@
             ? "O texto abaixo é exatamente o que a pessoa aceitou (mesmo hash)."
             : "Atenção: o texto atual é diferente do aceito (hash diferente). As variáveis do termo mudaram depois do aceite."}</p>
           <div class="ped-termo" tabindex="0" role="region" aria-label="Texto do termo, versão ${esc(termoVisto.versao)}">${esc(termoVisto.texto)}</div>` : ""}` : ""}
+        ${p.estornadoEm ? `<p class="adm-erro" role="note"><b>Estornado</b> em ${esc(quando(p.estornadoEm))} por ${esc(p.estornadoPor || "—")}.</p>` : ""}
         ${botoes ? `<div class="adm-botoes">${botoes}</div>` : ""}
+        ${estorno}
       </div>
       ${pagamentoHtml(p)}
       ${r ? respostasHtml(p, r) : ""}
       ${p.fotos ? fotosHtml(p.fotos) : r ? `<div class="card"><h2 class="adm-tit">Fotos</h2><p class="muted">Nenhuma foto (não enviadas ou já apagadas 90 dias depois do treino pronto).</p></div>` : ""}
       ${p.plano ? planoHtml(p.plano) : ""}`;
     if (focar) { const t = $("#admDetTit"); if (t) t.focus(); }
+    const f = $("#pedEstorno");
+    if (f) f.onsubmit = (ev) => {
+      ev.preventDefault();
+      const m = f.querySelector("[name=motivo]:checked"), texto = $("#pedEstornoTxt").value.trim(), err = $("#pedEstornoErr");
+      if (!m) return (err.textContent = "Escolha o motivo.");
+      if (m.value === "outro" && !texto) return (err.textContent = "Descreva o motivo.");
+      if (!confirm(`Confirmar a devolução deste pedido de ${ped.nome}? O pedido será cancelado${p.tipo === "novo_treino" ? "" : ", o acesso perde 30 dias"} e o treino gerado por ele sai da conta. Isso não devolve o dinheiro: faça a devolução no app do InfinitePay.`)) return;
+      estornando = false;
+      acaoPedido("pedido_estornar", "Devolução registrada e pedido cancelado.", f.querySelector("[type=submit]"), { motivo: m.value, ...(m.value === "outro" ? { texto } : {}) });
+    };
   }
   // Pagamento pelo checkout do InfinitePay (Pix ou cartão): confirmado só pelo payment_check.
   function pagamentoHtml(p) {
@@ -639,6 +678,8 @@
       if (confirm(`Cancelar este pedido de ${ped.nome}? Não há reembolso automático, e os dias de acesso já dados continuam valendo.`)) acaoPedido("pedido_cancelar", "Pedido cancelado.", b);
       return;
     }
+    if (ds.pedEstornar !== undefined) { estornando = true; pintarPedido(); $("#pedEstornoTit").focus(); return; }
+    if (ds.pedEstornarVoltar !== undefined) { estornando = false; pintarPedido(); const x = $("[data-ped-estornar]"); if (x) x.focus(); return; }
     if (ds.pedFoto) { fotoGrande = ds.pedFoto; pintarPedido(); const f = $("[data-ped-fechar-foto]"); if (f) f.focus(); return; }
     if (ds.pedFecharFoto) { fotoGrande = ""; pintarPedido(); const f = $(`[data-ped-foto="${ds.pedFecharFoto}"]`); if (f) f.focus(); return; }
     if (ds.pedTermo) {
