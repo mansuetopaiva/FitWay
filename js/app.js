@@ -544,19 +544,19 @@
     const u = { nome: nomeUser };
     shell("Perfil", `
       <section class="card profile">
-        ${fotoUser ? `<img class="avatar" src="${esc(fotoUser)}" alt="Sua foto de perfil" width="72" height="72">`
+        ${fotoUser ? `<img class="avatar" src="${esc(fotoUser)}" alt="Sua foto de perfil" width="96" height="96">`
           : `<div class="avatar" aria-hidden="true">${esc((u.nome || "?").charAt(0).toUpperCase())}</div>`}
         <input type="file" id="fotoArq" accept="image/*" hidden>
-        ${editandoPerfil ? `<form novalidate style="text-align:left">
+        ${editandoPerfil ? `<div class="tools foto-tools"><button type="button" id="trocarFoto">${icon("user")}${fotoUser ? "Trocar foto" : "Adicionar foto"}</button>
+            ${fotoUser ? `<button type="button" id="tirarFoto">${icon("user")}Remover foto</button>` : ""}</div>
+          <form novalidate style="text-align:left">
             <div class="field"><label for="nome">Nome</label><input id="nome" autocomplete="given-name" maxlength="40" value="${esc(u.nome)}" required></div>
             <p class="err" role="alert"></p>
             <button class="btn" type="submit">Salvar</button>
-            <div class="tools"><button type="button" id="cancelar">Cancelar</button></div>
+            <div class="tools"><button type="button" id="cancelar">Fechar</button></div>
           </form>` : `<h2>${esc(u.nome)}</h2>`}
         <p class="muted" ${editandoPerfil ? 'style="margin-top:10px"' : ""}>${esc(email)}</p>
-        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar nome</button>
-          <button id="trocarFoto">${icon("user")}${fotoUser ? "Trocar foto" : "Adicionar foto"}</button>
-          ${fotoUser ? `<button id="tirarFoto">${icon("user")}Remover foto</button>` : ""}</div>`}
+        ${editandoPerfil ? "" : `<div class="tools"><button id="editar">${icon("edit")}Editar perfil</button></div>`}
       </section>
       <section class="card">
         <div class="row"><span>Plano</span><span>${plano() ? esc(plano().nome) : "Nenhum"}</span></div>
@@ -611,29 +611,31 @@
       fr.readAsDataURL(f);
     };
     if (!editandoPerfil) {
-      $("#editar").onclick = () => { editandoPerfil = true; viewPerfil(); $("#nome").select(); };
-      const salvarFoto = async (foto) => {
-        try { fotoUser = (await api("foto", { foto })).foto; }
-        catch (e) { return toast(e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }
-        toast(foto ? "Foto atualizada." : "Foto removida.");
-        if (location.hash.split("/")[1] === "perfil") { viewPerfil(); $("#trocarFoto").focus(); }
-      };
-      $("#trocarFoto").onclick = () => $("#fotoArq").click();
-      $("#fotoArq").onchange = async (ev) => {
-        const f = ev.target.files[0];
-        ev.target.value = "";
-        if (!f) return;
-        // Recorta o centro em quadrado e reduz para 160x160 no aparelho: a foto fica com ~10 KB no banco.
-        let img;
-        try { img = await createImageBitmap(f); } catch (e) { return toast("Não consegui abrir esta imagem."); }
-        const c = document.createElement("canvas"), lado = Math.min(img.width, img.height);
-        c.width = c.height = 160;
-        c.getContext("2d").drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, 160, 160);
-        salvarFoto(c.toDataURL("image/jpeg", 0.85));
-      };
-      if (fotoUser) $("#tirarFoto").onclick = () => { if (confirm("Remover sua foto de perfil?")) salvarFoto(""); };
+      $("#editar").onclick = () => { editandoPerfil = true; viewPerfil(); $("#nome").focus(); };
       return;
     }
+    const salvarFoto = async (foto) => {
+      try { fotoUser = (await api("foto", { foto })).foto; }
+      catch (e) { return toast(e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }
+      toast(foto ? "Foto atualizada." : "Foto removida.");
+      if (location.hash.split("/")[1] !== "perfil" || !editandoPerfil) return;
+      const nome = $("#nome").value; // mantém o nome que estava sendo digitado
+      viewPerfil(); $("#nome").value = nome; $("#trocarFoto").focus();
+    };
+    $("#trocarFoto").onclick = () => $("#fotoArq").click();
+    $("#fotoArq").onchange = async (ev) => {
+      const f = ev.target.files[0];
+      ev.target.value = "";
+      if (!f) return;
+      // Recorta o centro em quadrado e reduz para 160x160 no aparelho: a foto fica com ~10 KB no banco.
+      let img;
+      try { img = await createImageBitmap(f); } catch (e) { return toast("Não consegui abrir esta imagem."); }
+      const c = document.createElement("canvas"), lado = Math.min(img.width, img.height);
+      c.width = c.height = 160;
+      c.getContext("2d").drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, 160, 160);
+      salvarFoto(c.toDataURL("image/jpeg", 0.85));
+    };
+    if (fotoUser) $("#tirarFoto").onclick = () => { if (confirm("Remover sua foto de perfil?")) salvarFoto(""); };
     const fechar = () => { editandoPerfil = false; viewPerfil(); $("#editar").focus(); };
     $("#cancelar").onclick = fechar;
     $("form").onsubmit = async (ev) => {
