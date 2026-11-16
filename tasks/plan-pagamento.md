@@ -1,4 +1,4 @@
-# Plano: pagamento dos pedidos (Pix manual e cartão pelo InfinitePay)
+# Plano: pagamento dos pedidos (Pix e cartão pelo InfinitePay)
 
 Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda regra de dinheiro. Um commit por tarefa, sem push.
 
@@ -59,6 +59,29 @@ Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda 
 
 - [x] **T10. README** (variáveis) e os 4 agentes em paralelo, com a análise de fraude pedida ao security-auditor; correções; go/no-go.
 
+## Fase 5: Pix pelo checkout do InfinitePay (mudança de decisão de 2026-11-16)
+
+O Pix manual (link do Nubank + comprovante) sai. Pix e cartão passam a ser links do InfinitePay, confirmados pelo `payment_check`.
+Nenhuma migração destrutiva. Commits de remoção separados; histórico intacto.
+
+- [x] **T11. Spec e plano** (`docs/pagamento.md`, este arquivo).
+- [ ] **T12. Remover o Pix manual no servidor** (`api/_precos.js`, `api/_pagamento.js`, `api/_admin.js`, `api/app.js`, testes)
+  - Saem `linkPix`, `PIX_LINK_*`, `PIX_TITULAR_EXIBIDO`, `pedido_metodo`, `pix_avisei`, `lerE2E`/`dataDoE2E`, `pix_confirmar`,
+    `pix_nao_encontrado`, `pixAguardando`, `mensagem_usuario` na resposta.
+  - Aceite: ações e ops removidas respondem "Ação desconhecida." / "Operação desconhecida."; pedido em `aguardando_confirmacao` ainda cancela.
+- [ ] **T13. Link por meio e confirmação genérica** (`api/_pagamento.js`, `api/_admin.js`, `api/app.js`, `api/infinitepay.js`, testes antes)
+  - `checkout_url_pix`; `pagar { id, metodo }`; `confirmar_pagamento`; `confirmarPagamento` com mínimo pelo link mais barato,
+    `valor` do `payment_check`, `capture_method` real, valor menor registrado; `pedido_verificar`; detalhe com meio diferente.
+  - Aceite: os testes da spec (preço por meio, reaproveitar link, meio diferente aceito e marcado, valor menor recusado e registrado,
+    dois links confirmam uma vez só, 30 dias).
+- [ ] **T14. Telas** (`js/pagamento.js`, `js/app.js`, `js/admin.js`, `css/style.css`): remover o Pix manual; os dois botões levam ao checkout;
+  admin sem conferência de Pix, com "meio diferente" e "Cancelar pedido" no pedido antigo.
+- [ ] **T15. Termo 2026-11-16-2** (4.2, 5.3, 5.4) e teste.
+- [ ] **T16. README** (fluxo e variáveis).
+- [ ] **T17. Os 4 agentes em paralelo** (fraude pelo security-auditor), correções, go/no-go. Checkpoints PGlite e jsdom atualizados.
+
+**Depois:** você habilita o checkout externo no InfinitePay e eu rodo o teste com link real (P2).
+
 ## Riscos
 
 | Risco | Impacto | Como reduzir |
@@ -68,5 +91,6 @@ Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda 
 | Valor alterado no navegador | Alto | O valor sai sempre de `PRECOS` no servidor; o `payment_check` compara `paid_amount` com `pedido.valor` |
 | Pagar o cartão depois de trocar para Pix | Médio | P3 |
 | Campo da resposta de `/links` | Médio | P2: um link real antes de liberar |
-| Pix confundido na conferência manual | Médio | ID da transação (E2E) obrigatório na confirmação e `unique` no banco; comprovante obrigatório (P4) |
-| Comprovante com dado pessoal (LGPD) | Médio | Apagado em 90 dias; só o admin vê; visualização registrada no log |
+| Link criado por terceiro com valor baixo (o `handle` é público) | Alto | Valor mínimo pelo link mais barato do pedido; dinheiro registrado para devolver |
+| Cartão pagando o link do Pix | Baixo | Aceito e marcado no admin (P9) |
+| Comprovante antigo com dado pessoal (LGPD) | Baixo | Continua apagado em 90 dias |
