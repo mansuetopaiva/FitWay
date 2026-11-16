@@ -5,7 +5,7 @@ import { DIA, escaparLike, limpar, validarPlano } from "./_dados.js";
 import { NOMES_FOTOS, lerPdf } from "./_treino.js";
 import { PARQ, limparPedidos } from "./_pedido.js";
 import { termoFaltando } from "./_termo.js";
-import { ABERTOS, PRECOS, efeitoDoPagamento } from "./_precos.js";
+import { ABERTOS, efeitoDoPagamento, tipoValido } from "./_precos.js";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
   "pedidos", "pedido", "pedido_pago", "pedido_gerar_de_novo", "pedido_cancelar"];
@@ -69,7 +69,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
   if (b.op === "pedidos") {
     const status = b.status === undefined ? "" : b.status, tipo = b.tipo === undefined ? "" : b.tipo;
     if (status !== "" && !STATUS.includes(status)) return falha(400, "Status inválido.");
-    if (tipo !== "" && !(typeof tipo === "string" && Object.hasOwn(PRECOS, tipo))) return falha(400, "Tipo inválido.");
+    if (tipo !== "" && !tipoValido(tipo)) return falha(400, "Tipo inválido.");
     if (!paginaValida(b.pagina)) return falha(400, "Página inválida.");
     const xs = await sql`select p.id, p.tipo, p.status, p.valor, p.criado, p.email, u.nome from pedidos p join usuarios u on u.email = p.email
       where (${status} = '' or p.status = ${status}) and (${tipo} = '' or p.tipo = ${tipo})
