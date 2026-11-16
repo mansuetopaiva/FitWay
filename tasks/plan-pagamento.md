@@ -51,7 +51,7 @@ Spec: [docs/pagamento.md](../docs/pagamento.md). Teste antes do código em toda 
 
 - [x] **T7. Tela "Como quer pagar?", Pix (botão do link numa aba nova, `rel="noopener noreferrer"`) e "Já paguei"** (`js/pagamento.js`, baixado só quando abre, e `js/app.js` no Perfil, no Renovar e no "Pagar")
 - [x] **T8. Volta do cartão** (`js/app.js`): ler os parâmetros, chamar `confirmar_cartao`, limpar a URL, mostrar "ainda não confirmado" com as duas opções.
-- [ ] **T9. Admin** (`js/admin.js`): aviso de Pix aguardando, filtro do status novo, detalhe com comprovante e o valor esperado em destaque ao lado, campo do ID da transação (com o ID informado pela pessoa lado a lado) e os botões.
+- [x] **T9. Admin** (`js/admin.js`): aviso de Pix aguardando, filtro do status novo, detalhe com comprovante e o valor esperado em destaque ao lado, campo do ID da transação (com o ID informado pela pessoa lado a lado) e os botões.
 
 **Checkpoint 3:** jsdom do fluxo completo (pedir, escolher Pix, avisar, admin confirmar; pedir, escolher cartão, voltar com os parâmetros, confirmar).
 
