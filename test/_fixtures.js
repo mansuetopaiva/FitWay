@@ -9,3 +9,7 @@ export const planoIA = () => ({
     { nome: "Remada baixa na polia", series: 4, reps: "10", descanso_s: 60, obs: "" },
   ] })),
 });
+
+// Variáveis do termo com valores de exemplo (os reais ficam só no .env.local e na Vercel).
+export const ENV_TERMO = { TERMO_RESPONSAVEL: "Fulana de Tal", TERMO_DOCUMENTO: "00.000.000/0001-00", TERMO_EMAIL: "contato@exemplo.com", TERMO_FORO: "Cidade/UF" };
+export const comTermo = () => Object.assign(process.env, ENV_TERMO);

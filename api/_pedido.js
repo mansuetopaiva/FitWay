@@ -2,7 +2,7 @@
 // O formulário (js/pedido.js) recebe PARQ, OPCOES e TEXTOS do servidor, então o texto fica só aqui.
 import { randomBytes } from "node:crypto";
 import { ABERTOS, PRECOS, iaAtiva, podePedir } from "./_precos.js";
-import { registrarAceite } from "./_termo.js";
+import { registrarAceite, termoFaltando } from "./_termo.js";
 
 export const PARQ = [
   "Algum médico já disse que você tem algum problema de coração e que só deve fazer atividade física com orientação médica?",
@@ -90,13 +90,17 @@ export async function limparPedidos(sql, email) {
 
 // pedido_criar. Recebe sql e "agora" por parâmetro para o teste. u traz email, acesso_ate e dados do banco.
 export async function criarPedido(sql, u, b, headers, agora, { admin = false } = {}) {
-  if (b.tipo !== "mensalidade" && !iaAtiva() && !admin) return { status: 400, corpo: { erro: "Em breve." } };
+  if (b.tipo !== "mensalidade") {
+    const falta = termoFaltando();
+    if (falta.length) return { status: 400, corpo: { erro: admin ? `Termo incompleto: configure ${falta.join(", ")}.` : "Em breve." } };
+    if (!iaAtiva() && !admin) return { status: 400, corpo: { erro: "Em breve." } };
+  }
   const [{ aberto }] = await sql`select exists (select 1 from pedidos where email = ${u.email} and status = any(${ABERTOS})) as aberto`;
   const pode = podePedir(b.tipo, u, agora, aberto);
   if (pode.erro) return { status: 400, corpo: { erro: pode.erro } };
   let respostas = null, fotos = null, aceite = null;
   if (b.tipo !== "mensalidade") { // inicial e novo_treino têm formulário de saúde: termo, fotos e respostas de novo
-    const a = registrarAceite(b.termo, headers || {}, agora);
+    const a = registrarAceite(b.termo, b.termoHash, headers || {}, agora);
     if (a.erro) return { status: 400, corpo: { erro: a.erro } };
     const f = limparFotos(b.fotos);
     if (f.erro) return { status: 400, corpo: { erro: f.erro } };

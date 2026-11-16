@@ -4,6 +4,7 @@
 import { DIA, escaparLike, limpar, validarPlano } from "./_dados.js";
 import { NOMES_FOTOS, lerPdf } from "./_treino.js";
 import { PARQ, limparPedidos } from "./_pedido.js";
+import { termoFaltando } from "./_termo.js";
 import { ABERTOS, PRECOS, efeitoDoPagamento } from "./_precos.js";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
@@ -50,7 +51,8 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
       from pedidos`;
     return ok({ usuarios: r.usuarios, novos7d: r.novos7d, comTreino: r.com_treino, comAcesso: r.com_acesso,
       checkinsHoje: r.checkins_hoje, checkinsSemana: r.checkins_semana, cadastroAntes: r.cadastro_antes || "",
-      aguardando: p.aguardando, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d });
+      aguardando: p.aguardando, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d,
+      iaLigada: process.env.TREINO_IA_ATIVO === "1", termoFaltando: termoFaltando() });
   }
 
   if (b.op === "usuarios") {

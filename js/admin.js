@@ -99,7 +99,11 @@
     if (!resumo) { el.innerHTML = estado("Carregando resumo…"); return; }
     if (resumo.erro) { el.innerHTML = estado(resumo.erro, "resumo"); return; }
     const c = (n, t) => `<div class="stat"><b>${n}</b><span>${t}</span></div>`;
-    el.innerHTML = `<div class="adm-cards">
+    const falta = resumo.termoFaltando || [];
+    const aviso = falta.length
+      ? `<p class="adm-erro" role="note"><b>Treino com IA bloqueado${resumo.iaLigada ? "" : " (e desligado)"}:</b> o termo precisa das variáveis ${esc(falta.join(", "))} na Vercel.</p>`
+      : resumo.iaLigada ? "" : `<p class="muted adm-aviso-ia">Treino com IA desligado para os usuários (TREINO_IA_ATIVO). Você, como admin, pode pedir para testar.</p>`;
+    el.innerHTML = aviso + `<div class="adm-cards">
       ${c(resumo.usuarios, "usuários")}${c(resumo.novos7d, "novos em 7 dias")}${c(resumo.comTreino, "com treino")}
       ${c(resumo.comAcesso, "com acesso liberado")}${c(resumo.checkinsHoje, "check-ins hoje")}${c(resumo.checkinsSemana, "check-ins na semana")}
       ${c(resumo.aguardando, "pedidos aguardando pagamento")}${c(reais(resumo.receitaMes), "receita do mês")}${c(resumo.vencendo7d, "acessos vencem em 7 dias")}
@@ -524,7 +528,11 @@
         ${p.erro ? `<p class="adm-erro" role="note"><b>Último erro:</b> ${esc(p.erro)}</p>` : ""}
         ${ac ? `<div class="row"><span>Termo aceito: versão ${esc(ac.versao)} em ${esc(quando(ac.aceito_em))}</span><button class="btn-sec" data-ped-termo="${esc(ac.versao)}">Ver texto</button></div>
           <p class="muted">IP ${esc(ac.ip || "—")} · ${esc(ac.user_agent || "—")}</p>
-          ${termoVisto ? `<div class="ped-termo" tabindex="0" role="region" aria-label="Texto do termo, versão ${esc(termoVisto.versao)}">${esc(termoVisto.texto)}</div>` : ""}` : ""}
+          ${ac.hash ? `<p class="muted">Hash do texto aceito: ${esc(ac.hash.slice(0, 16))}…</p>` : ""}
+          ${termoVisto ? `<p class="${termoVisto.hash === ac.hash ? "muted" : "adm-erro"}">${termoVisto.hash === ac.hash
+            ? "O texto abaixo é exatamente o que a pessoa aceitou (mesmo hash)."
+            : "Atenção: o texto atual é diferente do aceito (hash diferente). As variáveis do termo mudaram depois do aceite."}</p>
+          <div class="ped-termo" tabindex="0" role="region" aria-label="Texto do termo, versão ${esc(termoVisto.versao)}">${esc(termoVisto.texto)}</div>` : ""}` : ""}
         ${botoes ? `<div class="adm-botoes">${botoes}</div>` : ""}
       </div>
       ${r ? respostasHtml(p, r) : ""}

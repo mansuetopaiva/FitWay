@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { criarPedido } from "../api/_pedido.js";
 import { gerarSeDevido } from "../api/_ia.js";
-import { TERMO } from "../api/_termo.js";
-import { planoIA } from "./_fixtures.js";
+import { TERMO_VERSAO, montarTermo } from "../api/_termo.js";
+import { planoIA, comTermo } from "./_fixtures.js";
+comTermo();
 
 process.env.TREINO_IA_ATIVO = "1"; // os testes de pedido rodam com a função ligada; o caso desligado tem teste próprio
 const AGORA = new Date("2026-11-15T12:00:00Z");
@@ -31,26 +32,26 @@ test("pedido_criar: PAR-Q com Sim sem liberação é recusado no servidor, mesmo
   for (let i = 0; i < 7; i++) {
     const r = respostas(); r.parq[i] = true; r.liberacao = false;
     const { sql, chamadas } = sqlFalso(semAberto);
-    const x = await criarPedido(sql, novo, { tipo: "inicial", respostas: r, termo: TERMO.versao }, H, AGORA);
+    const x = await criarPedido(sql, novo, { tipo: "inicial", respostas: r, termo: TERMO_VERSAO, termoHash: montarTermo().hash }, H, AGORA);
     assert.equal(x.status, 400, `pergunta ${i + 1}`);
     assert.match(x.corpo.erro, /liberação médica/);
     assert.equal(inserido(chamadas), undefined, "nada gravado");
   }
 });
 
-test("pedido_criar: sem aceite ou com versão antiga do termo é recusado", async () => {
-  for (const termo of [undefined, "", "2025-01-01", true]) {
+test("pedido_criar: sem aceite, com versão antiga ou com hash de outro texto do termo é recusado", async () => {
+  for (const [termo, termoHash] of [[undefined, montarTermo().hash], ["", montarTermo().hash], ["2025-01-01", montarTermo().hash], [true, montarTermo().hash], [TERMO_VERSAO, "f".repeat(64)], [TERMO_VERSAO, undefined]]) {
     const { sql, chamadas } = sqlFalso(semAberto);
-    const x = await criarPedido(sql, novo, { tipo: "inicial", respostas: respostas(), termo }, H, AGORA);
+    const x = await criarPedido(sql, novo, { tipo: "inicial", respostas: respostas(), termo, termoHash }, H, AGORA);
     assert.equal(x.status, 400, String(termo));
-    assert.match(x.corpo.erro, /Termo/);
+    assert.match(x.corpo.erro, /[Tt]ermo/);
     assert.equal(inserido(chamadas), undefined);
   }
 });
 
 test("pedido_criar: grava valor do servidor, aceite com a hora do servidor e respostas limpas", async () => {
   const { sql, chamadas } = sqlFalso(semAberto);
-  const b = { tipo: "inicial", valor: 1, respostas: respostas(), termo: TERMO.versao, aceito_em: "2000-01-01T00:00:00Z",
+  const b = { tipo: "inicial", valor: 1, respostas: respostas(), termo: TERMO_VERSAO, termoHash: montarTermo().hash, aceito_em: "2000-01-01T00:00:00Z",
     fotos: { frente: "data:image/jpeg;base64,QUJD" } };
   b.respostas.consentimentos.fotos = true;
   const x = await criarPedido(sql, novo, b, H, AGORA);
@@ -58,7 +59,7 @@ test("pedido_criar: grava valor do servidor, aceite com a hora do servidor e res
   const [id, email, tipo, valor, resp, fotos, aceite] = inserido(chamadas).valores;
   assert.equal(typeof id, "string"); assert.ok(id.length >= 16);
   assert.deepEqual([email, tipo, valor], ["a@x.com", "inicial", 999]);
-  assert.deepEqual(JSON.parse(aceite), { versao: TERMO.versao, aceito_em: AGORA.toISOString(), ip: "203.0.113.7", user_agent: "teste" });
+  assert.deepEqual(JSON.parse(aceite), { versao: TERMO_VERSAO, hash: montarTermo().hash, aceito_em: AGORA.toISOString(), ip: "203.0.113.7", user_agent: "teste" });
   assert.equal(JSON.parse(resp).consentimentos.fotos, AGORA.toISOString());
   assert.deepEqual(JSON.parse(fotos), b.fotos);
   assert.equal(x.corpo.pedido.fotos, undefined);
@@ -73,17 +74,17 @@ test("pedido_criar: mensalidade não exige termo nem formulário; novo_treino ex
   s = sqlFalso(semAberto);
   assert.equal((await criarPedido(s.sql, comIA, { tipo: "novo_treino", respostas: respostas() }, H, AGORA)).status, 400, "sem termo");
   s = sqlFalso(semAberto);
-  const n = await criarPedido(s.sql, comIA, { tipo: "novo_treino", respostas: respostas(), termo: TERMO.versao }, H, AGORA);
+  const n = await criarPedido(s.sql, comIA, { tipo: "novo_treino", respostas: respostas(), termo: TERMO_VERSAO, termoHash: montarTermo().hash }, H, AGORA);
   assert.equal(n.status, 200);
   assert.equal(inserido(s.chamadas).valores[3], 499);
 });
 
 test("pedido_criar: pedido aberto (ou corrida barrada pelo índice) dá 400; regra de tipo vem antes do formulário", async () => {
   let s = sqlFalso((q) => (q.includes("select exists") ? [{ aberto: true }] : []));
-  assert.equal((await criarPedido(s.sql, novo, { tipo: "inicial", respostas: respostas(), termo: TERMO.versao }, H, AGORA)).status, 400);
+  assert.equal((await criarPedido(s.sql, novo, { tipo: "inicial", respostas: respostas(), termo: TERMO_VERSAO, termoHash: montarTermo().hash }, H, AGORA)).status, 400);
   assert.equal(inserido(s.chamadas), undefined);
   s = sqlFalso((q) => (q.includes("select exists") ? [{ aberto: false }] : [])); // insert on conflict do nothing → sem linha
-  assert.equal((await criarPedido(s.sql, novo, { tipo: "inicial", respostas: respostas(), termo: TERMO.versao }, H, AGORA)).status, 400);
+  assert.equal((await criarPedido(s.sql, novo, { tipo: "inicial", respostas: respostas(), termo: TERMO_VERSAO, termoHash: montarTermo().hash }, H, AGORA)).status, 400);
   s = sqlFalso(semAberto);
   assert.equal((await criarPedido(s.sql, novo, { tipo: "mensalidade" }, H, AGORA)).status, 400, "mensalidade sem plano de IA");
   assert.equal((await criarPedido(s.sql, novo, { tipo: "vitalicio" }, H, AGORA)).status, 400);
@@ -180,7 +181,7 @@ test("geração: o plano anterior entra no prompt só no novo_treino", async () 
 test("TREINO_IA_ATIVO: só \"1\" liga; desligado, inicial e novo_treino dão \"Em breve\" para usuário comum; mensalidade e admin seguem", async () => {
   const antes = process.env.TREINO_IA_ATIVO;
   const comIA = { email: "a@x.com", acesso_ate: new Date(+AGORA + 864e5), dados: { plano: { origem: "ia", criado: new Date(AGORA - 60 * 864e5).toISOString(), treinos: [] } } };
-  const corpo = (tipo) => ({ tipo, respostas: respostas(), termo: TERMO.versao });
+  const corpo = (tipo) => ({ tipo, respostas: respostas(), termo: TERMO_VERSAO, termoHash: montarTermo().hash });
   try {
     for (const v of [undefined, "", "0", "true", " 1", "1 ", "sim"]) {
       if (v === undefined) delete process.env.TREINO_IA_ATIVO; else process.env.TREINO_IA_ATIVO = v;
@@ -202,4 +203,22 @@ test("TREINO_IA_ATIVO: só \"1\" liga; desligado, inicial e novo_treino dão \"E
   } finally {
     if (antes === undefined) delete process.env.TREINO_IA_ATIVO; else process.env.TREINO_IA_ATIVO = antes;
   }
+});
+
+test("variável do termo faltando: pedido inicial e novo treino bloqueados mesmo com TREINO_IA_ATIVO=1 (usuário vê \"Em breve.\", admin vê qual falta); mensalidade segue", async () => {
+  try {
+    process.env.TERMO_EMAIL = "";
+    const corpo = { tipo: "inicial", respostas: respostas(), termo: TERMO_VERSAO, termoHash: montarTermo().hash };
+    let s = sqlFalso(semAberto);
+    let r = await criarPedido(s.sql, novo, corpo, H, AGORA);
+    assert.deepEqual([r.status, r.corpo.erro, s.chamadas.length], [400, "Em breve.", 0]);
+    s = sqlFalso(semAberto);
+    r = await criarPedido(s.sql, novo, corpo, H, AGORA, { admin: true });
+    assert.equal(r.status, 400);
+    assert.match(r.corpo.erro, /TERMO_EMAIL/, "admin sabe qual variável falta");
+    assert.equal(s.chamadas.length, 0);
+    const comIA = { email: "a@x.com", acesso_ate: new Date(+AGORA + 864e5), dados: { plano: { origem: "ia", criado: new Date(AGORA - 60 * 864e5).toISOString(), treinos: [] } } };
+    s = sqlFalso(semAberto);
+    assert.equal((await criarPedido(s.sql, comIA, { tipo: "mensalidade" }, H, AGORA)).status, 200, "renovar não depende do termo");
+  } finally { comTermo(); }
 });

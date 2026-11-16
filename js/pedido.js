@@ -163,7 +163,8 @@
     const respostas = { ...f, consentimentos: { dados: f.consentimentos.dados, fotos: !!Object.keys(fotos).length && f.consentimentos.fotos } };
     delete respostas.termo;
     try {
-      await api("pedido_criar", { tipo, respostas, fotos: Object.keys(fotos).length ? fotos : undefined, termo: termo.versao });
+      // O hash prova que o aceite foi deste texto exato.
+      await api("pedido_criar", { tipo, respostas, fotos: Object.keys(fotos).length ? fotos : undefined, termo: termo.versao, termoHash: termo.hash });
     } catch (e) {
       enviando = false;
       if (location.hash.split("/")[1] !== "pedido") return toast(e.message);

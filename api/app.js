@@ -8,7 +8,7 @@ import { DIA, juntar, limpar } from "./_dados.js";
 import { gerarSeDevido } from "./_ia.js";
 import { OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_pedido.js";
 import { ABERTOS, PRECOS, iaAtiva, planoVisivel, podePedir } from "./_precos.js";
-import { TERMO, termoDaVersao } from "./_termo.js";
+import { TERMO_VERSAO, montarTermo, termoFaltando } from "./_termo.js";
 import { lerPdf } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
@@ -142,7 +142,7 @@ export default async function handler(req, res) {
         const s = await usuarioDaSessao(req);
         if (!s || !ehAdmin(s.email)) return res.status(400).json({ erro: "Em breve." });
       }
-      const t = b.versao === undefined ? TERMO : termoDaVersao(b.versao);
+      const t = montarTermo(b.versao === undefined ? TERMO_VERSAO : b.versao);
       return t ? res.json(t) : res.status(404).json({ erro: "Versão do termo não encontrada." });
     }
 
@@ -214,7 +214,7 @@ export default async function handler(req, res) {
       }
       const agora = new Date(), aberto = !!pedido && ABERTOS.includes(pedido.status), plano = x.dados && x.dados.plano;
       // Função desligada (TREINO_IA_ATIVO): usuário comum não vê pedido inicial nem novo treino; renovar continua.
-      const ativo = iaAtiva() || ehAdmin(u.email);
+      const ativo = iaAtiva() || (ehAdmin(u.email) && !termoFaltando().length);
       const pode = Object.fromEntries(Object.keys(PRECOS).map((t) => [t, (ativo || t === "mensalidade") && !podePedir(t, x, agora, aberto).erro]));
       // novo_treino: o formulário vem com as últimas respostas; os consentimentos precisam ser marcados de novo.
       let ultimas = null;
@@ -224,7 +224,7 @@ export default async function handler(req, res) {
       }
       return res.json({
         pedido, ativo, acessoAte: x.acesso_ate, temPlanoIA: !!plano && plano.origem === "ia", planoCriado: (plano && plano.criado) || null,
-        pode, precos: PRECOS, termo: TERMO.versao, ultimas, plano: visivel(x, x.dados).plano || null,
+        pode, precos: PRECOS, termo: TERMO_VERSAO, ultimas, plano: visivel(x, x.dados).plano || null,
         ...(b.form === true ? { form: { parq: PARQ, opcoes: OPCOES, textos: TEXTOS } } : {}),
       });
     }

@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { PARQ, limparRespostas, limparFotos, limparPedidos } from "../api/_pedido.js";
-import { TERMO, TERMOS, termoDaVersao, registrarAceite } from "../api/_termo.js";
+import { CAMPOS, TERMOS, TERMO_VERSAO, montarTermo, registrarAceite, termoFaltando } from "../api/_termo.js";
+import { ENV_TERMO, comTermo } from "./_fixtures.js";
+comTermo();
 
 const AGORA = new Date("2026-11-15T12:00:00Z");
 const base = () => ({
@@ -93,28 +96,63 @@ test("limparFotos: só JPEG base64, 4 chaves conhecidas, até 300 KB cada", () =
   assert.ok(limparFotos([jpeg(8)]).erro);
 });
 
-test("termo: versão atual, versões antigas consultáveis", () => {
-  assert.equal(TERMO.versao, "2026-11-16");
-  assert.equal(TERMOS[0], TERMO);
-  assert.match(TERMO.texto, /^TERMO DE RESPONSABILIDADE E USO/);
-  assert.equal(termoDaVersao("2026-11-16"), TERMO);
-  assert.equal(termoDaVersao("1999-01-01"), null);
-  assert.equal(termoDaVersao({}), null);
+test("termo: marcadores trocados pelas variáveis, nenhum sobrando no texto mostrado; versão desconhecida dá null", () => {
+  assert.deepEqual(TERMOS.map((t) => t.versao), ["2026-11-16"], "só a versão atual (a 2026-11-15 nunca foi usada)");
+  assert.equal(TERMO_VERSAO, "2026-11-16");
+  const m = TERMOS[0].modelo;
+  for (const k of Object.keys(CAMPOS)) assert.ok(m.includes(`{{${k}}}`), `modelo tem {{${k}}}`);
+  assert.doesNotMatch(m, /\[[^\]]*\]/, "nenhum campo entre colchetes");
+  const t = montarTermo();
+  assert.match(t.texto, /^TERMO DE RESPONSABILIDADE E USO/);
+  assert.doesNotMatch(t.texto, /\{\{|\}\}/, "nenhum marcador sobrando");
+  assert.match(t.texto, /oferecido por Fulana de Tal, 00\.000\.000\/0001-00, monta/);
+  assert.match(t.texto, /pelo email contato@exemplo\.com\./);
+  assert.match(t.texto, /comarca de Cidade\/UF, ressalvado/);
+  assert.match(t.texto, /4\.3\. .*aguardando pagamento por mais de 30 dias.*cancelado.*fotos são apagadas/);
+  assert.equal(montarTermo("2026-11-15"), null);
+  assert.equal(montarTermo({}), null);
 });
 
-test("aceite do termo: recusado sem aceite ou com versão antiga; grava a hora do servidor, IP e navegador", () => {
+test("termo: variável faltando aparece na lista e o marcador fica visível; valor com $& não vira padrão de troca", () => {
+  try {
+    assert.deepEqual(termoFaltando(), []);
+    process.env.TERMO_DOCUMENTO = "  ";
+    delete process.env.TERMO_FORO;
+    assert.deepEqual(termoFaltando(), ["TERMO_DOCUMENTO", "TERMO_FORO"]);
+    assert.match(montarTermo().texto, /\{\{documento\}\}.*\{\{foro\}\}/s);
+    process.env.TERMO_DOCUMENTO = "$& $1"; process.env.TERMO_FORO = "X";
+    assert.match(montarTermo().texto, /oferecido por Fulana de Tal, \$& \$1, monta/);
+  } finally { comTermo(); }
+});
+
+test("hash: SHA-256 do texto exato mostrado; muda quando uma variável muda", () => {
+  const t = montarTermo();
+  assert.match(t.hash, /^[0-9a-f]{64}$/);
+  assert.equal(t.hash, createHash("sha256").update(t.texto, "utf8").digest("hex"));
+  try {
+    process.env.TERMO_EMAIL = "outro@exemplo.com";
+    assert.notEqual(montarTermo().hash, t.hash);
+  } finally { comTermo(); }
+});
+
+test("aceite do termo: recusado sem aceite, com versão antiga, com hash diferente ou com variável faltando; grava hash, hora do servidor, IP e navegador", () => {
   const h = { "x-forwarded-for": "203.0.113.7, 10.0.0.1", "user-agent": "Mozilla/5.0 " + "x".repeat(300) };
-  assert.ok(registrarAceite(undefined, h, AGORA).erro, "sem aceite");
-  assert.ok(registrarAceite("", h, AGORA).erro);
-  assert.ok(registrarAceite("2025-01-01", h, AGORA).erro, "versão antiga ou inventada");
-  assert.ok(registrarAceite({ versao: TERMO.versao }, h, AGORA).erro, "objeto não vale");
-  const { aceite } = registrarAceite(TERMO.versao, h, AGORA);
-  assert.deepEqual(Object.keys(aceite).sort(), ["aceito_em", "ip", "user_agent", "versao"]);
-  assert.equal(aceite.versao, TERMO.versao);
+  const { hash } = montarTermo();
+  assert.ok(registrarAceite(undefined, hash, h, AGORA).erro, "sem aceite");
+  assert.ok(registrarAceite("", hash, h, AGORA).erro);
+  assert.ok(registrarAceite("2026-11-15", hash, h, AGORA).erro, "versão antiga");
+  assert.ok(registrarAceite({ versao: TERMO_VERSAO }, hash, h, AGORA).erro, "objeto não vale");
+  assert.match(registrarAceite(TERMO_VERSAO, "0".repeat(64), h, AGORA).erro, /atualizado/, "hash de outro texto");
+  assert.ok(registrarAceite(TERMO_VERSAO, undefined, h, AGORA).erro, "sem hash");
+  try { delete process.env.TERMO_RESPONSAVEL; assert.ok(registrarAceite(TERMO_VERSAO, hash, h, AGORA).erro, "termo incompleto"); } finally { comTermo(); }
+  const { aceite } = registrarAceite(TERMO_VERSAO, hash, h, AGORA);
+  assert.deepEqual(Object.keys(aceite).sort(), ["aceito_em", "hash", "ip", "user_agent", "versao"]);
+  assert.equal(aceite.hash, hash);
   assert.equal(aceite.aceito_em, AGORA.toISOString(), "hora do servidor");
   assert.equal(aceite.ip, "203.0.113.7");
   assert.equal(aceite.user_agent.length, 200);
-  assert.deepEqual(registrarAceite(TERMO.versao, {}, AGORA).aceite.ip, "");
+  assert.equal(registrarAceite(TERMO_VERSAO, hash, { "x-real-ip": "198.51.100.1", "x-forwarded-for": "1.1.1.1" }, AGORA).aceite.ip, "198.51.100.1");
+  assert.equal(registrarAceite(TERMO_VERSAO, hash, {}, AGORA).aceite.ip, "");
 });
 
 test("limparPedidos: fotos de 90 dias e pedido aguardando pagamento há mais de 30 dias cancelado e sem fotos", async () => {
@@ -131,15 +169,4 @@ test("limparPedidos: fotos de 90 dias e pedido aguardando pagamento há mais de 
   chamadas.length = 0;
   await limparPedidos(sql, null);
   for (const c of chamadas) assert.deepEqual(c.valores, [null, null], "admin: todos");
-});
-
-test("termo 2026-11-16: item 4.3 fala do cancelamento em 30 dias; a versão 2026-11-15 continua consultável", () => {
-  assert.equal(TERMO.versao, "2026-11-16");
-  assert.match(TERMO.texto, /4\.3\. .*aguardando pagamento por mais de 30 dias.*cancelado.*fotos são apagadas/);
-  const antiga = termoDaVersao("2026-11-15");
-  assert.ok(antiga && antiga.texto !== TERMO.texto);
-  assert.doesNotMatch(antiga.texto, /30 dias, ele é cancelado/);
-  assert.deepEqual(TERMOS.map((t) => t.versao), ["2026-11-16", "2026-11-15"]);
-  for (const t of TERMOS) assert.doesNotMatch(t.texto, /\[[^\]]*\]/, "nenhum campo entre colchetes");
-  assert.ok(registrarAceite("2026-11-15", {}, AGORA).erro, "aceite da versão anterior é recusado");
 });

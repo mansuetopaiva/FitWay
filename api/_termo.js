@@ -1,7 +1,12 @@
-// Termo de Responsabilidade e Uso. A versão atual é a primeira da lista; as antigas ficam aqui para o texto
+// Termo de Responsabilidade e Uso. A versão atual é a primeira da lista; versões antigas ficam aqui para o texto
 // aceito em cada pedido sempre poder ser consultado. Ao mudar o texto, acrescente uma versão nova no topo.
+// Os dados pessoais do responsável NÃO ficam no código (o repositório é público): os marcadores {{...}} são
+// trocados na hora pelas variáveis de ambiente de CAMPOS. Faltando alguma, o treino com IA não pode ser ligado.
+import { createHash } from "node:crypto";
 
-const V_2026_11_15 = `TERMO DE RESPONSABILIDADE E USO — TREINO PERSONALIZADO FITWAY
+export const CAMPOS = { responsavel: "TERMO_RESPONSAVEL", documento: "TERMO_DOCUMENTO", email_contato: "TERMO_EMAIL", foro: "TERMO_FORO" };
+
+const V_2026_11_16 = `TERMO DE RESPONSABILIDADE E USO — TREINO PERSONALIZADO FITWAY
 
 Ao marcar "Li e aceito", eu declaro que li, entendi e concordo com o que segue.
 
@@ -25,7 +30,7 @@ Ao marcar "Li e aceito", eu declaro que li, entendi e concordo com o que segue.
 4. Meus dados e fotos
 4.1. Autorizo o uso dos meus dados, incluindo os de saúde e as fotos que eu enviar, apenas para montar e ajustar meu plano de treino.
 4.2. Para isso, essas informações são enviadas ao serviço de inteligência artificial usado na montagem do plano. Elas não são vendidas nem usadas para publicidade.
-4.3. As fotos são apagadas 90 dias depois que o plano fica pronto. As demais respostas ficam guardadas enquanto eu tiver conta, para eu poder pedir um novo treino sem preencher tudo de novo.
+4.3. As fotos são apagadas 90 dias depois que o plano fica pronto. Se o pedido ficar aguardando pagamento por mais de 30 dias, ele é cancelado e as fotos são apagadas. As demais respostas ficam guardadas enquanto eu tiver conta, para eu poder pedir um novo treino sem preencher tudo de novo.
 4.4. Posso pedir a qualquer momento acesso, correção ou exclusão dos meus dados pelo email {{email_contato}}.
 
 5. Pagamento e acesso
@@ -37,20 +42,28 @@ Ao marcar "Li e aceito", eu declaro que li, entendi e concordo com o que segue.
 6.1. Este termo pode ser atualizado. Quando isso acontecer, vou precisar aceitar a nova versão no próximo pedido.
 6.2. Fica eleito o foro da comarca de {{foro}}, ressalvado o meu direito, como consumidor, de propor ação no foro do meu domicílio.`;
 
-// 2026-11-16: o item 4.3 passa a dizer que o pedido aguardando pagamento há mais de 30 dias é cancelado e perde as fotos.
-const V_2026_11_16 = V_2026_11_15.replace(
-  "4.3. As fotos são apagadas 90 dias depois que o plano fica pronto. As demais respostas ficam guardadas enquanto eu tiver conta, para eu poder pedir um novo treino sem preencher tudo de novo.",
-  "4.3. As fotos são apagadas 90 dias depois que o plano fica pronto. Se o pedido ficar aguardando pagamento por mais de 30 dias, ele é cancelado e as fotos são apagadas. As demais respostas ficam guardadas enquanto eu tiver conta, para eu poder pedir um novo treino sem preencher tudo de novo.");
+export const TERMOS = [{ versao: "2026-11-16", modelo: V_2026_11_16 }];
+export const TERMO_VERSAO = TERMOS[0].versao;
 
-export const TERMOS = [{ versao: "2026-11-16", texto: V_2026_11_16 }, { versao: "2026-11-15", texto: V_2026_11_15 }];
-export const TERMO = TERMOS[0];
+const valor = (k) => (process.env[CAMPOS[k]] || "").trim();
+// Variáveis do termo que estão vazias (lidas a cada chamada, como ADMIN_EMAILS).
+export const termoFaltando = () => Object.keys(CAMPOS).filter((k) => !valor(k)).map((k) => CAMPOS[k]);
 
-export const termoDaVersao = (v) => TERMOS.find((t) => t.versao === v) || null;
+// Texto pronto para mostrar e o SHA-256 dele. Uma passada só; marcador sem variável fica como está (o admin vê o que falta).
+export function montarTermo(versao = TERMO_VERSAO) {
+  const t = TERMOS.find((x) => x.versao === versao);
+  if (!t) return null;
+  const texto = t.modelo.replace(/\{\{(\w+)\}\}/g, (m, k) => (Object.hasOwn(CAMPOS, k) && valor(k) ? valor(k) : m));
+  return { versao: t.versao, texto, hash: createHash("sha256").update(texto, "utf8").digest("hex") };
+}
 
-// Só vale o aceite da versão atual. A hora é a do servidor; IP e navegador vêm dos cabeçalhos da requisição
-// (na Vercel, x-real-ip e x-forwarded-for são preenchidos pela própria Vercel).
-export function registrarAceite(versao, headers, agora) {
-  if (versao !== TERMO.versao) return { erro: "Aceite a versão atual do Termo de Responsabilidade e Uso para enviar o pedido." };
+// Só vale o aceite da versão atual, com o termo completo e o hash do texto que o app mostrou (vem da ação "termo").
+// Assim o aceite prova o texto exato, mesmo que as variáveis mudem depois. A hora é a do servidor; IP e navegador
+// vêm dos cabeçalhos (na Vercel, x-real-ip e x-forwarded-for são preenchidos pela própria Vercel).
+export function registrarAceite(versao, hash, headers, agora) {
+  const atual = montarTermo();
+  if (versao !== TERMO_VERSAO || termoFaltando().length) return { erro: "Aceite a versão atual do Termo de Responsabilidade e Uso para enviar o pedido." };
+  if (hash !== atual.hash) return { erro: "O termo foi atualizado. Leia de novo e aceite para enviar o pedido." };
   const h = (k) => (typeof headers[k] === "string" ? headers[k] : "");
-  return { aceite: { versao, aceito_em: agora.toISOString(), ip: (h("x-real-ip") || h("x-forwarded-for").split(",")[0]).trim().slice(0, 64), user_agent: h("user-agent").slice(0, 200) } };
+  return { aceite: { versao, hash, aceito_em: agora.toISOString(), ip: (h("x-real-ip") || h("x-forwarded-for").split(",")[0]).trim().slice(0, 64), user_agent: h("user-agent").slice(0, 200) } };
 }

@@ -1,7 +1,9 @@
 // api/app.js de verdade, com o banco simulado (precisa de --experimental-test-module-mocks, já no "npm test").
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import { TERMO } from "../api/_termo.js";
+import { TERMO_VERSAO, montarTermo } from "../api/_termo.js";
+import { comTermo } from "./_fixtures.js";
+comTermo();
 
 process.env.TREINO_IA_ATIVO = "1";
 let usuario, responder = () => [];
@@ -71,7 +73,7 @@ test("pedido_criar pelo handler: PAR-Q com Sim sem liberação é recusado com 4
   chamadas.length = 0;
   const respostas = { objetivo: "Definir", nivel: "Nunca treinei", idade: 40, sexo: "Masculino", altura: 180, peso: 90, dias: 4, minutos: 45,
     parq: [true, false, false, false, false, false, false], liberacao: false, consentimentos: { dados: true } };
-  const r = await chamar({ acao: "pedido_criar", tipo: "inicial", respostas, termo: TERMO.versao });
+  const r = await chamar({ acao: "pedido_criar", tipo: "inicial", respostas, termo: TERMO_VERSAO, termoHash: montarTermo().hash });
   assert.equal(r.status, 400);
   assert.match(r.corpo.erro, /liberação médica/);
   assert.equal(chamadas.some((c) => c.q.startsWith("insert into pedidos")), false);
@@ -79,8 +81,8 @@ test("pedido_criar pelo handler: PAR-Q com Sim sem liberação é recusado com 4
 
 test("termo: atual, versão existente e 404 para versão desconhecida, sem precisar de sessão", async () => {
   usuario = null;
-  assert.equal((await chamar({ acao: "termo" })).corpo.versao, TERMO.versao);
-  assert.equal((await chamar({ acao: "termo", versao: TERMO.versao })).corpo.texto, TERMO.texto);
+  assert.deepEqual((await chamar({ acao: "termo" })).corpo, montarTermo(), "texto montado e hash");
+  assert.equal((await chamar({ acao: "termo", versao: TERMO_VERSAO })).corpo.texto, montarTermo().texto);
   assert.equal((await chamar({ acao: "termo", versao: "1999-01-01" })).status, 404);
   assert.equal((await chamar({ acao: "pedido_status" })).status, 401);
 });
@@ -113,7 +115,7 @@ test("termo com a função desligada: \"Em breve.\" para visitante e usuário co
   delete process.env.TREINO_IA_ATIVO;
   try {
     usuario = null;
-    for (const b of [{ acao: "termo" }, { acao: "termo", versao: TERMO.versao }]) {
+    for (const b of [{ acao: "termo" }, { acao: "termo", versao: TERMO_VERSAO }]) {
       const r = await chamar(b);
       assert.deepEqual([r.status, r.corpo.erro, r.corpo.texto], [400, "Em breve.", undefined], "visitante");
     }
@@ -121,12 +123,33 @@ test("termo com a função desligada: \"Em breve.\" para visitante e usuário co
     let r = await chamar({ acao: "termo" });
     assert.deepEqual([r.status, r.corpo.texto], [400, undefined], "usuário comum");
     process.env.ADMIN_EMAILS = "c@x.com";
-    r = await chamar({ acao: "termo", versao: TERMO.versao });
-    assert.equal(r.corpo.texto, TERMO.texto, "admin lê para conferir o aceite");
+    r = await chamar({ acao: "termo", versao: TERMO_VERSAO });
+    assert.equal(r.corpo.texto, montarTermo().texto, "admin lê para conferir o aceite");
   } finally {
     process.env.TREINO_IA_ATIVO = "1";
     delete process.env.ADMIN_EMAILS;
   }
   usuario = null;
-  assert.equal((await chamar({ acao: "termo" })).corpo.versao, TERMO.versao, "ligada: público");
+  assert.equal((await chamar({ acao: "termo" })).corpo.versao, TERMO_VERSAO, "ligada: público");
+});
+
+test("variável do termo faltando: TREINO_IA_ATIVO=1 não liga; termo e pedido \"Em breve.\" para usuário; admin vê o aviso no resumo", async () => {
+  try {
+    delete process.env.TERMO_RESPONSAVEL;
+    usuario = { email: "d@x.com", nome: "Davi", dados: {}, acesso_ate: null };
+    responder = () => [];
+    const st = (await chamar({ acao: "pedido_status" })).corpo;
+    assert.deepEqual([st.ativo, st.pode.inicial], [false, false]);
+    assert.equal((await chamar({ acao: "termo" })).corpo.erro, "Em breve.");
+    assert.equal((await chamar({ acao: "pedido_criar", tipo: "inicial" })).corpo.erro, "Em breve.");
+    process.env.ADMIN_EMAILS = "d@x.com";
+    responder = (q) => (q.includes("as usuarios") ? [{ usuarios: 1 }] : q.includes("as aguardando") ? [{ aguardando: 0, receita_mes: 0, vencendo7d: 0 }] : []);
+    const rs = (await chamar({ acao: "admin", op: "resumo" })).corpo;
+    assert.deepEqual(rs.termoFaltando, ["TERMO_RESPONSAVEL"]);
+    assert.equal(rs.iaLigada, true);
+    assert.deepEqual([(await chamar({ acao: "pedido_status" })).corpo.pode.inicial], [false], "nem o admin pede com o termo incompleto");
+  } finally {
+    comTermo();
+    delete process.env.ADMIN_EMAILS;
+  }
 });

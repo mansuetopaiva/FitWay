@@ -127,6 +127,24 @@ Onde editar:
 - o termo: `api/_termo.js`. Para mudar o texto, acrescente uma versão nova no topo da lista; quem já aceitou a antiga continua com ela registrada,
   e o próximo pedido exige o aceite da nova.
 
+### Dados do responsável no termo
+
+O repositório é público, então nome, documento, email e foro do responsável **não ficam no código**. O termo tem os marcadores
+`{{responsavel}}`, `{{documento}}`, `{{email_contato}}` e `{{foro}}`, trocados na hora por estas variáveis de ambiente:
+
+| Variável | Marcador | Exemplo |
+|---|---|---|
+| `TERMO_RESPONSAVEL` | `{{responsavel}}` | nome do responsável ou da empresa |
+| `TERMO_DOCUMENTO` | `{{documento}}` | CPF ou CNPJ |
+| `TERMO_EMAIL` | `{{email_contato}}` | email para pedidos de acesso, correção ou exclusão de dados |
+| `TERMO_FORO` | `{{foro}}` | cidade/UF do foro |
+
+- Cadastre as quatro na Vercel (Production e Development) e, para testar no computador, no `.env.local` (fora do git).
+  O `vercel env pull` reescreve o `.env.local`: cadastre na Vercel antes, para não perdê-las.
+- Se alguma estiver vazia, o treino com IA fica bloqueado mesmo com `TREINO_IA_ATIVO=1`: o usuário vê "Em breve." e o painel do admin
+  mostra qual variável falta.
+- O aceite grava o SHA-256 do texto exato mostrado. Se as variáveis mudarem depois, o painel avisa que o texto atual é diferente do aceito.
+
 Cada geração custa por volta de US$ 0,05 a 0,10. A geração roda dentro da consulta de status (do aluno ou do admin), sem fila nem cron;
 se falhar, o pedido tenta mais uma vez e, na segunda falha, fica como **Erro** para o admin clicar em **Gerar de novo**.
 

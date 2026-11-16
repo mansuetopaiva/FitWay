@@ -109,10 +109,12 @@ Etapas: Você, Rotina, Saúde, Fotos, Observações e Resumo. Os limites e opç�
   - reduzidas no aparelho a JPEG com lado maior de até 768 px e qualidade 0,8;
   - o servidor aceita só `data:image/jpeg;base64`, as 4 chaves e até 300 KB por foto (cerca de 1,2 MB no total, abaixo dos 4,5 MB da Vercel).
 - **Consentimentos:** o de fotos é obrigatório se houver foto; o de dados de saúde é obrigatório sempre (consentimento específico da LGPD para dado sensível). Ficam em `respostas.consentimentos`, com a hora do servidor.
-- **Termo de Responsabilidade e Uso** (`api/_termo.js`, `TERMO = { versao, texto }`, versões antigas na lista `TERMOS`):
+- **Termo de Responsabilidade e Uso** (`api/_termo.js`, lista `TERMOS = [{ versao, modelo }]`, a atual primeiro):
+  - os dados pessoais do responsável não ficam no código (repositório público): o modelo tem `{{responsavel}}`, `{{documento}}`, `{{email_contato}}` e `{{foro}}`, trocados por `TERMO_RESPONSAVEL`, `TERMO_DOCUMENTO`, `TERMO_EMAIL` e `TERMO_FORO`; com alguma vazia, o treino com IA fica bloqueado (usuário vê "Em breve.", o resumo do admin lista o que falta);
+  - a ação `termo` devolve `{ versao, texto, hash }` (SHA-256 do texto montado); o `pedido_criar` exige `termoHash` igual ao do texto atual, e o aceite grava esse hash;
   - o Resumo mostra o texto inteiro numa caixa com rolagem e a caixa obrigatória "Li e aceito…", que substitui a caixa sobre IA;
   - o app recebe o texto pela ação `termo` (`{ versao? }`, pública);
-  - `pedido_criar` recusa sem aceite ou com versão diferente da atual; grava `pedidos.aceite = { versao, aceito_em (hora do servidor), ip (1º valor de x-forwarded-for), user_agent (até 200) }`;
+  - `pedido_criar` recusa sem aceite ou com versão diferente da atual; grava `pedidos.aceite = { versao, hash, aceito_em (hora do servidor), ip (1º valor de x-forwarded-for), user_agent (até 200) }`;
   - mensalidade não precisa de aceite; novo_treino precisa;
   - o admin vê "Termo aceito: versão X em DD/MM/AAAA HH:MM" e abre o texto daquela versão; o Perfil tem o link para o texto atual.
 - **Prazos (`limparPedidos`, no `pedido_status` do próprio usuário e no resumo do admin, sem cron):**

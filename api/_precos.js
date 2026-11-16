@@ -1,10 +1,12 @@
 // Preços e regras de cobrança e acesso (puro, sem banco). O "_" no nome impede a Vercel de expor este arquivo como rota.
+import { termoFaltando } from "./_termo.js";
 
 export const PRECOS = { inicial: 999, mensalidade: 999, novo_treino: 499 }; // centavos
 export const ABERTOS = ["aguardando_pagamento", "pago", "gerando"];
-// Liga os pedidos de treino com IA (inicial e novo treino). Só "1" vale; qualquer outro valor deixa desligado.
-// Desligado, admin continua podendo pedir para testar; renovar e ver um treino de IA que já existe seguem normais.
-export const iaAtiva = () => process.env.TREINO_IA_ATIVO === "1";
+// Liga os pedidos de treino com IA (inicial e novo treino). Só "1" vale, e só com o termo completo (variáveis TERMO_*).
+// Desligado, admin continua podendo pedir para testar (se o termo estiver completo); renovar e ver um treino de IA
+// que já existe seguem normais.
+export const iaAtiva = () => process.env.TREINO_IA_ATIVO === "1" && !termoFaltando().length;
 const EFEITOS = { inicial: { dias: 30, gerar: true }, mensalidade: { dias: 30, gerar: false }, novo_treino: { dias: 0, gerar: true } };
 const OITO_SEMANAS = 56 * 864e5;
 
