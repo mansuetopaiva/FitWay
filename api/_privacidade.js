@@ -62,7 +62,11 @@ const V_2026_11_16_2 = V_2026_11_16
   .replace(/^(- Pedidos não pagos: .*)$/m, (m) => m + "\n- Imagens anexadas aos chamados: apagadas 90 dias depois que o chamado é encerrado. As mensagens ficam enquanto você tiver conta.")
   .replace("Respondemos em até 15 dias.", "Respondemos em até 15 dias. Pedidos sobre seus dados também podem ser feitos pelo suporte do app, no assunto Conta e dados.");
 
-export const PRIVACIDADES = [{ versao: "2026-11-16-2", modelo: V_2026_11_16_2 }, { versao: "2026-11-16", modelo: V_2026_11_16 }];
+// 2026-11-16-3: o Gmail, que envia os emails (troca de senha).
+const V_2026_11_16_3 = V_2026_11_16_2.replace(/^(- InfinitePay, .*)$/m, (m) => m +
+  "\n- Google (Gmail), usado para enviar os emails do FitWay, como o de troca de senha; recebe o seu email e o conteúdo da mensagem.");
+
+export const PRIVACIDADES = [{ versao: "2026-11-16-3", modelo: V_2026_11_16_3 }, { versao: "2026-11-16-2", modelo: V_2026_11_16_2 }, { versao: "2026-11-16", modelo: V_2026_11_16 }];
 export const PRIVACIDADE_VERSAO = PRIVACIDADES[0].versao;
 
 const env = (k) => (process.env[k] || "").trim();

@@ -5,6 +5,6 @@
 - [x] P3. `senha_pedir` e `senha_disponivel` (TDD): mensagem única, piso de tempo, limites, token com hash.
 - [x] P4. `senha_nova` (TDD): uso único, 30 min, apaga sessões, log, aviso.
 - [x] P5. `senha_alterar` no Perfil (TDD).
-- [ ] P6. Telas: "Esqueci a senha", `#/nova-senha/<token>` (limpa o endereço), "Trocar senha" no Perfil.
-- [ ] P7. Política `2026-11-16-3`, README (variáveis), PGlite + jsdom.
+- [x] P6. Telas: "Esqueci a senha", `#/nova-senha/<token>` (limpa o endereço), "Trocar senha" no Perfil.
+- [x] P7. Política `2026-11-16-3`, README (variáveis), PGlite + jsdom.
 - [ ] P8. 4 agentes (segurança focada em roubo de conta), correções, push.

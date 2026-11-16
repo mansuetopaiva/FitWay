@@ -43,10 +43,8 @@ test("termo 2026-11-16-2 aponta para a Política de privacidade no item 4; a ver
   assert.doesNotMatch(antiga, /Política de privacidade/);
 });
 
-test("política 2026-11-16-2 (suporte): é a atual e só acrescenta o 2.6, os anexos no 6 e o suporte no 7", () => {
-  const [nova, antiga] = PRIVACIDADES;
-  assert.equal(nova.versao, "2026-11-16-2"); assert.equal(PRIVACIDADE_VERSAO, "2026-11-16-2");
-  assert.equal(antiga.versao, "2026-11-16");
+test("política 2026-11-16-2 (suporte): só acrescenta o 2.6, os anexos no 6 e o suporte no 7", () => {
+  const nova = PRIVACIDADES.find((p) => p.versao === "2026-11-16-2"), antiga = PRIVACIDADES.find((p) => p.versao === "2026-11-16");
   const L26 = "2.6. Suporte: as mensagens e imagens que você enviar nos chamados.";
   const L6 = "- Imagens anexadas aos chamados: apagadas 90 dias depois que o chamado é encerrado. As mensagens ficam enquanto você tiver conta.";
   const L7 = " Pedidos sobre seus dados também podem ser feitos pelo suporte do app, no assunto Conta e dados.";
@@ -56,4 +54,13 @@ test("política 2026-11-16-2 (suporte): é a atual e só acrescenta o 2.6, os an
   assert.equal(nova.modelo.replace("\n" + L26, "").replace("\n" + L6, "").replace(L7, ""), antiga.modelo, "o resto é igual");
   comTermo();
   assert.ok(montarPrivacidade().texto.includes(L26));
+});
+
+test("política 2026-11-16-3 (email): é a atual e só acrescenta o Google (Gmail) no item 5", () => {
+  const [nova, antiga] = PRIVACIDADES;
+  assert.equal(nova.versao, "2026-11-16-3"); assert.equal(PRIVACIDADE_VERSAO, "2026-11-16-3"); assert.equal(antiga.versao, "2026-11-16-2");
+  const L = "- Google (Gmail), usado para enviar os emails do FitWay, como o de troca de senha; recebe o seu email e o conteúdo da mensagem.";
+  const item5 = nova.modelo.match(/\n5\. Com quem compartilhamos\n[\s\S]*?\n\n6\. /)[0];
+  assert.ok(item5.includes("\n" + L + "\n"));
+  assert.equal(nova.modelo.replace("\n" + L, ""), antiga.modelo, "o resto é igual");
 });

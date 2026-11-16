@@ -192,6 +192,22 @@ Variáveis na Vercel:
 Antes de liberar: habilitar o checkout externo nas configurações de checkout do InfinitePay e conferir, com um link real (criar link
 é grátis), o campo da URL na resposta de `/links` (pergunta P2 da spec).
 
+## Senha (esqueci a senha)
+
+Spec: [docs/senha.md](docs/senha.md). "Esqueci a senha" na tela de login manda um link de troca (vale 30 minutos, uma vez só) pelo
+Gmail do FitWay; trocar a senha encerra todas as sessões da conta e manda um email de aviso. No Perfil, **Trocar senha** pede a senha
+atual e desconecta os outros aparelhos.
+
+| Variável | Para quê |
+|---|---|
+| `SMTP_USER` | o Gmail do FitWay (remetente "FitWay <SMTP_USER>") |
+| `SMTP_SENHA_APP` | **senha de app** do Google para esse Gmail (exige verificação em duas etapas na conta). É segredo: só na Vercel e no `.env.local`, nunca no código |
+
+- Também usa `SITE_URL` (o link) e `TERMO_EMAIL` (o contato mostrado quando o envio está indisponível).
+- Sem `SMTP_USER`, `SMTP_SENHA_APP` ou `SITE_URL`, a tela mostra "A recuperação por email está indisponível. Escreva para …".
+- A resposta é sempre a mesma, exista a conta ou não, e leva sempre cerca de 2,5 s. Limites: 3 pedidos por email e 10 por IP por hora.
+- O Gmail comum envia até cerca de 500 emails por dia; acima disso, troque por um serviço de envio.
+
 ## Suporte
 
 Spec: [docs/suporte.md](docs/suporte.md). Vale para o app inteiro, mesmo com `TREINO_IA_ATIVO` desligado.
