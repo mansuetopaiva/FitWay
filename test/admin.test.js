@@ -178,7 +178,8 @@ test("sem ADMIN_EMAILS ou sem usuário ninguém é admin; lista de ops fixa", as
   // op nova precisa de ramo próprio: este teste obriga a revisar o despacho ao mudar a lista
   assert.deepEqual(OPS, ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
     "pedidos", "pedido", "pedido_verificar", "pedido_gerar_de_novo", "pedido_cancelar",
-    "pedido_estornar", "devolucao_marcar"]);
+    "pedido_estornar", "devolucao_marcar",
+    "suporte_lista", "suporte_chamado", "suporte_responder", "suporte_encerrar", "suporte_reabrir", "suporte_anexo", "usuario_excluir"]);
 });
 
 test("usuarios: a busca chega ao banco escapada", async () => {

@@ -7,10 +7,12 @@ import { PARQ, limparPedidos } from "./_pedido.js";
 import { termoFaltando } from "./_termo.js";
 import { ABERTOS, PRECOS, efeitoDoPagamento, tipoValido } from "./_precos.js";
 import { confirmarPagamento } from "./_pagamento.js";
+import { OPS_ADMIN as OPS_SUPORTE, acaoAdminSuporte, limparChamados } from "./_suporte.js";
+import { createHash } from "node:crypto";
 
 export const OPS = ["resumo", "usuarios", "usuario", "acesso", "plano_salvar", "plano_pdf", "plano_remover",
   "pedidos", "pedido", "pedido_verificar", "pedido_gerar_de_novo", "pedido_cancelar",
-  "pedido_estornar", "devolucao_marcar"];
+  "pedido_estornar", "devolucao_marcar", ...OPS_SUPORTE, "usuario_excluir"];
 // Estorno: o dinheiro o admin devolve no app do InfinitePay; aqui só se registra e se desfaz o efeito no app.
 const MOTIVOS = { desistencia: "Desistência em 7 dias", duplicado: "Pagamento duplicado", outro: "Outro" };
 const DIAS = Object.fromEntries(Object.keys(PRECOS.pix).map((t) => [t, efeitoDoPagamento(t).dias]));
@@ -59,6 +61,8 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         col_description('usuarios'::regclass, (select attnum from pg_attribute where attrelid = 'usuarios'::regclass and attname = 'criado')) as cadastro_antes
       from usuarios`;
     await limparPedidos(sql, null); // prazos de pedidos e fotos (sem cron: roda aqui e no pedido_status)
+    await limparChamados(sql, null);
+    const [ch] = await sql`select count(*)::int as n from chamados where status = 'aberto'`;
     const [p] = await sql`select count(*) filter (where status = 'aguardando_pagamento')::int as aguardando,
         coalesce(sum(valor) filter (where estornado_em is null and pago_em >= date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'), 0)::int as receita_mes,
         (select count(*) from usuarios where acesso_ate > now() and acesso_ate <= now() + interval '7 days')::int as vencendo7d
@@ -73,7 +77,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     return ok({ usuarios: r.usuarios, novos7d: r.novos7d, comTreino: r.com_treino, comAcesso: r.com_acesso,
       checkinsHoje: r.checkins_hoje, checkinsSemana: r.checkins_semana, cadastroAntes: r.cadastro_antes || "",
       aguardando: p.aguardando, cartaoSemPedido: semPedido, receitaMes: p.receita_mes, vencendo7d: p.vencendo7d,
-      iaLigada: process.env.TREINO_IA_ATIVO === "1", termoFaltando: termoFaltando() });
+      iaLigada: process.env.TREINO_IA_ATIVO === "1", termoFaltando: termoFaltando(), suporteAguardando: (ch && ch.n) || 0 });
   }
 
   if (b.op === "usuarios") {
@@ -97,6 +101,8 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
       order by p.criado desc, p.id limit 21 offset ${(b.pagina || 0) * 20}`;
     return ok({ itens: xs.slice(0, 20), temMais: xs.length > 20 });
   }
+
+  if (b.op.startsWith("suporte_")) return acaoAdminSuporte(sql, u, b);
 
   if (b.op === "devolucao_marcar") {
     const t = typeof b.transaction_nsu === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(b.transaction_nsu) ? b.transaction_nsu : "";
@@ -206,6 +212,25 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
   const alvo = emailAlvo(b.email);
   if (!alvo) return falha(400, "Informe o email do usuário.");
   const naoExiste = async () => !(await sql`select 1 from usuarios where email = ${alvo}`).length;
+
+  if (b.op === "usuario_excluir") {
+    // Duas etapas: o painel pede para digitar o email, e o servidor confere de novo. Conta de admin (inclusive a própria) não.
+    if (typeof b.confirmacao !== "string" || b.confirmacao.trim().toLowerCase() !== alvo) return falha(400, "Digite o email da conta para confirmar.");
+    if (ehAdmin(alvo)) return falha(400, "Conta de admin não pode ser excluída por aqui.");
+    // Numa instrução: apaga (cascata: sessões, pedidos, chamados e mensagens) e registra só o SHA-256 do email, não o email.
+    const hash = createHash("sha256").update(alvo).digest("hex");
+    const [x] = await sql`with a as (select email from usuarios where email = ${alvo}
+          and not exists (select 1 from pedidos where email = ${alvo} and status in ('pago', 'gerando'))),
+        d as (delete from usuarios where email in (select email from a) returning email),
+        l as (insert into admin_log (admin_email, acao, alvo_email, detalhes)
+          select ${u.email}, 'conta_excluida', null, jsonb_build_object('email_sha256', ${hash}::text) from d)
+      select true as ok from d`;
+    if (x) return ok({});
+    const [d] = await sql`select exists (select 1 from usuarios where email = ${alvo}) as existe,
+      exists (select 1 from pedidos where email = ${alvo} and status in ('pago', 'gerando')) as andamento`;
+    if (d && d.andamento) return falha(400, "Esta conta tem um pedido pago ou gerando o treino. Resolva antes (gere o treino ou registre a devolução).");
+    return falha(404, "Usuário não encontrado.");
+  }
 
   if (b.op === "usuario") {
     const [x] = await sql`select nome, email, criado, acesso_ate, dados, grupo,

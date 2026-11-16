@@ -1,6 +1,6 @@
 // Backend do FitWay: uma função Vercel, POST /api/app com { acao, ... }.
 // Ações: criar, entrar, privacidade (pública), eu, salvar, sair, perfil, foto, treino, ranking, admin, termo, pedido_criar, pedido_status
-// e as de pagamento (api/_pagamento.js). O webhook do InfinitePay é outra função: api/infinitepay.js.
+// e as de pagamento (api/_pagamento.js) e de suporte (api/_suporte.js). O webhook do InfinitePay é outra função: api/infinitepay.js.
 // Banco: Postgres (Neon) via DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
@@ -12,6 +12,7 @@ import { LETRAS, OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_ped
 import { ABERTOS, PRECOS, iaAtiva, planoVisivel, podePedir } from "./_precos.js";
 import { TERMO_VERSAO, montarTermo, termoFaltando } from "./_termo.js";
 import { montarPrivacidade } from "./_privacidade.js";
+import { ACOES as ACOES_SUPORTE, acaoSuporte, limparChamados, naoLido } from "./_suporte.js";
 import { lerPdf } from "./_treino.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
@@ -96,6 +97,31 @@ const schema = () => pronto ||= (async () => {
   await sql`create unique index if not exists pedidos_um_aberto_v2 on pedidos (email)
     where status in ('aguardando_pagamento', 'aguardando_confirmacao', 'pago', 'gerando')`;
   await sql`drop index if exists pedidos_um_aberto`;
+  // Suporte por chamados (docs/suporte.md).
+  await sql`create table if not exists chamados (
+    id text primary key,
+    email text not null references usuarios on delete cascade,
+    assunto text not null check (assunto in ('pagamento', 'treino', 'conta', 'app')),
+    pedido_id text references pedidos on delete set null,
+    status text not null default 'aberto' check (status in ('aberto', 'respondido', 'fechado')),
+    criado timestamptz not null default now(),
+    atualizado timestamptz not null default now(),
+    fechado_em timestamptz,
+    lido_aluno_em timestamptz,
+    lido_admin_em timestamptz
+  )`;
+  await sql`create index if not exists chamados_email on chamados (email, atualizado desc)`;
+  await sql`create index if not exists chamados_status on chamados (status, atualizado desc)`;
+  await sql`create table if not exists chamado_mensagens (
+    id bigint generated always as identity primary key,
+    chamado_id text not null references chamados on delete cascade,
+    autor text not null check (autor in ('aluno', 'admin')),
+    admin_email text,
+    texto text not null check (char_length(texto) between 1 and 2000),
+    anexo text,
+    criado timestamptz not null default now()
+  )`;
+  await sql`create index if not exists chamado_mensagens_chamado on chamado_mensagens (chamado_id, id)`;
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
@@ -183,7 +209,7 @@ export default async function handler(req, res) {
     // O cookie é do navegador inteiro: se alguém entrou em outra conta em outra aba, esta aba ainda acha que é
     // a conta antiga. Sem esta checagem, ela gravaria check-ins, cargas e o PDF na conta errada.
     if (b.conta !== undefined && b.conta !== u.email) return res.status(409).json({ erro: "Outra conta entrou neste navegador. Recarregando…" });
-    if (b.acao === "eu") return res.json(publico(u));
+    if (b.acao === "eu") return res.json({ ...publico(u), suporteNaoLido: await naoLido(sql, u.email) });
     if (b.acao === "admin") { const r = await acaoAdmin(sql, u, b, { gerar }); return res.status(r.status).json(r.corpo); }
     if (b.acao === "salvar") {
       const dados = juntar(limpar(u.dados), limpar(b.dados));
@@ -226,12 +252,17 @@ export default async function handler(req, res) {
       const r = await criarPedido(sql, u, b, req.headers, new Date(), { admin: ehAdmin(u.email) });
       return res.status(r.status).json(r.corpo);
     }
+    if (ACOES_SUPORTE.includes(b.acao)) { // vale para o app inteiro, com ou sem TREINO_IA_ATIVO
+      const r = await acaoSuporte(sql, u, b);
+      return res.status(r.status).json(r.corpo);
+    }
     if (ACOES_PAGAMENTO.includes(b.acao)) {
       const r = await acaoPagamento(sql, u, b);
       return res.status(r.status).json(r.corpo);
     }
     if (b.acao === "pedido_status") {
       await limparPedidos(sql, u.email);
+      await limparChamados(sql, u.email);
       // O pedido aberto vem primeiro: o admin pode reabrir um pedido antigo com "Gerar de novo".
       const ultimo = async () => (await sql`select id, tipo, status, metodo, valor, codigo, criado, pago_em, gerado_em from pedidos
         where email = ${u.email} order by status = any(${ABERTOS}) desc, criado desc limit 1`)[0] || null;
@@ -253,7 +284,7 @@ export default async function handler(req, res) {
       }
       return res.json({
         pedido, ativo, acessoAte: x.acesso_ate, temPlanoIA: !!plano && plano.origem === "ia", planoCriado: (plano && plano.criado) || null,
-        pode, precos: PRECOS.pix, termo: TERMO_VERSAO, ultimas, plano: visivel(x, x.dados).plano || null,
+        pode, precos: PRECOS.pix, termo: TERMO_VERSAO, ultimas, plano: visivel(x, x.dados).plano || null, suporteNaoLido: await naoLido(sql, u.email),
         ...(b.form === true ? { form: { parq: PARQ, opcoes: OPCOES, textos: TEXTOS } } : {}),
       });
     }
