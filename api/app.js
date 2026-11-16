@@ -7,7 +7,7 @@ import { acaoAdmin, ehAdmin } from "./_admin.js";
 import { DIA, juntar, limpar } from "./_dados.js";
 import { gerarSeDevido } from "./_ia.js";
 import { OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_pedido.js";
-import { ABERTOS, PRECOS, planoVisivel, podePedir } from "./_precos.js";
+import { ABERTOS, PRECOS, iaAtiva, planoVisivel, podePedir } from "./_precos.js";
 import { TERMO, termoDaVersao } from "./_termo.js";
 import { lerPdf } from "./_treino.js";
 
@@ -193,7 +193,7 @@ export default async function handler(req, res) {
       return res.json({ dados });
     }
     if (b.acao === "pedido_criar") {
-      const r = await criarPedido(sql, u, b, req.headers, new Date());
+      const r = await criarPedido(sql, u, b, req.headers, new Date(), { admin: ehAdmin(u.email) });
       return res.status(r.status).json(r.corpo);
     }
     if (b.acao === "pedido_status") {
@@ -208,7 +208,9 @@ export default async function handler(req, res) {
         [x] = await sql`select acesso_ate, dados from usuarios where email = ${u.email}`;
       }
       const agora = new Date(), aberto = !!pedido && ABERTOS.includes(pedido.status), plano = x.dados && x.dados.plano;
-      const pode = Object.fromEntries(Object.keys(PRECOS).map((t) => [t, !podePedir(t, x, agora, aberto).erro]));
+      // Função desligada (TREINO_IA_ATIVO): usuário comum não vê pedido inicial nem novo treino; renovar continua.
+      const ativo = iaAtiva() || ehAdmin(u.email);
+      const pode = Object.fromEntries(Object.keys(PRECOS).map((t) => [t, (ativo || t === "mensalidade") && !podePedir(t, x, agora, aberto).erro]));
       // novo_treino: o formulário vem com as últimas respostas; os consentimentos precisam ser marcados de novo.
       let ultimas = null;
       if (pode.novo_treino) {
@@ -216,7 +218,7 @@ export default async function handler(req, res) {
         if (r) { ultimas = r.respostas; delete ultimas.consentimentos; }
       }
       return res.json({
-        pedido, acessoAte: x.acesso_ate, temPlanoIA: !!plano && plano.origem === "ia", planoCriado: (plano && plano.criado) || null,
+        pedido, ativo, acessoAte: x.acesso_ate, temPlanoIA: !!plano && plano.origem === "ia", planoCriado: (plano && plano.criado) || null,
         pode, precos: PRECOS, termo: TERMO.versao, ultimas, plano: visivel(x, x.dados).plano || null,
         ...(b.form === true ? { form: { parq: PARQ, opcoes: OPCOES, textos: TEXTOS } } : {}),
       });

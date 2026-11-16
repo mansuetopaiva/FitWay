@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { acaoAdmin } from "../api/_admin.js";
 
 process.env.ADMIN_EMAILS = "dono@x.com";
+process.env.ANTHROPIC_API_KEY = "sk-teste"; // só para passar da checagem da chave; nenhum teste chama a IA
 const dono = { email: "dono@x.com" };
 function sqlFalso(responder = () => []) {
   const chamadas = [];
@@ -91,4 +92,30 @@ test("gerar de novo e cancelar: recusas com mensagem própria; corrida no índic
   const { sql, chamadas } = sqlFalso();
   await acaoAdmin(sql, dono, { op: "pedido_gerar_de_novo", id: "p1" });
   assert.match(chamadas[0].q, /status = 'erro' or \(status = 'pronto' and .*dados->'plano'->>'pedido'/s, "pronto só se ainda é o treino atual");
+});
+
+test("sem ANTHROPIC_API_KEY: marcar como pago (e gerar de novo) um pedido que gera treino avisa e não muda nada; mensalidade segue", async () => {
+  const chave = process.env.ANTHROPIC_API_KEY;
+  try {
+    for (const v of [undefined, ""]) {
+      if (v === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = v;
+      for (const tipo of ["inicial", "novo_treino"]) {
+        const { sql, chamadas } = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo, ativo: true }] : [{ status: "pago" }]));
+        const r = await acaoAdmin(sql, dono, { op: "pedido_pago", id: "p1" });
+        assert.equal(r.status, 400, tipo);
+        assert.equal(r.corpo.erro, "Chave da IA não configurada.");
+        assert.equal(chamadas.length, 1, "só a leitura do pedido; nenhuma escrita");
+      }
+      const g = sqlFalso(() => [{ status: "pago" }]);
+      const r = await acaoAdmin(g.sql, dono, { op: "pedido_gerar_de_novo", id: "p1" });
+      assert.equal(r.corpo.erro, "Chave da IA não configurada.");
+      assert.equal(g.chamadas.length, 0);
+      const m = sqlFalso((q) => (q.startsWith("select p.tipo") ? [{ tipo: "mensalidade", ativo: false }] : q.startsWith("with p as") ? [{ status: "pronto" }] : []));
+      const rm = await acaoAdmin(m.sql, dono, { op: "pedido_pago", id: "p1" });
+      assert.equal(rm.status, 200, "mensalidade não precisa da IA");
+      assert.equal(m.chamadas.length, 2);
+    }
+  } finally {
+    process.env.ANTHROPIC_API_KEY = chave;
+  }
 });

@@ -557,7 +557,7 @@
         <div class="row"><span>Sessões feitas</span><span>${data.sessoes}</span></div>
         <div class="row"><span>Check-ins</span><span>${data.checkins.length}</span></div>
       </section>
-      <section class="card ia" id="ia" aria-live="polite">${pintarIA()}</section>
+      <section class="card ia" id="ia" aria-live="polite" ${ia && !ia.ativo && !ia.temPlanoIA && !ia.pedido ? "hidden" : ""}>${pintarIA()}</section>
       <section class="card">
         <h2>Meu treino</h2>
         <p class="muted" style="margin:6px 0 12px">${data.plano ? "Para trocar de treino, envie outro PDF." : "Envie o PDF do seu treino para liberar a aba Treinos."} O site lê os exercícios, as séries e as repetições e escolhe a foto de cada exercício.</p>
@@ -710,6 +710,7 @@
     }
     if (!ia) { $("#ia").innerHTML = `<h2>Treino personalizado</h2><p class="err">Sem conexão com o servidor.</p>`; return; }
     $("#ia").innerHTML = pintarIA();
+    $("#ia").hidden = !ia.ativo && !ia.temPlanoIA && !ia.pedido; // função desligada (TREINO_IA_ATIVO) e nada de IA nesta conta
     ligarIA();
     if (ia.pedido && (ia.pedido.status === "pago" || ia.pedido.status === "gerando")) iaTimer = setTimeout(atualizarIA, 4000);
   }

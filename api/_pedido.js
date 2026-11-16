@@ -1,7 +1,7 @@
 // Pedidos de treino: validação do formulário e das fotos e a criação do pedido. O "_" impede a Vercel de expor como rota.
 // O formulário (js/pedido.js) recebe PARQ, OPCOES e TEXTOS do servidor, então o texto fica só aqui.
 import { randomBytes } from "node:crypto";
-import { ABERTOS, PRECOS, podePedir } from "./_precos.js";
+import { ABERTOS, PRECOS, iaAtiva, podePedir } from "./_precos.js";
 import { registrarAceite } from "./_termo.js";
 
 export const PARQ = [
@@ -89,7 +89,8 @@ export async function limparPedidos(sql, email) {
 }
 
 // pedido_criar. Recebe sql e "agora" por parâmetro para o teste. u traz email, acesso_ate e dados do banco.
-export async function criarPedido(sql, u, b, headers, agora) {
+export async function criarPedido(sql, u, b, headers, agora, { admin = false } = {}) {
+  if (b.tipo !== "mensalidade" && !iaAtiva() && !admin) return { status: 400, corpo: { erro: "Em breve." } };
   const [{ aberto }] = await sql`select exists (select 1 from pedidos where email = ${u.email} and status = any(${ABERTOS})) as aberto`;
   const pode = podePedir(b.tipo, u, agora, aberto);
   if (pode.erro) return { status: 400, corpo: { erro: pode.erro } };

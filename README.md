@@ -117,6 +117,7 @@ e o pedido é só para maiores de 18 anos. As fotos são apagadas 90 dias depois
 Pedido aguardando pagamento há mais de 30 dias é cancelado e perde as fotos (roda na consulta de status e no resumo do admin, sem cron).
 
 Variáveis na Vercel (**Settings → Environment Variables**):
+- `TREINO_IA_ATIVO`: `1` liga os pedidos de treino com IA para todos; qualquer outro valor (ou sem a variável) deixa desligado — só o admin vê e pode pedir, para testar. Renovar e ver um treino de IA que já existe funcionam sempre.
 - `ANTHROPIC_API_KEY`: chave da API da Anthropic (console.anthropic.com). Fica só no servidor.
 - `IA_MODELO` (opcional): modelo usado; o padrão é `claude-sonnet-5-5`.
 

@@ -3,6 +3,7 @@ import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { TERMO } from "../api/_termo.js";
 
+process.env.TREINO_IA_ATIVO = "1";
 let usuario, responder = () => [];
 const chamadas = [];
 const sql = async (partes, ...valores) => {
@@ -82,4 +83,28 @@ test("termo: atual, versão existente e 404 para versão desconhecida, sem preci
   assert.equal((await chamar({ acao: "termo", versao: TERMO.versao })).corpo.texto, TERMO.texto);
   assert.equal((await chamar({ acao: "termo", versao: "1999-01-01" })).status, 404);
   assert.equal((await chamar({ acao: "pedido_status" })).status, 401);
+});
+
+test("TREINO_IA_ATIVO desligado: pedido_status esconde inicial e novo treino para usuário comum; renovar e ver o plano de IA seguem; admin vê tudo", async () => {
+  delete process.env.TREINO_IA_ATIVO;
+  try {
+    responder = () => [];
+    usuario = comPlano("ia", 5, 60);
+    let r = (await chamar({ acao: "pedido_status" })).corpo;
+    assert.deepEqual([r.ativo, r.pode.inicial, r.pode.novo_treino, r.pode.mensalidade], [false, false, false, true]);
+    assert.equal(r.plano.nome, "P", "treino de IA que já existe continua visível");
+    assert.equal(r.ultimas, null);
+    usuario = { email: "b@x.com", nome: "Bia", dados: {}, acesso_ate: null };
+    r = (await chamar({ acao: "pedido_status" })).corpo;
+    assert.equal(r.pode.inicial, false);
+    const c = await chamar({ acao: "pedido_criar", tipo: "inicial" });
+    assert.deepEqual([c.status, c.corpo.erro], [400, "Em breve."]);
+    process.env.ADMIN_EMAILS = "b@x.com";
+    usuario = { email: "b@x.com", nome: "Bia", dados: {}, acesso_ate: null };
+    r = (await chamar({ acao: "pedido_status" })).corpo;
+    assert.deepEqual([r.ativo, r.pode.inicial], [true, true], "admin vê para testar");
+  } finally {
+    process.env.TREINO_IA_ATIVO = "1";
+    delete process.env.ADMIN_EMAILS;
+  }
 });

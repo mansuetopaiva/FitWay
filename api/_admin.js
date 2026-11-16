@@ -100,6 +100,8 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
       // Novo treino não mexe no acesso: com o acesso vencido, o treino pago ficaria escondido.
       if (p.tipo === "novo_treino" && !p.ativo) return falha(400, "O acesso deste usuário venceu. Ele precisa renovar (mensalidade) antes do novo treino.");
       const ef = efeitoDoPagamento(p.tipo);
+      // Sem a chave, a geração falharia e gastaria uma tentativa: avisa e não muda nada.
+      if (ef.gerar && !process.env.ANTHROPIC_API_KEY) return falha(400, "Chave da IA não configurada.");
       // Os dias somam a partir de greatest(now(), acesso_ate): renovar antes do vencimento não perde dias.
       [x] = await sql`with p as (update pedidos set status = ${ef.gerar ? "pago" : "pronto"}, pago_em = now(), atualizado = now()
             where id = ${id} and status = 'aguardando_pagamento' and tipo = ${p.tipo}
@@ -111,6 +113,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
             select ${u.email}, 'pedido_pago', email, jsonb_build_object('pedido', id, 'tipo', tipo, 'valor', valor, 'dias', ${ef.dias}::int) from p)
         select p.status, (select acesso_ate from a) as acesso_ate from p`;
     } else if (b.op === "pedido_gerar_de_novo") {
+      if (!process.env.ANTHROPIC_API_KEY) return falha(400, "Chave da IA não configurada.");
       // Pronto só se ainda é o treino atual do usuário: não sobrescreve um treino mais novo nem um PDF.
       const recusa = "Só dá para gerar de novo um pedido com erro, ou o pronto que ainda é o treino atual do usuário, sem outro pedido em andamento.";
       try {

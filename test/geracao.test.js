@@ -5,6 +5,7 @@ import { gerarSeDevido } from "../api/_ia.js";
 import { TERMO } from "../api/_termo.js";
 import { planoIA } from "./_fixtures.js";
 
+process.env.TREINO_IA_ATIVO = "1"; // os testes de pedido rodam com a função ligada; o caso desligado tem teste próprio
 const AGORA = new Date("2026-11-15T12:00:00Z");
 const H = { "x-forwarded-for": "203.0.113.7", "user-agent": "teste" };
 const respostas = () => ({
@@ -173,5 +174,32 @@ test("geração: o plano anterior entra no prompt só no novo_treino", async () 
     await gerarSeDevido(sql, "p1", { ia: async (b) => { corpo = b; return resposta(planoIA()); } });
     const texto = corpo.messages[0].content.at(-1).text;
     assert.equal(texto.includes("PLANO ANTERIOR") && texto.includes("A – Velho: Leg press"), espera, tipo);
+  }
+});
+
+test("TREINO_IA_ATIVO: só \"1\" liga; desligado, inicial e novo_treino dão \"Em breve\" para usuário comum; mensalidade e admin seguem", async () => {
+  const antes = process.env.TREINO_IA_ATIVO;
+  const comIA = { email: "a@x.com", acesso_ate: new Date(+AGORA + 864e5), dados: { plano: { origem: "ia", criado: new Date(AGORA - 60 * 864e5).toISOString(), treinos: [] } } };
+  const corpo = (tipo) => ({ tipo, respostas: respostas(), termo: TERMO.versao });
+  try {
+    for (const v of [undefined, "", "0", "true", " 1", "1 ", "sim"]) {
+      if (v === undefined) delete process.env.TREINO_IA_ATIVO; else process.env.TREINO_IA_ATIVO = v;
+      for (const [tipo, u] of [["inicial", novo], ["novo_treino", comIA]]) {
+        const { sql, chamadas } = sqlFalso(semAberto);
+        const r = await criarPedido(sql, u, corpo(tipo), H, AGORA);
+        assert.equal(r.status, 400, `${tipo} com ${JSON.stringify(v)}`);
+        assert.equal(r.corpo.erro, "Em breve.");
+        assert.equal(chamadas.length, 0, "recusa antes de consultar o banco");
+      }
+      const m = sqlFalso(semAberto);
+      assert.equal((await criarPedido(m.sql, comIA, { tipo: "mensalidade" }, H, AGORA)).status, 200, "renovar continua");
+      const a = sqlFalso(semAberto);
+      assert.equal((await criarPedido(a.sql, novo, corpo("inicial"), H, AGORA, { admin: true })).status, 200, "admin pode pedir para testar");
+    }
+    process.env.TREINO_IA_ATIVO = "1";
+    const s = sqlFalso(semAberto);
+    assert.equal((await criarPedido(s.sql, novo, corpo("inicial"), H, AGORA)).status, 200, "ligado");
+  } finally {
+    if (antes === undefined) delete process.env.TREINO_IA_ATIVO; else process.env.TREINO_IA_ATIVO = antes;
   }
 });
