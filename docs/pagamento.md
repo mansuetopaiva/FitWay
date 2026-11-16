@@ -27,7 +27,7 @@ Documentação do Checkout InfinitePay (https://www.infinitepay.io/checkout-docu
 - `POST https://api.checkout.infinitepay.io/payment_check` recebe `{ handle, order_nsu, transaction_nsu, slug }` e devolve
   `{ success, paid, amount, paid_amount, installments, capture_method }`;
 - `paid_amount` pode ser maior que `amount` (juros do parcelamento pagos pelo comprador);
-- **a documentação não diz o nome do campo da resposta de `/links` que traz a URL** (P2).
+- a resposta de `/links` traz a URL no campo `url` (confirmado com link real, P2).
 
 ## Contrato
 
@@ -182,14 +182,21 @@ e chama `confirmarPagamento`; 200 (processado ou ignorado) ou 400 (temporário).
 
 ## Perguntas em aberto
 
-1. **P2. Campo da URL na resposta de `/links`:** a documentação não diz o nome. O código lê `url` e, se não vier, responde
-   "Pagamento indisponível no momento" sem gastar nada.
-   - **Tentativa em 2026-11-16:** `404 { success: false, error: "external_checkout_not_enabled" }`. O checkout externo precisa ser
-     habilitado nas configurações de checkout da conta. Depois disso, rodar o teste com link real (criar link é grátis).
-2. **P8. O `payment_check` amarra `order_nsu`, `transaction_nsu` e `slug`?** A documentação não diz. `checkout_slug` único e a
-   conferência do `order_nsu` da resposta (quando vier) barram o reuso. Só um pagamento real responde de vez.
-3. **P9. Cartão pagando o link do Pix (decidido: aceitar e marcar).** Custa até R$ 2,00 por pedido. Alternativa futura, se virar
-   problema: obter a API Key e usar um link só, no preço do cartão, com `options.discounts.pix` (desconto do Pix por link).
+1. **P2. Campo da URL na resposta de `/links` (fechada em 2026-11-16, com link real, sem pagamento):**
+   - 1ª tentativa: `404 { success: false, error: "external_checkout_not_enabled" }`; o dono habilitou o checkout externo.
+   - 2ª tentativa: os dois links (Pix 999 e cartão 1199, mesmo `order_nsu` de teste) voltaram `200 { "url": "https://checkout.infinitepay.io/<handle>?lenc=<token opaco>.v1.<assinatura>" }`.
+     O campo é `url`, a URL passa no filtro do app (`https://…infinitepay.io/`) e a página abre (HTTP 200). Cada link tem um token próprio.
+   - O slug **não** aparece na URL do link: só chega na volta do checkout e no webhook (o código já usa só esses).
+   - `payment_check` sem pagamento (`order_nsu` certo ou trocado, `transaction_nsu` inventado) → `200 { "success": false }`, como na documentação.
+2. **P8. O `payment_check` amarra `order_nsu`, `transaction_nsu` e `slug`?** A documentação não diz, e sem pagamento toda consulta
+   responde `success: false`. `transaction_nsu` e `checkout_slug` únicos, a conferência do `order_nsu` da resposta (quando vier) e a recusa
+   de pagamento já registrado para devolução barram o reuso. Também falta ver num pagamento real se a resposta traz `amount` (sem ele, o
+   pagamento é recusado e vai para devolução: aparece logo no primeiro uso).
+3. **P9. Cartão pagando o link do Pix (decidido pelo dono em 2026-11-16: risco aceito).** Aceito, com a marcação "Pago com meio
+   diferente do escolhido" no admin. Custa no máximo R$ 2,00 por pedido (R$ 1,00 no novo treino), e qualquer pessoa consegue de propósito.
+   Alternativa futura, se virar problema: obter a API Key e usar um link só, no preço do cartão, com `options.discounts.pix`.
+4. **P10. Desconto do Pix nas configurações do checkout (decidido pelo dono em 2026-11-16: não ligar).** Com ele, `paid_amount < amount`
+   e todo Pix seria recusado (passo 6).
 
 Decididas e encerradas pela mudança: P1 (recebedor do Pix), P3 (trocar de cartão para Pix), P4 (ID da transação do Pix).
 P5 (`checkout_ref`), P6 (botão sem parcelas) e P7 (versão `2026-11-16-2`) continuam valendo.
