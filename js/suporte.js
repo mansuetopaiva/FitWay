@@ -1,0 +1,196 @@
+/* FitWay — suporte por chamados (#/suporte, #/suporte/novo, #/suporte/<id>). Baixado só quando a pessoa abre.
+   O servidor confere a conta em toda ação (api/_suporte.js). Todo texto vem do usuário ou do admin: sempre esc(), nunca HTML. */
+(function () {
+  "use strict";
+  const { api, esc, toast, shell, $, app, icon } = window.FitWay;
+  const TIT = "Ajuda e suporte";
+  const ASSUNTOS = {
+    pagamento: { nome: "Pagamento", ajuda: "Paguei e não liberou, cobrança errada, desistência ou devolução." },
+    treino: { nome: "Meu treino", ajuda: "Dúvidas sobre exercícios, ajustes ou trocas." },
+    conta: { nome: "Conta e dados", ajuda: "Login, senha, trocar email, excluir a conta ou pedidos sobre seus dados (LGPD)." },
+    app: { nome: "Problema no app", ajuda: "Algo travou ou não funciona. Se puder, anexe um print." },
+  };
+  const SAUDE = "Se sentir dor no peito, falta de ar, tontura ou dor forte, pare o treino e procure atendimento médico. O suporte não substitui atendimento de saúde.";
+  const STATUS = { aberto: "Aguardando o suporte", respondido: "Respondido", fechado: "Encerrado" };
+  const TIPOS = { inicial: "Treino personalizado", mensalidade: "Renovação", novo_treino: "Novo treino" };
+  const ST_PEDIDO = { aguardando_pagamento: "aguardando pagamento", aguardando_confirmacao: "em análise", pago: "pago", gerando: "gerando",
+    pronto: "pronto", erro: "com erro", cancelado: "cancelado" };
+  const MAX = 2000, MAX_ANEXO = 410000;
+  const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
+  const quando = (iso) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const sem = (e) => (e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
+  const voltar = (href, txt) => `<a class="adm-voltar" href="${href}">${icon("back")}${txt}</a>`;
+  const rota = () => location.hash.split("/");
+  const aqui = (arg) => rota()[1] === "suporte" && (rota()[2] || "") === (arg || "");
+
+  let pedidos = null, novo = null, anexo = "", enviando = false;
+
+  async function render(arg) {
+    anexo = ""; enviando = false;
+    if (!arg) return lista();
+    if (arg === "novo") return formNovo();
+    return conversa(arg);
+  }
+
+  // ---------- lista ----------
+  async function lista() {
+    shell(TIT, `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
+    let r;
+    try { r = await api("suporte"); } catch (e) { return aqui("") && shell(TIT, voltar("#/perfil", "Perfil") + `<p class="err" role="alert">${esc(sem(e))}</p>`, "perfil"); }
+    if (!aqui("")) return;
+    pedidos = r.pedidos;
+    window.FitWay.avisoSuporte(r.naoLido);
+    const itens = r.chamados.map((c) => `<li><a class="sup-item" href="#/suporte/${encodeURIComponent(c.id)}">
+        <span class="sup-item-t">${esc(ASSUNTOS[c.assunto].nome)}${c.nao_lido ? `<i class="ponto" aria-hidden="true"></i><span class="sr">(resposta nova)</span>` : ""}</span>
+        <span class="muted">${esc(STATUS[c.status])} · ${esc(quando(c.ultima || c.atualizado))}</span></a></li>`).join("");
+    shell(TIT, `${voltar("#/perfil", "Perfil")}
+      <section class="card"><h2 id="supTit" tabindex="-1">Seus chamados</h2>
+        ${itens ? `<ul class="sup-lista">${itens}</ul>` : `<p class="muted" style="margin:8px 0 4px">Você ainda não abriu nenhum chamado.</p>`}
+        <a class="btn sup-abrir" href="#/suporte/novo">Abrir chamado</a>
+      </section>`, "perfil");
+    $("#supTit").focus();
+  }
+
+  // ---------- anexo: reduzido no aparelho (lado maior 1280 px, JPEG), como as fotos ----------
+  async function reduzir(f) {
+    const img = await createImageBitmap(f);
+    for (const [lado, q] of [[1280, 0.8], [1024, 0.7], [800, 0.6]]) {
+      const k = Math.min(1, lado / Math.max(img.width, img.height)), c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      const url = c.toDataURL("image/jpeg", q);
+      if (url.length <= MAX_ANEXO) return url;
+    }
+    throw new Error("grande");
+  }
+  const anexoHtml = () => (anexo ? `<img class="sup-previa" src="${esc(anexo)}" alt="Imagem anexada"><button type="button" class="btn-sec" id="supTirar">Remover imagem</button>`
+    : `<button type="button" class="btn-sec" id="supAnexar">Anexar imagem (opcional)</button>`);
+  const campoAnexo = () => `<input type="file" id="supArq" accept="image/*" hidden><div id="supAnexo" class="sup-anexo">${anexoHtml()}</div>`;
+  function ligarAnexo() {
+    const pintar = () => { $("#supAnexo").innerHTML = anexoHtml(); ligarBotoes(); };
+    const ligarBotoes = () => {
+      const a = $("#supAnexar"), t = $("#supTirar");
+      if (a) a.onclick = () => $("#supArq").click();
+      if (t) t.onclick = () => { anexo = ""; pintar(); $("#supAnexar").focus(); };
+    };
+    ligarBotoes();
+    $("#supArq").onchange = async (ev) => {
+      const f = ev.target.files[0];
+      ev.target.value = "";
+      if (!f) return;
+      try { anexo = await reduzir(f); } catch (e) { return toast(e.message === "grande" ? "Imagem grande demais. Tente um print menor." : "Não consegui abrir esta imagem."); }
+      pintar(); $("#supTirar").focus();
+    };
+  }
+  const campoTexto = (rot) => `<div class="field"><label for="supTexto">${rot}</label>
+      <textarea id="supTexto" rows="5" maxlength="${MAX}" aria-describedby="supConta"></textarea>
+      <p class="muted sup-conta" id="supConta" aria-live="polite">0/${MAX}</p></div>`;
+  function ligarTexto() {
+    const t = $("#supTexto");
+    t.oninput = () => { $("#supConta").textContent = `${t.value.length}/${MAX}`; };
+  }
+
+  // ---------- abrir chamado ----------
+  async function formNovo() {
+    if (!pedidos) {
+      shell(TIT, `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
+      try { pedidos = (await api("suporte")).pedidos; } catch (e) { pedidos = []; }
+      if (!aqui("novo")) return;
+    }
+    const pre = novo || {}; novo = null; // "Abrir novo chamado sobre isso" chega com assunto e pedido
+    shell(TIT, `${voltar("#/suporte", "Chamados")}
+      <form class="card sup-form" id="supForm" novalidate>
+        <h2 id="supTit" tabindex="-1">Abrir chamado</h2>
+        <fieldset><legend>Assunto</legend>
+          ${Object.entries(ASSUNTOS).map(([k, a]) => `<label class="sup-assunto"><input type="radio" name="assunto" value="${k}" ${pre.assunto === k ? "checked" : ""}>
+            <span><b>${esc(a.nome)}</b><span class="muted">${esc(a.ajuda)}</span></span></label>`).join("")}
+        </fieldset>
+        <div id="supExtra"></div>
+        ${campoTexto("Mensagem")}
+        ${campoAnexo()}
+        <p class="err" role="alert" id="supErr"></p>
+        <button class="btn" type="submit">Enviar</button>
+      </form>`, "perfil");
+    const extra = () => {
+      const m = app.querySelector("[name=assunto]:checked"), v = m && m.value, el = $("#supExtra");
+      const atual = $("#supPedido") ? $("#supPedido").value : pre.pedido_id || "";
+      el.innerHTML = v === "pagamento" ? `<div class="field"><label for="supPedido">Pedido (opcional)</label><select id="supPedido">
+          <option value="">Nenhum pedido específico</option>
+          ${pedidos.map((p) => `<option value="${esc(p.id)}" ${p.id === atual ? "selected" : ""}>${esc(p.codigo || p.id.slice(0, 8))} · ${esc(TIPOS[p.tipo] || p.tipo)} · ${reais(p.valor)} · ${esc(ST_PEDIDO[p.status] || p.status)}</option>`).join("")}
+        </select></div>`
+        : v === "treino" ? `<p class="sup-saude" role="note">${esc(SAUDE)}</p>` : "";
+    };
+    app.querySelectorAll("[name=assunto]").forEach((r) => r.onchange = extra);
+    extra(); ligarTexto(); ligarAnexo();
+    $("#supTit").focus();
+    $("#supForm").onsubmit = async (ev) => {
+      ev.preventDefault();
+      if (enviando) return;
+      const m = app.querySelector("[name=assunto]:checked"), texto = $("#supTexto").value.trim(), err = $("#supErr");
+      if (!m) return (err.textContent = "Escolha o assunto.");
+      if (!texto) { err.textContent = "Escreva a mensagem."; return $("#supTexto").focus(); }
+      const pedido_id = m.value === "pagamento" && $("#supPedido").value ? $("#supPedido").value : undefined;
+      enviando = true; $("#supForm .btn").disabled = true; err.textContent = "";
+      try {
+        const r = await api("chamado_abrir", { assunto: m.value, texto, pedido_id, anexo: anexo || undefined });
+        anexo = ""; toast("Chamado aberto. Vamos responder por aqui.");
+        location.hash = "#/suporte/" + encodeURIComponent(r.id);
+      } catch (e) { enviando = false; if ($("#supForm")) { $("#supForm .btn").disabled = false; err.textContent = sem(e); } }
+    };
+  }
+
+  // ---------- conversa ----------
+  async function conversa(id) {
+    shell(TIT, `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
+    let r;
+    try { r = await api("chamado", { id }); }
+    catch (e) { return aqui(id) && shell(TIT, voltar("#/suporte", "Chamados") + `<p class="err" role="alert">${esc(sem(e))}</p>`, "perfil"); }
+    if (!aqui(id)) return;
+    api("suporte").then((s) => window.FitWay.avisoSuporte(s.naoLido), () => {}); // abrir marcou como lido
+    const c = r.chamado, fechado = c.status === "fechado";
+    const msgs = r.mensagens.map((m) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
+        <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte FitWay" : "Você"}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
+        <div class="sup-texto">${esc(m.texto)}</div>
+        ${m.anexo ? `<div class="sup-img" data-img="${esc(String(m.id))}"><button type="button" class="btn-sec" data-ver="${esc(String(m.id))}">Ver imagem</button></div>` : ""}</li>`).join("");
+    shell(TIT, `${voltar("#/suporte", "Chamados")}
+      <section class="card"><h2 id="supTit" tabindex="-1">${esc(ASSUNTOS[c.assunto].nome)}</h2>
+        <p class="muted">${esc(STATUS[c.status])}</p>
+        <ol class="sup-conversa" aria-label="Mensagens">${msgs}</ol>
+        ${fechado ? `<p class="ia-status">Este chamado foi encerrado.</p><button type="button" class="btn" id="supDeNovo">Abrir novo chamado sobre isso</button>`
+          : `<form id="supResp" novalidate>${campoTexto("Responder")}${campoAnexo()}<p class="err" role="alert" id="supErr"></p>
+            <button class="btn" type="submit">Enviar</button></form>
+            <div class="tools"><button type="button" id="supEncerrar">Encerrar chamado</button></div>`}
+      </section>`, "perfil");
+    $("#supTit").focus();
+    app.querySelectorAll("[data-ver]").forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const { anexo: src } = await api("chamado_anexo", { id, msg: Number(b.dataset.ver) });
+        if (!src.startsWith("data:image/jpeg;base64,")) throw new Error();
+        b.parentNode.innerHTML = `<img class="sup-previa" src="${esc(src)}" alt="Imagem anexada à mensagem">`;
+      } catch (e) { b.disabled = false; toast(e.status ? e.message : "Não consegui abrir a imagem."); }
+    });
+    if (fechado) {
+      $("#supDeNovo").onclick = () => { novo = { assunto: c.assunto, pedido_id: c.pedido_id || "" }; location.hash = "#/suporte/novo"; };
+      return;
+    }
+    ligarTexto(); ligarAnexo();
+    $("#supEncerrar").onclick = async (ev) => {
+      if (!confirm("Encerrar este chamado? Se precisar de novo, você pode abrir outro.")) return;
+      ev.currentTarget.disabled = true;
+      try { await api("chamado_encerrar", { id }); toast("Chamado encerrado."); } catch (e) { toast(sem(e)); }
+      if (aqui(id)) conversa(id);
+    };
+    $("#supResp").onsubmit = async (ev) => {
+      ev.preventDefault();
+      if (enviando) return;
+      const texto = $("#supTexto").value.trim(), err = $("#supErr");
+      if (!texto) { err.textContent = "Escreva a mensagem."; return $("#supTexto").focus(); }
+      enviando = true; $("#supResp .btn").disabled = true; err.textContent = "";
+      try { await api("chamado_responder", { id, texto, anexo: anexo || undefined }); anexo = ""; enviando = false; toast("Mensagem enviada."); if (aqui(id)) conversa(id); }
+      catch (e) { enviando = false; if ($("#supResp")) { $("#supResp .btn").disabled = false; err.textContent = sem(e); } }
+    };
+  }
+
+  window.FitWaySuporte = { render };
+})();

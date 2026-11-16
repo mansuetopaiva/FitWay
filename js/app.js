@@ -31,6 +31,7 @@
     edit: "M3 17.2V21h3.8L17.8 9.9l-3.7-3.7zM20.7 7a1 1 0 0 0 0-1.4l-2.3-2.3a1 1 0 0 0-1.4 0l-1.8 1.8 3.7 3.7z",
     trophy: "M19 5h-2V3H7v2H5a2 2 0 0 0-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5 5 0 0 0 11 15.9V19H7v2h10v-2h-4v-3.1a5 5 0 0 0 3.61-2.96C19.08 12.63 21 10.55 21 8V7a2 2 0 0 0-2-2zM5 8V7h2v3.82A3 3 0 0 1 5 8zm14 0a3 3 0 0 1-2 2.82V7h2z",
     shield: "M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5zm-1.2 14.4-3.5-3.5 1.4-1.4 2.1 2.1 4.9-4.9 1.4 1.4z",
+    help: "M11 18h2v-2h-2zm1-16a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm0-14a4 4 0 0 0-4 4h2a2 2 0 1 1 4 0c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5a4 4 0 0 0-4-4z",
     eye: "M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z",
   };
   const icon = (n, cls) => `<svg class="i ${cls || ""}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
@@ -52,7 +53,7 @@
     if (!r.ok) throw Object.assign(new Error(j.erro || "Erro no servidor. Tente de novo."), { status: r.status });
     return j;
   }
-  let email = null, nomeUser = "", fotoUser = "", adminUser = false, data = null;
+  let email = null, nomeUser = "", fotoUser = "", adminUser = false, data = null, suporteAviso = false;
   // Esta chave só existe enquanto há algo que o servidor ainda não confirmou
   // (salvamento sem conexão, ou dados da versão antiga que ficava só no navegador).
   const dataKey = () => "mt_data_" + email;
@@ -68,7 +69,7 @@
   }
   const plano = () => data && data.plano; // só existe depois que a pessoa envia o PDF
   async function entrou(u) {
-    email = u.email; nomeUser = u.nome; fotoUser = u.foto || ""; adminUser = u.admin === true; // só visual: o servidor confere a cada chamada
+    email = u.email; nomeUser = u.nome; fotoUser = u.foto || ""; adminUser = u.admin === true; suporteAviso = u.suporteNaoLido === true; // só visual: o servidor confere a cada chamada
     store.set("mt_session", email); // avisa as outras abas (evento "storage")
     loadData(u.dados);
     const pend = store.get(dataKey(), null);
@@ -156,15 +157,26 @@
     store.del("mt_session");
     // O rascunho do formulário tem dados de saúde: não fica no aparelho depois de sair.
     try { Object.keys(localStorage).filter((k) => k.startsWith("fw_pedido_")).forEach((k) => store.del(k)); } catch (e) { /* sem armazenamento */ }
-    email = null; data = null; rank = null; fotoUser = ""; adminUser = false;
+    email = null; data = null; rank = null; fotoUser = ""; adminUser = false; suporteAviso = false;
     location.hash = "";
     render();
   }
 
+  // ---------- aviso de resposta no suporte (aba Perfil e card do Perfil) ----------
+  const pontoAba = () => (suporteAviso ? `<i class="ponto" aria-hidden="true"></i><b class="sr"> (resposta nova no suporte)</b>` : "");
+  function avisoSuporte(v) {
+    suporteAviso = v === true;
+    const a = document.querySelector("[data-aba-perfil] span");
+    if (a) { a.querySelectorAll(".ponto, .sr").forEach((x) => x.remove()); a.insertAdjacentHTML("beforeend", pontoAba()); }
+    const c = document.querySelector("#supCard .sup-card-ponto");
+    if (c) c.innerHTML = pontoAba();
+  }
+
   // ---------- estrutura ----------
   function shell(title, body, tab) {
+    // O ponto na aba Perfil avisa resposta nova no suporte.
     const item = (href, ic, label, id) =>
-      `<a href="${href}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""}><span>${icon(ic)}</span>${label}</a>`;
+      `<a href="${href}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${id === "perfil" ? "data-aba-perfil" : ""}><span>${icon(ic)}${id === "perfil" ? pontoAba() : ""}</span>${label}</a>`;
     app.classList.toggle("largo", tab === "admin"); // só o painel usa a tela larga no computador
     app.innerHTML = `
       <header class="topbar"><h1>${title}</h1></header>
@@ -197,6 +209,12 @@
       () => { if (location.hash.split("/")[1] === "pedido") window.FitWayPedido.render(tipo); },
       () => toast("Não consegui abrir o formulário. Tente de novo."));
   }
+  function viewSuporte(arg) {
+    shell("Ajuda e suporte", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
+    carregar("js/suporte.js").then(
+      () => { if (location.hash.split("/")[1] === "suporte") window.FitWaySuporte.render(arg ? decodeURIComponent(arg) : ""); },
+      () => toast("Não consegui abrir o suporte. Tente de novo."));
+  }
   function viewPagamento(id) {
     shell("Pagamento", `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
     carregar("js/pagamento.js").then(
@@ -204,7 +222,7 @@
       () => toast("Não consegui abrir o pagamento. Tente de novo."));
   }
   // O painel, o formulário e o pagamento usam estas peças do app; ficam expostas só depois do login.
-  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, get email() { return email; }, get nome() { return nomeUser; } }; };
+  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, avisoSuporte, get email() { return email; }, get nome() { return nomeUser; } }; };
 
   // ---------- início: check-in + gráfico ----------
   let chartMode = "semana", diaRender = "";
@@ -574,6 +592,9 @@
         <button class="btn" id="enviarPdf">${data.plano ? "Trocar PDF do treino" : "Enviar PDF do treino"}</button>
         ${data.plano ? `<div class="tools"><button id="removerTreino">Remover treino</button></div>` : ""}
       </section>
+      <a class="card sup-card" id="supCard" href="#/suporte"><span class="sup-card-ic">${icon("help")}</span>
+        <span class="sup-card-t"><b>Ajuda e suporte</b><span class="muted">Fale com a gente sobre pagamento, treino, conta ou o app.</span></span>
+        <span class="sup-card-ponto">${pontoAba()}</span></a>
       <button class="btn" id="sair" style="margin-top:16px">Sair</button>
       <p class="muted login-links"><a href="#/privacidade">Política de privacidade</a></p>`, "perfil");
     $("#sair").onclick = sair;
@@ -718,6 +739,7 @@
     clearTimeout(iaTimer);
     if (document.hidden && ia) { iaTimer = setTimeout(atualizarIA, 4000); return; } // aba escondida: não consulta
     try { ia = await api("pedido_status"); } catch (e) { if (e.status === 401) return; }
+    if (ia && typeof ia.suporteNaoLido === "boolean" && ia.suporteNaoLido !== suporteAviso) avisoSuporte(ia.suporteNaoLido);
     if (location.hash.split("/")[1] !== "perfil" || !$("#ia")) return;
     if (ia && JSON.stringify(data.plano) !== JSON.stringify(ia.plano)) { // treino pronto, acesso renovado ou vencido
       if (ia.plano && (!data.plano || data.plano.pedido !== ia.plano.pedido)) data.proximo = ia.plano.treinos[0].id; // plano novo começa no 1º treino
@@ -841,6 +863,7 @@
     else if (rota === "admin" && adminUser) { expor(); viewAdmin(arg); }
     else if (rota === "pedido") { expor(); viewPedido(arg); }
     else if (rota === "pagamento") { expor(); viewPagamento(arg); }
+    else if (rota === "suporte") { expor(); viewSuporte(arg); }
     else if (rota === "termo") viewTermo();
     else viewInicio();
     window.scrollTo(0, 0);
@@ -851,7 +874,7 @@
     if (document.hidden || !email) return;
     tickRest();
     const rota = location.hash.split("/")[1];
-    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "pagamento", "termo", "privacidade"].includes(rota) && diaRender !== dayKey(today())) render();
+    if (!["treino", "treinos", "perfil", "ranking", "admin", "pedido", "pagamento", "termo", "privacidade", "suporte"].includes(rota) && diaRender !== dayKey(today())) render();
   });
   // outra aba entrou ou saiu da conta
   window.addEventListener("storage", (ev) => { if (ev.key === "mt_session") location.reload(); });

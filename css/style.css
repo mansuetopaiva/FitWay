@@ -369,3 +369,33 @@ a.btn { display: flex; align-items: center; justify-content: center; text-decora
 .login-links a, .login-aceite a, .termo-texto a, .ped-termo a { color: var(--green); }
 .login.privacidade { text-align: left; }
 .login.privacidade h2 { margin-bottom: 8px; }
+
+/* suporte (aluno) */
+.ponto { position: absolute; top: 2px; right: 10px; width: 9px; height: 9px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--bg); }
+.nav a span { position: relative; }
+.sup-card { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text); position: relative; }
+.sup-card-ic { color: var(--green); display: grid; place-items: center; }
+.sup-card-t { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.sup-card-ponto { position: relative; width: 20px; height: 20px; }
+.sup-card-ponto .ponto { top: 5px; right: 5px; }
+.sup-lista { list-style: none; padding: 0; margin: 8px 0 12px; }
+.sup-item { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; }
+.sup-item-t { position: relative; padding-right: 18px; font-size: 14px; }
+.sup-item-t .ponto { top: 5px; right: 0; }
+.sup-abrir { display: block; text-align: center; text-decoration: none; }
+.sup-form fieldset { border: 0; padding: 0; margin: 10px 0; }
+.sup-form legend { font-size: 13px; margin-bottom: 6px; }
+.sup-assunto { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.sup-assunto input { margin-top: 4px; }
+.sup-assunto > span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.sup-saude { background: #4a3a14; color: #ffe9b8; border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 8px 0; }
+.sup-conta { text-align: right; margin-top: 2px; }
+.sup-anexo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 10px; }
+.sup-previa { display: block; max-width: 100%; max-height: 320px; border-radius: 8px; border: 1px solid var(--line); }
+.sup-conversa { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 10px; }
+.sup-msg { background: var(--card2); border-radius: 10px; padding: 10px 12px; max-width: 92%; }
+.sup-eu { align-self: flex-end; }
+.sup-admin { align-self: flex-start; border-left: 3px solid var(--green); }
+.sup-quem { font-size: 12px; margin-bottom: 4px; }
+.sup-texto { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.45; }
+.sup-img { margin-top: 8px; }

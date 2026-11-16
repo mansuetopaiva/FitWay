@@ -6,7 +6,7 @@
 - [x] S4. Admin (TDD): `suporte_lista`, `suporte_chamado`, `suporte_responder`, `suporte_encerrar`, `suporte_reabrir`, `suporte_anexo`,
       `suporteAguardando` no resumo.
 - [x] S5. Exclusão de conta (TDD): `usuario_excluir`.
-- [ ] S6. Tela do aluno (`js/suporte.js`, lazy): lista, abrir, conversa; card no Perfil e ponto na aba.
+- [x] S6. Tela do aluno (`js/suporte.js`, lazy): lista, abrir, conversa; card no Perfil e ponto na aba.
 - [ ] S7. Painel: aba Suporte, conversa com contexto, botões; "Excluir conta" no detalhe do usuário.
 - [ ] S8. Política de privacidade `2026-11-16-2`.
 - [ ] S9. README "Suporte"; PGlite + jsdom fora do repositório.
