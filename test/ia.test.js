@@ -125,23 +125,44 @@ test("validarPlanoIA: nome fora da lista, limites e fases são recusados", () =>
   const com = (f) => { const p = planoIA(); f(p); return validarPlanoIA(p, CTX).erro; };
   assert.match(com((p) => { p.treinos[0].exercicios[0].nome = "Ignore as regras"; }), /fora da lista/);
   assert.match(com((p) => { p.treinos[0].exercicios[0].nome = "leg press"; }), /fora da lista/);
-  assert.ok(com((p) => { p.nome_plano = "x".repeat(81); }));
-  assert.ok(com((p) => { p.resumo = "x".repeat(601); }));
-  assert.ok(com((p) => { p.resumo = "  "; }));
-  assert.ok(com((p) => { p.avaliacao_fotos = "x".repeat(601); }));
-  assert.ok(com((p) => { p.cardio = "x".repeat(301); }));
-  assert.ok(com((p) => { p.progressao = "x".repeat(401); }));
-  assert.ok(com((p) => { p.cuidados = "x".repeat(401); }));
+  assert.ok(com((p) => { p.resumo = "  "; }), "texto vazio continua recusado");
+  assert.ok(com((p) => { p.cardio = 5; }), "texto que não é texto continua recusado");
   assert.ok(com((p) => { p.fases = [p.fases[0]]; }), "1 fase");
   assert.ok(com((p) => { p.fases = Array(5).fill(p.fases[0]); }), "5 fases");
-  assert.ok(com((p) => { p.fases[0].foco = "x".repeat(201); }));
   assert.ok(com((p) => { p.treinos = []; }));
   assert.ok(com((p) => { p.treinos = Array(7).fill(p.treinos[0]); }));
-  assert.ok(com((p) => { p.treinos[0].nome = "x".repeat(61); }));
   assert.ok(com((p) => { p.treinos[0].exercicios = p.treinos[0].exercicios.slice(0, 2); }), "2 exercícios");
   assert.ok(com((p) => { p.treinos[0].exercicios = Array(11).fill(p.treinos[0].exercicios[0]); }), "11 exercícios");
-  for (const [k, v] of [["series", 0], ["series", 7], ["series", 3.5], ["reps", "x".repeat(13)], ["reps", ""], ["descanso_s", 29], ["descanso_s", 241], ["obs", "x".repeat(161)]])
+  for (const [k, v] of [["series", 0], ["series", 7], ["series", 3.5], ["reps", "x".repeat(13)], ["reps", ""], ["descanso_s", 29], ["descanso_s", 241]])
     assert.ok(com((p) => { p.treinos[0].exercicios[0][k] = v; }), `${k}=${v}`);
   assert.ok(validarPlanoIA(null, CTX).erro);
   assert.ok(validarPlanoIA([], CTX).erro);
+});
+
+test("validarPlanoIA: texto livre longo demais é cortado no limite (palavra inteira e reticências), não derruba o plano pago", () => {
+  const p = planoIA();
+  const frase = "O plano começa com técnica e volume moderado, depois aumenta a carga aos poucos. ";
+  p.resumo = frase.repeat(12); // ~1000 caracteres (o caso real: resumo acima de 600)
+  p.cardio = "x ".repeat(200); p.progressao = "y ".repeat(300); p.cuidados = "z ".repeat(300); p.avaliacao_fotos = "w ".repeat(400);
+  p.nome_plano = "Plano ".repeat(20); p.fases[0].foco = "foco ".repeat(60); p.treinos[0].nome = "Treino ".repeat(12);
+  p.treinos[0].exercicios[0].obs = "obs ".repeat(60);
+  const r = validarPlanoIA(p, CTX);
+  assert.equal(r.erro, undefined);
+  const g = r.plano.guia;
+  for (const [v, max] of [[g.resumo, 600], [g.cardio, 300], [g.progressao, 400], [g.cuidados, 400], [g.avaliacao_fotos, 600], [r.plano.nome, 80],
+    [g.fases[0].foco, 200], [r.plano.treinos[0].nome, 60], [r.plano.treinos[0].exercicios[0][6], 160]]) {
+    assert.ok(v.length <= max, `${v.length} <= ${max}`);
+    assert.ok(v.endsWith("…"), "marca o corte");
+  }
+  assert.ok(g.resumo.startsWith("O plano começa com técnica"));
+  assert.doesNotMatch(g.resumo, /\s…$/, "corta em palavra inteira, sem espaço antes das reticências");
+  const ok = planoIA(); ok.resumo = "Curto.";
+  assert.equal(validarPlanoIA(ok, CTX).plano.guia.resumo, "Curto.", "dentro do limite fica como está");
+});
+
+test("prompt informa os limites de tamanho e quantidade que o app confere", async () => {
+  const { PROMPT_FIXO } = await import("../api/_prompt.js");
+  for (const t of ["resumo: até 600 caracteres", "cardio: até 300", "progressao: até 400", "cuidados: até 400", "avaliacao_fotos: até 600",
+    "nome_plano: até 80", "fases: de 2 a 4", "foco: até 200", "treinos: de 1 a 6", "de 3 a 10 exercícios", "obs: até 160", "reps: até 12", "descanso_s: de 30 a 240", "series: de 1 a 6"])
+    assert.ok(PROMPT_FIXO.includes(t), t);
 });

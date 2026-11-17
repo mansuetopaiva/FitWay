@@ -4,7 +4,7 @@
 //   saída estruturada: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
 import { NOMES_FOTOS, foto } from "./_treino.js";
 import { CHAVES_FOTOS } from "./_pedido.js";
-import { montarPrompt, ROTULOS_FOTOS } from "./_prompt.js";
+import { LIMITES, montarPrompt, ROTULOS_FOTOS } from "./_prompt.js";
 
 const NOMES = [...new Set(NOMES_FOTOS)];
 const txt = { type: "string" };
@@ -68,37 +68,45 @@ export function lerResposta(r) {
 const NOMES_SET = new Set(NOMES);
 const texto = (v, max, min = 1) => typeof v === "string" && v.trim().length >= min && v.trim().length <= max;
 const int = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+// Texto livre longo demais não derruba um plano pago: corta no limite, numa palavra inteira, com reticências
+// (sempre mostrado escapado). Vazio ou que não é texto continua sendo recusado.
+const cortar = (v, max) => {
+  const t = v.trim();
+  if (t.length <= max) return t;
+  const c = t.slice(0, max - 1), espaco = c.lastIndexOf(" ");
+  return (espaco > max * 0.6 ? c.slice(0, espaco) : c).replace(/[\s,;:.\-–—]+$/, "") + "…";
+};
+const livre = (v, min = 1) => typeof v === "string" && v.trim().length >= min;
 
 // A saída da IA é tratada como entrada hostil: confere todos os limites e monta o plano no formato do app.
 export function validarPlanoIA(j, { criado, pedido }) {
   if (!j || typeof j !== "object" || Array.isArray(j)) return { erro: "Plano da IA inválido." };
-  if (!texto(j.nome_plano, 80)) return { erro: "nome_plano: de 1 a 80 caracteres." };
-  for (const [k, max] of [["resumo", 600], ["cardio", 300], ["progressao", 400], ["cuidados", 400]])
-    if (!texto(j[k], max)) return { erro: `${k}: de 1 a ${max} caracteres.` };
-  if (j.avaliacao_fotos !== undefined && !texto(j.avaliacao_fotos, 600, 0)) return { erro: "avaliacao_fotos: até 600 caracteres." };
+  if (!livre(j.nome_plano)) return { erro: "nome_plano vazio." };
+  for (const k of ["resumo", "cardio", "progressao", "cuidados"]) if (!livre(j[k])) return { erro: `${k} vazio.` };
+  if (j.avaliacao_fotos !== undefined && !livre(j.avaliacao_fotos, 0)) return { erro: "avaliacao_fotos inválida." };
   if (!Array.isArray(j.fases) || j.fases.length < 2 || j.fases.length > 4) return { erro: "fases: de 2 a 4." };
-  for (const f of j.fases) if (!f || !texto(f.semanas, 10) || !texto(f.foco, 200)) return { erro: "fase inválida." };
+  for (const f of j.fases) if (!f || !texto(f.semanas, LIMITES.semanas) || !livre(f.foco)) return { erro: "fase inválida." };
   if (!Array.isArray(j.treinos) || j.treinos.length < 1 || j.treinos.length > 6) return { erro: "treinos: de 1 a 6." };
   const treinos = [];
   for (const [i, t] of j.treinos.entries()) {
     const id = "ABCDEF"[i];
-    if (!t || !texto(t.nome, 60)) return { erro: `treino ${id}: nome de 1 a 60 caracteres.` };
+    if (!t || !livre(t.nome)) return { erro: `treino ${id}: nome vazio.` };
     if (!Array.isArray(t.exercicios) || t.exercicios.length < 3 || t.exercicios.length > 10) return { erro: `treino ${id}: de 3 a 10 exercícios.` };
     const exercicios = [];
     for (const e of t.exercicios) {
       if (!e || !NOMES_SET.has(e.nome)) return { erro: `treino ${id}: exercício fora da lista.` };
-      if (!int(e.series, 1, 6) || !texto(e.reps, 12) || !int(e.descanso_s, 30, 240) || !texto(e.obs, 160, 0))
+      if (!int(e.series, 1, 6) || !texto(e.reps, LIMITES.reps) || !int(e.descanso_s, 30, 240) || !livre(e.obs, 0))
         return { erro: `treino ${id}, ${e.nome}: séries, repetições, descanso ou observação fora do limite.` };
-      exercicios.push([e.nome, foto(e.nome), e.series, e.reps.trim(), 0, e.descanso_s, e.obs.trim()]);
+      exercicios.push([e.nome, foto(e.nome), e.series, e.reps.trim(), 0, e.descanso_s, cortar(e.obs, LIMITES.obs)]);
     }
-    treinos.push({ id, nome: t.nome.trim(), exercicios });
+    treinos.push({ id, nome: cortar(t.nome, LIMITES.nome_treino), exercicios });
   }
   const guia = {
-    resumo: j.resumo.trim(), avaliacao_fotos: (j.avaliacao_fotos || "").trim(),
-    fases: j.fases.map((f) => ({ semanas: f.semanas.trim(), foco: f.foco.trim() })),
-    cardio: j.cardio.trim(), progressao: j.progressao.trim(), cuidados: j.cuidados.trim(),
+    resumo: cortar(j.resumo, LIMITES.resumo), avaliacao_fotos: cortar(j.avaliacao_fotos || "", LIMITES.avaliacao_fotos),
+    fases: j.fases.map((f) => ({ semanas: f.semanas.trim(), foco: cortar(f.foco, LIMITES.foco) })),
+    cardio: cortar(j.cardio, LIMITES.cardio), progressao: cortar(j.progressao, LIMITES.progressao), cuidados: cortar(j.cuidados, LIMITES.cuidados),
   };
-  return { plano: { nome: j.nome_plano.trim(), origem: "ia", criado, semanas: 8, pedido, guia, treinos } };
+  return { plano: { nome: cortar(j.nome_plano, LIMITES.nome_plano), origem: "ia", criado, semanas: 8, pedido, guia, treinos } };
 }
 
 // Gera o treino de um pedido pago. Chamada pelo pedido_status (usuário) e pelo admin; o UPDATE condicional
