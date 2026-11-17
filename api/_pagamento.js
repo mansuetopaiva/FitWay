@@ -42,6 +42,19 @@ async function postar(fetch, caminho, corpo) {
   return fetch(API + caminho, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo), signal: AbortSignal.timeout(10000) });
 }
 
+// Diagnóstico nos Runtime Logs da Vercel quando o InfinitePay falha. Nunca o valor do handle, nem nome ou email:
+// do corpo saem o handle, os textos de "ocultar" (nome e email do cliente) e qualquer email; das variáveis, só o tamanho.
+const corpoDe = async (r) => { try { return String(await r.text()); } catch (e) { return ""; } };
+function diagnostico(etapa, { status = null, corpo = "", erro = "", ocultar = [] } = {}) {
+  const h = process.env.INFINITEPAY_HANDLE || "", site = process.env.SITE_URL || "";
+  let t = String(corpo || "");
+  for (const x of [h, ...ocultar]) if (x) t = t.split(x).join("<oculto>");
+  t = t.replace(/[^\s"'<>,;:@]+@[^\s"'<>,;:@]+\.[^\s"'<>,;:@]+/g, "<email>").slice(0, 500);
+  const tam = (v) => (v ? `presente (${v.length} caracteres)` : "ausente");
+  console.error(`[infinitepay] ${etapa} ` + JSON.stringify({ status, corpo: t, erro: String(erro).slice(0, 200),
+    INFINITEPAY_HANDLE: tam(h), SITE_URL: tam(site) }));
+}
+
 // Webhook, volta do checkout e "Verificar no InfinitePay". Nunca usa valor nem "paid" vindos de fora:
 // só o payment_check, com o handle do servidor. Devolve "pago", "ignorado", "recusado", "temporario" ou "sobra"
 // (pago de verdade num pedido que já não está aberto: fica no admin_log para o admin devolver o dinheiro).
@@ -61,13 +74,19 @@ export async function confirmarPagamento(sql, ref, { fetch = globalThis.fetch } 
   let j;
   try {
     const r = await postar(fetch, "/payment_check", { handle, order_nsu, transaction_nsu, slug });
-    if (r.status >= 500 || r.status === 429) return "temporario";
-    if (!r.ok) return "recusado";
+    if (!r.ok) {
+      diagnostico("payment_check falhou", { status: r.status, corpo: await corpoDe(r) });
+      return r.status >= 500 || r.status === 429 ? "temporario" : "recusado";
+    }
     j = await r.json();
   } catch (e) {
+    diagnostico("payment_check falhou", { erro: `${e && e.name}: ${e && e.message}` });
     return "temporario"; // rede, tempo esgotado ou resposta que não é JSON
   }
-  if (!j || j.success !== true || (j.order_nsu !== undefined && String(j.order_nsu) !== order_nsu)) return "recusado";
+  if (!j || j.success !== true || (j.order_nsu !== undefined && String(j.order_nsu) !== order_nsu)) {
+    diagnostico("payment_check recusou", { status: 200, corpo: JSON.stringify(j) });
+    return "recusado";
+  }
   // Guarda o par para o "Verificar no InfinitePay" só depois que o InfinitePay o reconheceu: lixo não troca um par bom.
   await sql`update pedidos set checkout_ref = ${JSON.stringify({ slug, transaction_nsu })}::jsonb where id = ${p.id} and status = any(${ABERTO}::text[])`;
   if (j.paid !== true) return "recusado";
@@ -126,7 +145,7 @@ export async function acaoPagamento(sql, u, b, { fetch = globalThis.fetch } = {}
 
   if (b.acao === "pagar") {
     const disponiveis = metodosDisponiveis(p.tipo);
-    if (!disponiveis.length) return falha(400, INDISPONIVEL);
+    if (!disponiveis.length) { diagnostico("pagar sem INFINITEPAY_HANDLE ou SITE_URL"); return falha(400, INDISPONIVEL); }
     if (!disponiveis.includes(b.metodo)) return falha(400, "Escolha Pix ou cartão.");
     if (!pendente) return falha(400, "Este pedido não está aguardando pagamento.");
     const metodo = b.metodo, valor = precoDe(metodo, p.tipo);
@@ -138,16 +157,24 @@ export async function acaoPagamento(sql, u, b, { fetch = globalThis.fetch } = {}
     const site = process.env.SITE_URL.replace(/\/+$/, "");
     const NOMES = { inicial: "Treino personalizado FitWay", mensalidade: "Renovação do acesso FitWay (30 dias)", novo_treino: "Novo treino FitWay" };
     let url;
+    const ocultar = [u.nome, u.email].filter((x) => typeof x === "string" && x.length >= 2);
     try {
       const r = await postar(fetch, "/links", {
         handle: process.env.INFINITEPAY_HANDLE, order_nsu: p.id, redirect_url: site + "/", webhook_url: site + "/api/infinitepay",
         items: [{ quantity: 1, price: valor, description: NOMES[p.tipo] }],
         customer: { name: u.nome, email: u.email },
       });
-      const j = r.ok ? await r.json() : null;
-      url = j && j.url; // P2: a documentação não diz o nome do campo; confirmar com um link real antes de liberar
-    } catch (e) { url = null; }
-    if (typeof url !== "string" || !/^https:\/\/([a-z0-9-]+\.)*infinitepay\.io\/[^\s"'<>]*$/.test(url)) return falha(502, INDISPONIVEL);
+      if (!r.ok) { diagnostico("POST /links falhou", { status: r.status, corpo: await corpoDe(r), ocultar }); return falha(502, INDISPONIVEL); }
+      const j = await r.json();
+      url = j && j.url; // P2: campo "url", confirmado com link real
+      if (typeof url !== "string" || !/^https:\/\/([a-z0-9-]+\.)*infinitepay\.io\/[^\s"'<>]*$/.test(url)) {
+        diagnostico("POST /links devolveu URL fora do padrão", { status: r.status, corpo: JSON.stringify(j), ocultar });
+        return falha(502, INDISPONIVEL);
+      }
+    } catch (e) {
+      diagnostico("POST /links falhou", { erro: `${e && e.name}: ${e && e.message}`, ocultar });
+      return falha(502, INDISPONIVEL);
+    }
     // Dois cliques ao mesmo tempo: fica o primeiro link gravado daquele meio, e os dois recebem o mesmo. O link do outro meio fica como está.
     const [g] = await sql`update pedidos set checkout_url = case when ${metodo} = 'cartao' then coalesce(checkout_url, ${url}) else checkout_url end,
         checkout_url_pix = case when ${metodo} = 'pix' then coalesce(checkout_url_pix, ${url}) else checkout_url_pix end

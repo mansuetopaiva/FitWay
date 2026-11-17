@@ -367,3 +367,54 @@ test("pagar: URL do checkout fora de infinitepay.io é recusada", async () => {
     assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "pix" }, { fetch: fetchFalso({ json: { url } }).fetch })).status, 502, url);
   }
 });
+
+// ---------- diagnóstico no log (Runtime Logs da Vercel), sem dado pessoal ----------
+async function comLog(f) {
+  const linhas = [], antes = console.error;
+  console.error = (...a) => linhas.push(a.map(String).join(" "));
+  try { await f(); } finally { console.error = antes; }
+  return linhas;
+}
+const semPessoal = (l) => { for (const x of ["Ana", "a@x.com", "exemplo\"", ":\"exemplo"]) assert.ok(!l.includes(x), "vazou " + x + ": " + l); };
+
+test("POST /links com erro: loga status, corpo (sem handle, nome nem email, até 500) e as variáveis só com o tamanho", async () => {
+  const corpo = JSON.stringify({ success: false, error: "invalid_customer", handle: "exemplo", customer: { name: "Ana", email: "a@x.com" }, x: "y".repeat(800) });
+  const fetch = async () => ({ ok: false, status: 422, text: async () => corpo, json: async () => JSON.parse(corpo) });
+  const sql = async (p) => (p.join("?").startsWith("select id, tipo") ? [{ id: "p1", tipo: "inicial", status: "aguardando_pagamento" }] : [{ checkout_url: null, checkout_url_pix: null }]);
+  let r;
+  const log = await comLog(async () => { r = await acaoPagamento(sql, u, { acao: "pagar", id: "p1", metodo: "pix" }, { fetch }); });
+  assert.equal(r.status, 502);
+  assert.equal(log.length, 1);
+  const l = log[0];
+  assert.match(l, /POST \/links/); assert.match(l, /"status":422/); assert.match(l, /invalid_customer/);
+  assert.match(l, /"INFINITEPAY_HANDLE":"presente \(7 caracteres\)"/); assert.match(l, /"SITE_URL":"presente \(20 caracteres\)"/);
+  semPessoal(l);
+  const c = JSON.parse(l.slice(l.indexOf("{")));
+  assert.ok(c.corpo.length <= 500);
+});
+
+test("POST /links: rede fora e URL fora do padrão também logam; sem as variáveis, loga 'ausente'", async () => {
+  const sql = async (p) => (p.join("?").startsWith("select id, tipo") ? [{ id: "p1", tipo: "inicial", status: "aguardando_pagamento" }] : [{ checkout_url: null, checkout_url_pix: null }]);
+  let log = await comLog(() => acaoPagamento(sql, u, { acao: "pagar", id: "p1", metodo: "pix" }, { fetch: async () => { throw new TypeError("fetch failed"); } }));
+  assert.match(log[0], /"erro":"TypeError: fetch failed"/);
+  log = await comLog(() => acaoPagamento(sql, u, { acao: "pagar", id: "p1", metodo: "pix" }, { fetch: async () => ({ ok: true, status: 200, json: async () => ({ link: "https://outro.site/x" }) }) }));
+  assert.match(log[0], /URL fora do padrão/); assert.match(log[0], /outro\.site/);
+  const h = process.env.INFINITEPAY_HANDLE;
+  try {
+    delete process.env.INFINITEPAY_HANDLE;
+    log = await comLog(() => acaoPagamento(sql, u, { acao: "pagar", id: "p1", metodo: "pix" }));
+    assert.match(log[0], /"INFINITEPAY_HANDLE":"ausente"/);
+  } finally { process.env.INFINITEPAY_HANDLE = h; }
+});
+
+test("payment_check com erro (status, rede ou success: false) loga sem o handle", async () => {
+  for (const [resp, esperado] of [[{ status: 500, json: { e: "x" } }, /"status":500/], [new TypeError("fetch failed"), /fetch failed/], [{ json: { success: false } }, /success.{0,3}:false/]]) {
+    const s = sqlFalso();
+    const { fetch } = fetchFalso(resp);
+    const log = await comLog(() => confirmarPagamento(s.sql, ref, { fetch }));
+    assert.equal(log.length, 1, String(esperado)); assert.match(log[0], /payment_check/); assert.match(log[0], esperado);
+    semPessoal(log[0]);
+  }
+  const s = sqlFalso(), { fetch } = fetchFalso(pago());
+  assert.equal((await comLog(() => confirmarPagamento(s.sql, ref, { fetch }))).length, 0, "pago não loga");
+});
