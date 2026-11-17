@@ -19,7 +19,6 @@ test("montarPrompt: marcadores trocados, nenhum sobrando, nada do aluno no syste
   assert.doesNotMatch(system, /\{\{\w+\}\}/);
   assert.match(system, /Recuperação manda/, "material de apoio");
   for (const n of NOMES_FOTOS) assert.ok(system.includes("\n" + n), n);
-  for (const s of ["joelho", "IGNORE", "aluno: Emagrecer", "70.5"]) // "Emagrecer" sozinho aparece numa regra fixa assert.ok(!system.includes(s), s);
   assert.match(mensagem, /objetivo do aluno: Emagrecer\./);
   assert.match(montarPrompt({ ...R, objetivo: ["Emagrecer", "Definir"] }).mensagem, /objetivo do aluno: Emagrecer, Definir\./);
   assert.match(mensagem, /Peso: 70.5 kg/);
@@ -28,6 +27,17 @@ test("montarPrompt: marcadores trocados, nenhum sobrando, nada do aluno no syste
   assert.match(mensagem, /Fotos enviadas: nenhuma/);
   // só sobram as chaves digitadas pelo aluno, que não são trocadas
   assert.deepEqual(mensagem.match(/\{\{\w+\}\}/g), ["{{exercicios_permitidos}}", "{{idade}}"]);
+});
+
+test("montarPrompt: nenhum dado do aluno no system e todos na mensagem (marcadores únicos)", () => {
+  const sentinelas = { observacoes: "SENTINELA-OBS-7Q3", lesoes: "SENTINELA-LESAO-9K1", cirurgias: "SENTINELA-CIRURGIA-4T8",
+    doencas: "SENTINELA-DOENCA-2W6", remedios: "SENTINELA-REMEDIO-5M2", evitar: "SENTINELA-EVITAR-8P4" };
+  const numeros = { idade: 37, peso: 83.7, altura: 177 };
+  const { system, mensagem } = montarPrompt({ ...R, ...sentinelas, ...numeros }, { fotos: [] });
+  for (const v of [...Object.values(sentinelas), ...Object.values(numeros).map(String)]) {
+    assert.ok(!system.includes(v), `no system: ${v}`);
+    assert.ok(mensagem.includes(v), `fora da mensagem: ${v}`);
+  }
 });
 
 test("montarPrompt: texto do aluno escapado e delimitado", () => {
