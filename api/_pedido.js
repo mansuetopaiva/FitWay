@@ -34,7 +34,12 @@ export const limparTexto = (s) => s.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/
 export function limparRespostas(r, { temFotos, agora }) {
   if (!r || typeof r !== "object" || Array.isArray(r)) return { erro: "Respostas inválidas." };
   const out = {};
+  // Objetivo: um ou mais (texto único vem de rascunho antigo); guardado na ordem da lista, sem repetir.
+  const obj = [].concat(r.objetivo ?? []);
+  if (!obj.length || !obj.every((o) => OPCOES.objetivo.includes(o))) return { erro: `Escolha ${NOMES.objetivo}.` };
+  out.objetivo = OPCOES.objetivo.filter((o) => obj.includes(o));
   for (const [k, ops] of Object.entries(OPCOES)) {
+    if (k === "objetivo") continue;
     if (!ops.includes(r[k])) return { erro: `Escolha ${NOMES[k]}.` };
     out[k] = r[k];
   }

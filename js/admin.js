@@ -653,7 +653,7 @@
     const linha = (k, v) => `<div class="row"><span>${k}</span><span>${esc(v === "" || v === undefined ? "—" : v)}</span></div>`;
     const sims = r.parq.some(Boolean);
     return `<div class="card"><h2 class="adm-tit">Respostas</h2>
-      <h3 class="adm-sub">Você</h3>${linha("Objetivo", r.objetivo)}${linha("Nível", r.nivel)}${linha("Idade", r.idade + " anos")}${linha("Sexo", r.sexo)}${linha("Altura", r.altura + " cm")}${linha("Peso", String(r.peso).replace(".", ",") + " kg")}
+      <h3 class="adm-sub">Você</h3>${linha("Objetivo", [].concat(r.objetivo).join(", "))}${linha("Nível", r.nivel)}${linha("Idade", r.idade + " anos")}${linha("Sexo", r.sexo)}${linha("Altura", r.altura + " cm")}${linha("Peso", String(r.peso).replace(".", ",") + " kg")}
       <h3 class="adm-sub">Rotina</h3>${linha("Dias por semana", r.dias)}${linha("Tempo por treino", r.minutos + " min")}
       <h3 class="adm-sub">Saúde (PAR-Q)${sims ? ' <span class="selo aviso">Tem Sim</span>' : ""}</h3>
       <ol class="adm-parq">${p.parq.map((q, i) => `<li class="${r.parq[i] ? "sim" : ""}"><span>${esc(q)}</span><b>${r.parq[i] ? "Sim" : "Não"}</b></li>`).join("")}</ol>

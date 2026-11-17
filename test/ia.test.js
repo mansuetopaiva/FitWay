@@ -21,6 +21,7 @@ test("montarPrompt: marcadores trocados, nenhum sobrando, nada do aluno no syste
   for (const n of NOMES_FOTOS) assert.ok(system.includes("\n" + n), n);
   for (const s of ["joelho", "IGNORE", "Emagrecer", "70.5"]) assert.ok(!system.includes(s), s);
   assert.match(mensagem, /objetivo do aluno: Emagrecer\./);
+  assert.match(montarPrompt({ ...R, objetivo: ["Emagrecer", "Definir"] }).mensagem, /objetivo do aluno: Emagrecer, Definir\./);
   assert.match(mensagem, /Peso: 70.5 kg/);
   assert.match(mensagem, /5\. Você tem algum problema nos ossos.* Sim/);
   assert.match(mensagem, /liberação médica para fazer musculação: Sim/);

@@ -38,6 +38,12 @@ test("opções fechadas e limites numéricos", () => {
     assert.ok(limpa(c).respostas, JSON.stringify(c));
 });
 
+test("objetivo: um ou mais da lista, guardado na ordem da lista sem repetir; texto único (rascunho antigo) vira lista", () => {
+  assert.deepEqual(limpa({ objetivo: ["Definir", "Emagrecer", "Definir"] }).respostas.objetivo, ["Emagrecer", "Definir"]);
+  assert.deepEqual(limpa({ objetivo: "Definir" }).respostas.objetivo, ["Definir"]);
+  for (const objetivo of [[], ["Emagrecer", "Ficar forte"], [{}], null, undefined]) assert.ok(limpa({ objetivo }).erro, JSON.stringify(objetivo));
+});
+
 test("textos: limite de tamanho, tipo, e caracteres de controle removidos", () => {
   assert.ok(limpa({ observacoes: "a".repeat(600) }).respostas);
   assert.ok(limpa({ observacoes: "a".repeat(601) }).erro);

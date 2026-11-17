@@ -29,6 +29,7 @@
     // Rascunho sem fotos; no novo treino, começa com as últimas respostas. Os consentimentos são sempre marcados de novo.
     f = Object.assign({ parq: Array(st.form.parq.length).fill(null), liberacao: false }, tipo === "novo_treino" ? st.ultimas || {} : {}, rasc && rasc.f || {});
     f.consentimentos = { dados: false, fotos: false }; f.termo = false;
+    f.objetivo = f.objetivo ? [].concat(f.objetivo) : []; // pedido e rascunho antigos guardavam um texto só
     fotos = {};
     etapa = rasc && Number.isInteger(rasc.etapa) ? Math.min(rasc.etapa, 4) : 0;
     pintar();
@@ -37,13 +38,15 @@
 
   const radios = (nome, legenda, ops, rotulo = (o) => o) => `<fieldset class="ped-grupo"><legend>${legenda}</legend><div class="ped-ops">
     ${ops.map((o) => `<label><input type="radio" name="${nome}" value="${esc(o)}" ${f[nome] === o ? "checked" : ""}><span>${esc(rotulo(o))}</span></label>`).join("")}</div></fieldset>`;
+  const marcas = (nome, legenda, ops) => `<fieldset class="ped-grupo"><legend>${legenda}</legend><div class="ped-ops">
+    ${ops.map((o) => `<label><input type="checkbox" name="${nome}" value="${esc(o)}" ${f[nome].includes(o) ? "checked" : ""}><span>${esc(o)}</span></label>`).join("")}</div></fieldset>`;
   const numero = (k, rot, min, max, passo = 1) => `<div class="field"><label for="p_${k}">${rot}</label>
     <input id="p_${k}" name="${k}" type="number" inputmode="${passo < 1 ? "decimal" : "numeric"}" min="${min}" max="${max}" step="${passo}" value="${f[k] ?? ""}"></div>`;
   const caixa = (k, texto, marcado) => `<label class="ped-caixa"><input type="checkbox" name="${k}" ${marcado ? "checked" : ""}><span>${texto}</span></label>`;
 
   function corpo() {
     const o = st.form.opcoes;
-    if (etapa === 0) return radios("objetivo", "Objetivo", o.objetivo) + radios("nivel", "Nível de experiência", o.nivel)
+    if (etapa === 0) return marcas("objetivo", "Objetivo <span class=\"muted\">(pode escolher mais de um)</span>", o.objetivo) + radios("nivel", "Nível de experiência", o.nivel)
       + numero("idade", "Idade (anos)", 18, 90) + radios("sexo", "Sexo", o.sexo)
       + `<div class="ped-2">${numero("altura", "Altura (cm)", 120, 230)}${numero("peso", "Peso (kg)", 30, 300, 0.1)}</div>`;
     if (etapa === 1) return radios("dias", "Quantos dias por semana você pode treinar?", [2, 3, 4, 5, 6], (d) => d + " dias")
@@ -69,7 +72,7 @@
     const item = (i, linhas) => `<div class="ped-res"><div class="chart-head"><h3>${ETAPAS[i]}</h3><button type="button" class="btn-sec" data-ir="${i}">Editar<span class="sr"> ${ETAPAS[i]}</span></button></div>
       ${linhas.map(([k, v]) => `<div class="row"><span>${k}</span><span>${esc(v)}</span></div>`).join("")}</div>`;
     const sims = f.parq.map((x, i) => (x ? i + 1 : 0)).filter(Boolean);
-    return item(0, [["Objetivo", f.objetivo], ["Nível", f.nivel], ["Idade", f.idade + " anos"], ["Sexo", f.sexo], ["Altura", f.altura + " cm"], ["Peso", String(f.peso).replace(".", ",") + " kg"]])
+    return item(0, [["Objetivo", f.objetivo.join(", ")], ["Nível", f.nivel], ["Idade", f.idade + " anos"], ["Sexo", f.sexo], ["Altura", f.altura + " cm"], ["Peso", String(f.peso).replace(".", ",") + " kg"]])
       + item(1, [["Dias por semana", f.dias], ["Tempo por treino", f.minutos + " min"]])
       + item(2, [["PAR-Q", sims.length ? "Sim nas perguntas " + sims.join(", ") : "Não em todas"], ...(sims.length ? [["Liberação médica", "Sim"]] : []),
         ...TEXTOS.filter(([k]) => f[k]).map(([k, rot]) => [rot, f[k]])])
@@ -129,7 +132,7 @@
   function erroDaEtapa() {
     const faixa = (v, a, b, int = true) => typeof v === "number" && Number.isFinite(v) && v >= a && v <= b && (!int || Number.isInteger(v));
     if (etapa === 0) {
-      if (!f.objetivo) return "Escolha o objetivo.";
+      if (!f.objetivo.length) return "Escolha pelo menos um objetivo.";
       if (!f.nivel) return "Escolha o nível de experiência.";
       if (typeof f.idade === "number" && f.idade < 18) return "O treino personalizado é só para quem tem 18 anos ou mais.";
       if (!faixa(f.idade, 18, 90)) return "A idade precisa ser de 18 a 90 anos.";

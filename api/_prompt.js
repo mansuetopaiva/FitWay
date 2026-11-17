@@ -89,7 +89,7 @@ export function montarPrompt(r, { fotos = [], anterior = null } = {}) {
   const plano = anterior && Array.isArray(anterior.treinos)
     ? anterior.treinos.map((t) => `${t.id} – ${t.nome}: ${t.exercicios.map((e) => e[0]).join(", ")}`).join("\n") : "";
   const v = {
-    objetivo: r.objetivo, dias: r.dias, minutos: r.minutos, nivel: r.nivel, idade: r.idade, sexo: r.sexo, altura: r.altura, peso: r.peso,
+    objetivo: [].concat(r.objetivo).join(", "), dias: r.dias, minutos: r.minutos, nivel: r.nivel, idade: r.idade, sexo: r.sexo, altura: r.altura, peso: r.peso,
     fotos: ou(CHAVES_FOTOS.filter((k) => fotos.includes(k)).map((k) => ROTULOS_FOTOS[k]).join(", "), "nenhuma"),
     parq, restricoes, observacoes: ou(r.observacoes, "nenhuma"),
   };
