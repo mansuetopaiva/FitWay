@@ -103,7 +103,7 @@ test("prazos: respondido há 7 dias fecha; anexo some 90 dias depois de fechado"
 });
 
 test("ações do suporte conhecidas", () => {
-  assert.deepEqual(ACOES, ["suporte", "chamado_abrir", "chamado", "chamado_anexo", "chamado_responder", "chamado_encerrar"]);
+  assert.deepEqual(ACOES, ["suporte", "suporte_aviso", "chamado_abrir", "chamado", "chamado_anexo", "chamado_responder", "chamado_encerrar"]);
 });
 
 // ---------- admin ----------
@@ -205,4 +205,28 @@ test("anexo: limite exato de 410000 caracteres", () => {
   const base = "data:image/jpeg;base64,/9j/";
   assert.equal(anexoValido(base + "A".repeat(410000 - base.length)), true);
   assert.equal(anexoValido(base + "A".repeat(410001 - base.length)), false);
+});
+
+test("depois_de: só as mensagens de id maior, no SQL e só do chamado da própria conta; valor inválido dá 400 sem consultar", async () => {
+  for (const d of [-1, 1.5, "3", Number.MAX_SAFE_INTEGER + 1]) {
+    const s = sqlFalso();
+    assert.equal((await acaoSuporte(s.sql, aluno, { acao: "chamado", id: "c1", depois_de: d })).status, 400, String(d));
+    assert.equal(s.chamadas.length, 0);
+  }
+  const s = sqlFalso((q) => (q.includes("update chamados set lido_aluno_em") ? [{ id: "c1", status: "respondido" }] : q.includes("from chamado_mensagens") ? [{ id: 9 }] : []));
+  const r = await acaoSuporte(s.sql, aluno, { acao: "chamado", id: "c1", depois_de: 7 });
+  assert.equal(r.status, 200);
+  assert.match(s.chamadas[0].q, /where id = \? and email = \?/, "chamado da própria conta");
+  const m = s.chamadas.find((c) => c.q.includes("from chamado_mensagens"));
+  assert.match(m.q, /chamado_id = \? and id > \?/); assert.ok(m.valores.includes(7));
+  const a = sqlFalso((q) => (q.includes("update chamados set lido_admin_em") ? [{ id: "c1" }] : []));
+  assert.equal((await acaoAdmin(a.sql, dono, { op: "suporte_chamado", id: "c1", depois_de: 4 })).status, 200);
+  assert.ok(a.chamadas.find((c) => c.q.includes("from chamado_mensagens")).valores.includes(4));
+  assert.equal((await acaoAdmin(sqlFalso().sql, dono, { op: "suporte_chamado", id: "c1", depois_de: "x" })).status, 400);
+});
+
+test("suporte_aviso: só o aviso de não lida, da própria conta", async () => {
+  const s = sqlFalso(() => [{ n: true }]);
+  assert.deepEqual((await acaoSuporte(s.sql, aluno, { acao: "suporte_aviso" })).corpo, { naoLido: true });
+  assert.ok(s.chamadas.every((c) => c.valores.includes("al@x.com")));
 });

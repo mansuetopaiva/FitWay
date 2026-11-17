@@ -1,9 +1,13 @@
 // App inteiro no jsdom, falando com o servidor real (PGlite). Um cookie por navegador.
 import { JSDOM, VirtualConsole } from "jsdom";
+import { after } from "node:test";
+// Fecha as janelas no fim do arquivo: as consultas periódicas do suporte manteriam o processo vivo.
+const abertas = [];
+after(() => abertas.forEach((w) => w.close()));
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 const REPO = fileURLToPath(new URL("../", import.meta.url)), R = REPO; // raiz do repositório
-export async function navegador(chamar, { hash = "", confirmar = true, token: tk = null } = {}) {
+export async function navegador(chamar, { hash = "", confirmar = true, token: tk = null, rapido = false } = {}) {
   let token = tk; const erros = [];
   const vc = new VirtualConsole(); vc.on("jsdomError", (e) => erros.push(e)); vc.on("error", (e) => erros.push(e));
   const html = readFileSync(R + "index.html", "utf8").replace(/<meta http-equiv[^>]*>/, "").replace(/<script src[^>]*><\/script>/, "");
@@ -11,6 +15,8 @@ export async function navegador(chamar, { hash = "", confirmar = true, token: tk
     beforeParse(w) {
       w.confirm = () => (typeof confirmar === "function" ? confirmar() : confirmar);
       w.scrollTo = () => {};
+      // rapido: temporizadores de 1 s ou mais rodam 100x mais rápido (as consultas de 8 s e 30 s do suporte viram 80 e 300 ms).
+      if (rapido) { const st = w.setTimeout.bind(w); w.setTimeout = (f, ms, ...a) => st(f, ms >= 1000 ? ms / 100 : ms, ...a); }
       // Scripts baixados sob demanda (admin, pedido, pagamento): lidos do disco.
       const ap = w.Node.prototype.appendChild;
       w.Node.prototype.appendChild = function (el) {
@@ -25,6 +31,7 @@ export async function navegador(chamar, { hash = "", confirmar = true, token: tk
       };
     } });
   const w = dom.window;
+  abertas.push(w);
   w.eval(readFileSync(R + "js/app.js", "utf8"));
   const espera = async (f, ms = 3000) => { const t = Date.now(); for (;;) { try { const v = f(); if (v) return v; } catch (e) {} if (Date.now() - t > ms) throw new Error("tempo esgotado: " + f); await new Promise((r) => setTimeout(r, 20)); } };
   const texto = () => w.document.body.textContent.replace(/\s+/g, " ");

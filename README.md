@@ -218,6 +218,8 @@ Spec: [docs/suporte.md](docs/suporte.md). Vale para o app inteiro, mesmo com `TR
 - **Admin:** aba **Suporte** do painel, com a contagem dos que aguardam resposta. Os mais antigos esperando vêm primeiro. A conversa
   mostra o contexto (acesso, plano e o pedido ligado) e tem **Responder**, **Encerrar** e **Reabrir**. Tudo vai para o histórico,
   inclusive abrir uma imagem anexada.
+- **Atualização automática:** a conversa aberta busca mensagens novas a cada 8 s (aluno e admin), a lista do admin e o aviso do
+  Perfil a cada 30 s, só com a aba visível.
 - **Prazos** (sem cron, junto dos prazos dos pedidos): chamado respondido sem retorno do aluno em 7 dias é encerrado; imagens são
   apagadas 90 dias depois do encerramento. As mensagens ficam enquanto a conta existir.
 - **Excluir conta** (detalhe do usuário, para pedidos de "Conta e dados"): digite o email da pessoa para confirmar. Recusa se houver

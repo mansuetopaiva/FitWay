@@ -736,7 +736,12 @@
   const ASSUNTOS = { pagamento: "Pagamento", treino: "Meu treino", conta: "Conta e dados", app: "Problema no app" };
   const ST_CH = { aberto: ["Aguardando resposta", "aviso"], respondido: ["Respondido", "ok"], fechado: ["Encerrado", ""] };
   const supLista = { status: "aberto", assunto: "", pagina: 0, itens: [], temMais: false, estado: "carregando", erro: "" };
-  let ch = null, chId = "", chEstado = "", chErro = "", versaoCh = 0, versaoSupLista = 0;
+  let ch = null, chId = "", chEstado = "", chErro = "", versaoCh = 0, versaoSupLista = 0, pararCh = () => {};
+  const naSecaoSuporte = () => /^#\/admin\/(suporte$|chamado\.)/.test(location.hash);
+  const msgChHtml = (m, nome) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
+        <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte" + (m.admin_email ? " (" + esc(m.admin_email) + ")" : "") : esc(nome)}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
+        <div class="sup-texto">${esc(m.texto)}</div>
+        ${m.anexo ? `<div class="sup-img"><button type="button" class="btn-sec" data-ch-anexo="${esc(String(m.id))}">Ver imagem (fica registrado)</button></div>` : ""}</li>`;
   const seloCh = (st) => `<span class="selo ${ST_CH[st][1]}">${ST_CH[st][0]}</span>`;
   // "há 3 h", "há 2 dias": quanto tempo o chamado está parado.
   const ha = (iso) => {
@@ -769,7 +774,16 @@
     app.querySelector(".adm").addEventListener("click", cliqueSuporte);
     if (!resumo) carregarResumo();
     if (supLista.estado === "carregando" && !supLista.itens.length) carregarSupLista(false);
-    if (id) { if (id !== chId || !ch) carregarChamado(id); else pintarChamado(); return; }
+    // Lista a cada 30 s, sem piscar: só troca a primeira página quando a resposta chega.
+    window.FitWay.repetir(async () => {
+      if (supLista.pagina !== 0 || supLista.estado !== "ok") return;
+      const v = versaoSupLista;
+      const r = await api("admin", { op: "suporte_lista", status: supLista.status, assunto: supLista.assunto, pagina: 0 });
+      if (v !== versaoSupLista || supLista.pagina !== 0) return;
+      supLista.itens = r.itens; supLista.temMais = r.temMais;
+      pintarSupLista();
+    }, { base: 30000, ativo: naSecaoSuporte });
+    if (id) { if (id !== chId || !ch) carregarChamado(id); else { pintarChamado(); vigiarChamado(id, versaoCh); } return; }
     chId = ""; ch = null;
     pintarChamado();
     const linha = antes && app.querySelector(`a[href="#/admin/chamado.${CSS.escape(antes)}"]`);
@@ -826,6 +840,32 @@
     }
     pintarChamado(true);
     pintarSupLista();
+    if (chEstado === "ok") vigiarChamado(id, v);
+  }
+  // Conversa aberta: a cada 8 s, só as mensagens novas (depois_de) e o status. Mudou o status: redesenha guardando o que
+  // estava sendo digitado; senão, acrescenta no fim (rolando só se o admin já estava no fim).
+  function vigiarChamado(id, v) {
+    pararCh();
+    pararCh = window.FitWay.repetir(async () => {
+      const ultimo = ch.mensagens.length ? Number(ch.mensagens[ch.mensagens.length - 1].id) : 0;
+      const n = await api("admin", { op: "suporte_chamado", id, depois_de: ultimo });
+      if (v !== versaoCh || chId !== id || !ch) return;
+      const novas = n.mensagens.filter((m) => Number(m.id) > ultimo);
+      ch.mensagens.push(...novas);
+      if (n.chamado.status !== ch.chamado.status) {
+        const t = $("#chTexto"), digitado = t ? t.value : "";
+        ch.chamado = { ...ch.chamado, ...n.chamado };
+        pintarChamado(false);
+        const t2 = $("#chTexto"); if (t2 && digitado) t2.value = digitado;
+        return carregarSupLista(false);
+      }
+      if (!novas.length) return;
+      const noFim = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 80;
+      const ol = app.querySelector(".adm-det .sup-conversa");
+      if (!ol) return;
+      ol.insertAdjacentHTML("beforeend", novas.map((m) => msgChHtml(m, ch.chamado.nome)).join(""));
+      if (noFim && ol.lastElementChild.scrollIntoView) ol.lastElementChild.scrollIntoView({ block: "end" });
+    }, { base: 8000, ativo: () => naSecaoSuporte() && chId === id && v === versaoCh });
   }
   function pintarChamado(focar) {
     const el = $("#admDetalhe");
@@ -839,10 +879,7 @@
     const plano = c.plano_nome ? esc(c.plano_nome) + (c.plano_origem === "ia" ? " (IA)" : "") : "Nenhum";
     const pedido = c.pedido_id ? `<a href="#/admin/pedido.${encodeURIComponent(c.pedido_id)}">${esc([c.pedido_codigo || c.pedido_id.slice(0, 8), TIPOS[c.pedido_tipo],
       c.pedido_valor ? reais(c.pedido_valor) : "", STATUS[c.pedido_status] && STATUS[c.pedido_status][0]].filter(Boolean).join(" · "))}</a>` : "Nenhum";
-    const msgs = ch.mensagens.map((m) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
-        <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte" + (m.admin_email ? " (" + esc(m.admin_email) + ")" : "") : esc(c.nome)}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
-        <div class="sup-texto">${esc(m.texto)}</div>
-        ${m.anexo ? `<div class="sup-img"><button type="button" class="btn-sec" data-ch-anexo="${esc(String(m.id))}">Ver imagem (fica registrado)</button></div>` : ""}</li>`).join("");
+    const msgs = ch.mensagens.map((m) => msgChHtml(m, c.nome)).join("");
     el.innerHTML = `${voltar}
       <div class="sup-det">
         <aside class="card sup-ctx" aria-labelledby="chCtxTit">
@@ -857,7 +894,7 @@
         <div class="card sup-conv">
           <h2 id="admDetTit" tabindex="-1">${esc(ASSUNTOS[c.assunto])} ${seloCh(c.status)}</h2>
           <p class="muted">Aberto em ${esc(quando(c.criado))}${c.fechado_em ? " · encerrado em " + esc(quando(c.fechado_em)) : ""}</p>
-          <ol class="sup-conversa" aria-label="Mensagens">${msgs}</ol>
+          <ol class="sup-conversa" aria-label="Mensagens" aria-live="polite" aria-relevant="additions">${msgs}</ol>
           ${fechado ? `<p class="muted">Chamado encerrado. Reabra para responder.</p>`
             : `<form id="chResp" novalidate><div class="field"><label for="chTexto">Responder</label><textarea id="chTexto" rows="4" maxlength="2000" aria-describedby="chErr"></textarea></div>
               <p class="err" role="alert" id="chErr"></p><button class="btn" type="submit">Enviar resposta</button></form>`}

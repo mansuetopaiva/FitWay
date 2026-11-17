@@ -289,6 +289,30 @@
     render();
   }
 
+  // ---------- consulta periódica (suporte) ----------
+  // Só com a aba visível; ao voltar para a aba, consulta na hora. Falhou: espera o dobro (até "max"), sem mostrar erro;
+  // deu certo: volta para "base". Para sozinha quando ativo() fica falso (a pessoa saiu da tela) ou quando parar() é chamada.
+  const consultas = new Set(); // as ativas; render() para todas ao trocar de tela (nenhum intervalo esquecido)
+  function repetir(fn, { base, max = 60000, ativo }) {
+    let atraso = base, timer = null, parado = false, rodando = false;
+    const agendar = (ms) => { clearTimeout(timer); if (!parado) timer = setTimeout(rodar, ms); };
+    async function rodar() {
+      if (parado || rodando) return;
+      if (!ativo()) return parar();
+      if (document.hidden) return; // retoma pelo visibilitychange
+      rodando = true;
+      try { await fn(); atraso = base; } catch (e) { atraso = Math.min(atraso * 2, max); }
+      rodando = false;
+      agendar(atraso);
+    }
+    const voltou = () => { if (!document.hidden && !parado) { clearTimeout(timer); rodar(); } };
+    function parar() { parado = true; clearTimeout(timer); document.removeEventListener("visibilitychange", voltou); consultas.delete(parar); }
+    document.addEventListener("visibilitychange", voltou);
+    consultas.add(parar);
+    agendar(base);
+    return parar;
+  }
+
   // ---------- aviso de resposta no suporte (aba Perfil e card do Perfil) ----------
   const ponto = () => (suporteAviso ? `<i class="ponto" aria-hidden="true"></i>` : "");
   const pontoSr = () => (suporteAviso ? `<span class="sr"> (resposta nova no suporte)</span>` : "");
@@ -354,7 +378,7 @@
       () => toast("Não consegui abrir o pagamento. Tente de novo."));
   }
   // O painel, o formulário e o pagamento usam estas peças do app; ficam expostas só depois do login.
-  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, avisoSuporte, linkPrivacidade, get email() { return email; }, get nome() { return nomeUser; } }; };
+  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, avisoSuporte, linkPrivacidade, repetir, get email() { return email; }, get nome() { return nomeUser; } }; };
 
   // ---------- início: check-in + gráfico ----------
   let chartMode = "semana", diaRender = "";
@@ -691,7 +715,7 @@
   }
 
   // ---------- perfil ----------
-  let editandoPerfil = false, trocandoSenha = false;
+  let editandoPerfil = false, trocandoSenha = false, pararAviso = () => {};
   function viewPerfil() {
     const u = { nome: nomeUser };
     shell("Perfil", `
@@ -742,6 +766,10 @@
     $("#sair").onclick = sair;
     ligarIA();
     atualizarIA();
+    // Resposta nova no suporte enquanto o Perfil está aberto: o ponto aparece em até 30 s.
+    pararAviso();
+    pararAviso = repetir(async () => { const r = await api("suporte_aviso"); if (r.naoLido !== suporteAviso) avisoSuporte(r.naoLido); },
+      { base: 30000, ativo: () => !!email && location.hash.split("/")[1] === "perfil" });
     const pdfErr = $("#pdfErr"), enviar = $("#enviarPdf");
     // O treino feito pela IA é pago: substituir por PDF ou remover pede confirmação (vale também se ele está escondido por acesso vencido).
     const temIA = () => (ia && ia.temPlanoIA) || (data.plano && data.plano.origem === "ia");
@@ -1009,6 +1037,7 @@
   // ---------- rotas ----------
   function render() {
     tirarToken();
+    consultas.forEach((p) => p());
     clearInterval(tickTimer);
     clearTimeout(iaTimer);
     const [, rota, arg] = location.hash.split("/");

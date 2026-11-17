@@ -2,7 +2,7 @@
 // Toda instrução do aluno filtra por "email = u.email" no próprio SQL: um id de outra conta simplesmente não é achado.
 import { randomBytes } from "node:crypto";
 
-export const ACOES = ["suporte", "chamado_abrir", "chamado", "chamado_anexo", "chamado_responder", "chamado_encerrar"];
+export const ACOES = ["suporte", "suporte_aviso", "chamado_abrir", "chamado", "chamado_anexo", "chamado_responder", "chamado_encerrar"];
 export const ASSUNTOS = ["pagamento", "treino", "conta", "app"];
 const STATUS = ["aberto", "respondido", "fechado"];
 const MAX_ABERTOS = 3, MAX_HORA = 10, // os mesmos números estão escritos no SQL
@@ -12,6 +12,8 @@ const ok = (corpo) => ({ status: 200, corpo });
 const falha = (status, erro) => ({ status, corpo: { erro } });
 const idValido = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(v);
 const msgValida = (v) => Number.isSafeInteger(v) && v > 0;
+// "depois_de": id da última mensagem que a tela já tem (a atualização automática busca só as novas). Ausente = todas.
+const depoisDe = (v) => (v === undefined ? 0 : Number.isSafeInteger(v) && v >= 0 ? v : -1);
 // Texto do usuário: aparado, 1 a 2000 caracteres. Sempre mostrado escapado (esc + pre-wrap), nunca como HTML.
 const textoDe = (v) => (typeof v === "string" && v.trim().length >= 1 && v.trim().length <= MAX_TEXTO ? v.trim() : "");
 // Só JPEG em data URL, com a assinatura FF D8 FF ("/9j/" em base64): nada de SVG, HTML ou outro tipo.
@@ -51,6 +53,8 @@ export async function acaoSuporte(sql, u, b) {
     const pedidos = await sql`select id, codigo, tipo, valor, status, criado from pedidos where email = ${email} order by criado desc limit 20`;
     return ok({ chamados, pedidos, naoLido: chamados.some((c) => c.nao_lido) });
   }
+
+  if (b.acao === "suporte_aviso") return ok({ naoLido: await naoLido(sql, email) }); // a cada 30 s no Perfil: só o ponto
 
   if (b.acao === "chamado_abrir") {
     const assunto = typeof b.assunto === "string" && ASSUNTOS.includes(b.assunto) ? b.assunto : "";
@@ -92,12 +96,15 @@ export async function acaoSuporte(sql, u, b) {
   const id = b.id;
 
   if (b.acao === "chamado") {
-    // Abrir a conversa marca as respostas como lidas.
+    const depois = depoisDe(b.depois_de);
+    if (depois < 0) return falha(400, "Requisição inválida.");
+    // Abrir a conversa (e cada atualização com ela aberta) marca as respostas como lidas.
     const [c] = await sql`update chamados set lido_aluno_em = now() where id = ${id} and email = ${email}
       returning id, assunto, status, pedido_id, criado, atualizado, fechado_em`;
     if (!c) return naoAchou();
     // Sem o anexo (só se existe) e sem o email de quem respondeu.
-    const mensagens = await sql`select id, autor, texto, anexo is not null as anexo, criado from chamado_mensagens where chamado_id = ${id} order by id`;
+    const mensagens = await sql`select id, autor, texto, anexo is not null as anexo, criado from chamado_mensagens
+      where chamado_id = ${id} and id > ${depois} order by id`;
     return ok({ chamado: c, mensagens, naoLido: await naoLido(sql, email) });
   }
 
@@ -163,6 +170,8 @@ export async function acaoAdminSuporte(sql, u, b) {
   const id = b.id;
 
   if (b.op === "suporte_chamado") {
+    const depois = depoisDe(b.depois_de);
+    if (depois < 0) return falha(400, "Requisição inválida.");
     const [c] = await sql`with c as (update chamados set lido_admin_em = now() where id = ${id}
           returning id, email, assunto, status, pedido_id, criado, atualizado, fechado_em)
       select c.*, u.nome, u.acesso_ate, u.dados->'plano'->>'nome' as plano_nome, u.dados->'plano'->>'origem' as plano_origem,
@@ -170,7 +179,7 @@ export async function acaoAdminSuporte(sql, u, b) {
       from c join usuarios u on u.email = c.email left join pedidos p on p.id = c.pedido_id`;
     if (!c) return naoAchou();
     const mensagens = await sql`select id, autor, admin_email, texto, anexo is not null as anexo, criado from chamado_mensagens
-      where chamado_id = ${id} order by id`;
+      where chamado_id = ${id} and id > ${depois} order by id`;
     return ok({ chamado: c, mensagens });
   }
 

@@ -86,6 +86,16 @@ Todas exigem login e filtram por `email = u.email` dentro da própria instruçã
 - **Admin:** aba "Suporte" (`#/admin/suporte`, `#/admin/chamado.<id>`), filtros por status e assunto, conversa com o contexto acima
   (no celular) ou ao lado; Responder, Encerrar, Reabrir. Detalhe do usuário: "Excluir conta" em duas etapas.
 
+## Atualização automática
+
+- `chamado { id, depois_de }` e `suporte_chamado { id, depois_de }`: só as mensagens com id maior (e ainda só do chamado da própria
+  conta, no caso do aluno); cada consulta marca como lida. `suporte_aviso` devolve só `{ naoLido }`.
+- Conversa aberta (aluno e admin): a cada 8 s; acrescenta as novas no fim (`aria-live="polite"`), sem redesenhar a tela nem perder o
+  texto digitado; rola só se a pessoa estava no fim. Status mudou: atualiza o rótulo; abriu ou fechou: redesenha (o admin guarda o rascunho).
+- Lista do admin e aviso do Perfil: a cada 30 s.
+- `FitWay.repetir` (js/app.js): só com a aba visível, consulta na hora ao voltar; falha → 16, 32, até 60 s, sem mostrar erro;
+  certo → 8 s de novo. `render()` para todas as consultas ao trocar de tela.
+
 ## Política de privacidade `2026-11-16-2`
 
 Acrescenta o 2.6 (mensagens e imagens dos chamados), a linha dos anexos no item 6 e, no 7, os pedidos pelo suporte (assunto Conta e dados).

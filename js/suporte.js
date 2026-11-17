@@ -30,7 +30,14 @@
   let pedidos = null, novo = null, anexo = "", enviando = false, preparando = false;
 
   let conta = "";
+  // A conversa aberta se atualiza sozinha (FitWay.repetir); sair dela ou abrir outra para a consulta anterior.
+  let pararConversa = () => {}, geracao = 0;
+  const msgHtml = (m) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
+        <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte FitWay" : "Você"}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
+        <div class="sup-texto">${esc(m.texto)}</div>
+        ${m.anexo ? `<div class="sup-img"><button type="button" class="btn-sec" data-ver="${esc(String(m.id))}">Ver imagem</button></div>` : ""}</li>`;
   async function render(arg) {
+    pararConversa();
     anexo = ""; enviando = false; preparando = false;
     if (conta !== window.FitWay.email) { conta = window.FitWay.email; pedidos = null; novo = null; } // outra conta no mesmo aparelho
     if (!arg) return lista();
@@ -152,21 +159,20 @@
 
   // ---------- conversa ----------
   async function conversa(id, focoFim) {
+    pararConversa();
+    const g = ++geracao;
     shell(TIT, `<p class="muted" style="margin-top:16px">Carregando…</p>`, "perfil");
     let r;
     try { r = await api("chamado", { id }); }
     catch (e) { return aqui(id) && erroTela(voltar("#/suporte", "Chamados"), sem(e), () => conversa(id)); }
-    if (!aqui(id)) return;
+    if (!aqui(id) || g !== geracao) return;
     window.FitWay.avisoSuporte(r.naoLido); // abrir marcou como lido
     const c = r.chamado, fechado = c.status === "fechado";
-    const msgs = r.mensagens.map((m) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
-        <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte FitWay" : "Você"}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
-        <div class="sup-texto">${esc(m.texto)}</div>
-        ${m.anexo ? `<div class="sup-img" data-img="${esc(String(m.id))}"><button type="button" class="btn-sec" data-ver="${esc(String(m.id))}">Ver imagem</button></div>` : ""}</li>`).join("");
+    const msgs = r.mensagens.map(msgHtml).join("");
     shell(TIT, `${voltar("#/suporte", "Chamados")}
       <section class="card"><h2 id="supTit" tabindex="-1">${esc(ASSUNTOS[c.assunto].nome)}</h2>
-        <p class="muted">${esc(STATUS[c.status])}</p>
-        <ol class="sup-conversa" aria-label="Mensagens">${msgs}</ol>
+        <p class="muted" id="supStatus">${esc(STATUS[c.status])}</p>
+        <ol class="sup-conversa" aria-label="Mensagens" aria-live="polite" aria-relevant="additions">${msgs}</ol>
         ${fechado ? `<p class="ia-status">Este chamado foi encerrado.</p><button type="button" class="btn" id="supDeNovo">Abrir novo chamado sobre isso</button>`
           : `<form id="supResp" novalidate>${campoTexto("Responder")}${campoAnexo()}<p class="err" role="alert" id="supErr"></p>
             <button class="btn" type="submit">Enviar</button></form>
@@ -174,7 +180,28 @@
       </section>`, "perfil");
     const ult = app.querySelector(".sup-msg:last-child");
     if (focoFim && ult) { ult.tabIndex = -1; ult.focus(); } else $("#supTit").focus();
-    app.querySelectorAll("[data-ver]").forEach((b) => b.onclick = async () => {
+    // Atualização automática: a cada 8 s, só as mensagens novas (depois_de) e o status; não mexe no que está sendo digitado.
+    let ultimo = r.mensagens.length ? Number(r.mensagens[r.mensagens.length - 1].id) : 0, status = c.status;
+    pararConversa = window.FitWay.repetir(async () => {
+      const n = await api("chamado", { id, depois_de: ultimo });
+      if (!aqui(id) || g !== geracao) return;
+      window.FitWay.avisoSuporte(n.naoLido); // chegou com a conversa aberta: já está lida
+      if (n.chamado.status !== status) {
+        if (n.chamado.status === "fechado" || status === "fechado") return conversa(id); // o formulário muda inteiro
+        status = n.chamado.status; $("#supStatus").textContent = STATUS[status];
+      }
+      const novas = n.mensagens.filter((m) => Number(m.id) > ultimo);
+      if (!novas.length) return;
+      // Só rola se a pessoa já estava no fim; lendo mais acima, a rolagem fica onde está.
+      const noFim = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 80;
+      const ol = $(".sup-conversa");
+      ol.insertAdjacentHTML("beforeend", novas.map(msgHtml).join(""));
+      ultimo = Number(novas[novas.length - 1].id);
+      if (noFim && ol.lastElementChild.scrollIntoView) ol.lastElementChild.scrollIntoView({ block: "end" });
+    }, { base: 8000, ativo: () => aqui(id) && g === geracao });
+    $(".sup-conversa").onclick = async (ev) => {
+      const b = ev.target.closest("[data-ver]");
+      if (!b) return;
       b.disabled = true;
       try {
         const { anexo: src } = await api("chamado_anexo", { id, msg: Number(b.dataset.ver) });
@@ -183,7 +210,7 @@
         box.innerHTML = `<img class="sup-previa" src="${esc(src)}" alt="Imagem anexada à mensagem" tabindex="-1">`;
         box.firstChild.focus();
       } catch (e) { b.disabled = false; toast(e.status ? e.message : "Não consegui abrir a imagem."); }
-    });
+    };
     if (fechado) {
       $("#supDeNovo").onclick = () => { novo = { assunto: c.assunto, pedido_id: c.pedido_id || "" }; location.hash = "#/suporte/novo"; };
       return;
