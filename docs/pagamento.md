@@ -9,6 +9,10 @@ automaticamente pelo `payment_check`. Nenhuma confirmação é manual.
 comprovante pode ser falso, e a liberação precisa ser automática e segura. As colunas e o status usados por ele continuam no banco
 (nenhuma migração destrutiva); o código só deixa de usá-los.
 
+**Mudança de decisão (preço único):** o InfinitePay não deixa travar o link no Pix, então preço diferente no cartão não se sustenta.
+Um preço por tipo, qualquer que seja o meio, e um link por pedido; a pessoa escolhe Pix ou cartão na página do checkout. O meio real
+(`capture_method`) aparece no admin só como informação. Sai a marcação "Pago com meio diferente do escolhido" (a antiga P9).
+
 **Fora do escopo:** a IA, o formulário e as regras de acesso. O pagamento só chama `efeitoDoPagamento()`, que já existe.
 **Nunca no código:** dado pessoal do dono. Tudo que é dele vem de variável de ambiente.
 
@@ -34,34 +38,33 @@ Documentação do Checkout InfinitePay (https://www.infinitepay.io/checkout-docu
 ### Preços e meios (`api/_precos.js`)
 
 ```js
-PRECOS = { pix: { inicial: 999, mensalidade: 999, novo_treino: 499 }, cartao: { inicial: 1199, mensalidade: 1199, novo_treino: 599 } } // centavos
-metodosDisponiveis(tipo) // ["pix", "cartao"] com INFINITEPAY_HANDLE e SITE_URL; senão []
-precoDe(metodo, tipo)    // centavos ou undefined
+PRECOS = { inicial: 999, mensalidade: 999, novo_treino: 499 } // centavos, qualquer que seja o meio
+pagamentoDisponivel()  // INFINITEPAY_HANDLE e SITE_URL
+precoDe(tipo)          // centavos ou undefined
 ```
 
 - Sem as duas variáveis, a tela mostra "Pagamento indisponível no momento".
-- **Criação do pedido:** `metodo = null` e `valor = PRECOS.pix[tipo]` (provisório, só para a lista do admin).
+- **Criação do pedido:** `metodo = null` e `valor = PRECOS[tipo]`. `metodo` não é mais gravado (fica o de pedidos antigos).
 - `ABERTOS` continua com `aguardando_confirmacao` (pedido antigo nesse status ainda bloqueia um pedido novo até o admin cancelar).
 
 ### Banco
 
 Coluna nova em `pedidos` (`add column if not exists`):
-- `checkout_url_pix text`: o link do InfinitePay criado com o preço do Pix.
+- `checkout_url_pix text`: o link de Pix de pedidos antigos (preço por meio). Não é mais gravado.
 
-`checkout_url` continua sendo o link criado com o preço do cartão (pedidos antigos já o têm). Um pedido tem no máximo um link por meio.
+`checkout_url` é o link do pedido (um por pedido). Pedidos antigos podem ter `checkout_url` (preço do cartão) e `checkout_url_pix`.
 
 Ficam no banco, sem uso pelo código novo: `pagador_nome`, `comprovante`, `aviso_em`, `pix_e2e`, `pix_e2e_informado`, `mensagem_usuario`
 e o valor `aguardando_confirmacao` do `check`. A limpeza de 90 dias continua apagando `comprovante` e `pagador_nome` antigos.
 
 ### Ações do usuário (`api/app.js`, lógica em `api/_pagamento.js`)
 
-- **`pagamento { id }`:** só pedido da própria conta. Devolve `{ pedido: { id, tipo, status, metodo, valor }, metodos: [{ metodo, valor }] }`.
-- **`pagar { id, metodo }`:**
-  - só pedido da própria conta, em `aguardando_pagamento`, com `metodo` em `metodosDisponiveis(tipo)`;
-  - grava `metodo` e `valor = precoDe(metodo, tipo)` num UPDATE condicional (`status = 'aguardando_pagamento'`);
-  - se já existe o link daquele meio, devolve o mesmo (`{ url }`) sem chamar o InfinitePay;
-  - senão chama `/links` com o preço do meio e `order_nsu = id`, grava com `coalesce` (dois cliques: fica o primeiro) e devolve `{ url }`;
-  - trocar de meio cria o link do outro meio **sem apagar o primeiro**;
+- **`pagamento { id }`:** só pedido da própria conta. Devolve `{ pedido: { id, tipo, status, metodo, valor }, valor: PRECOS[tipo], disponivel }`.
+- **`pagar { id }`** (um `metodo` no corpo é ignorado):
+  - só pedido da própria conta, em `aguardando_pagamento`, com `pagamentoDisponivel()`;
+  - grava `valor = PRECOS[tipo]` num UPDATE condicional (`status = 'aguardando_pagamento'`);
+  - se o pedido já tem link (`checkout_url`, ou o `checkout_url_pix` de um pedido antigo), devolve o mesmo sem chamar o InfinitePay;
+  - senão chama `/links` com o preço do tipo e `order_nsu = id`, grava em `checkout_url` com `coalesce` (dois cliques: fica o primeiro);
   - resposta sem URL `https://…infinitepay.io/` válida, erro de rede ou 4xx/5xx → 502 "Pagamento indisponível no momento.".
 - **`confirmar_pagamento { order_nsu, transaction_nsu, slug }`:** o pedido precisa ser da conta logada; roda `confirmarPagamento`.
 - **Removidas** (respondem 400 "Ação desconhecida."): `pedido_metodo`, `pix_avisei`, `pagar_cartao`, `confirmar_cartao`.
@@ -79,22 +82,20 @@ e o valor `aguardando_confirmacao` do `check`. A limpeza de 90 dias continua apa
    - reconhecido: guarda o par em `checkout_ref` (para o admin verificar de novo); `paid !== true` → "recusado";
 5. pedido já fechado e pago de verdade → **"sobra"**: um `admin_log` `cartao_sem_pedido` (motivo `pedido_fechado`) por
    `transaction_nsu` (um 2º pagamento no mesmo link também conta), e o resumo do admin avisa para devolver;
-6. **valor:** `base` = o menor preço entre os links que o pedido tem (com link de Pix, `PRECOS.pix[tipo]`; só com link de cartão,
-   `PRECOS.cartao[tipo]`). Exige `amount` (o valor do link pago) `≥ base` e `paid_amount ≥ max(base, amount)`. Sem `amount`, ou abaixo
+6. **valor:** `base` = `PRECOS[tipo]` (vale também para os links antigos de Pix e de cartão). Exige `amount` (o valor do link pago) `≥ base` e `paid_amount ≥ max(base, amount)`. Sem `amount`, ou abaixo
    disso → "recusado", **e o dinheiro fica registrado** no mesmo `admin_log` (motivo `valor_menor`) para devolver.
    **Não ligue o desconto do Pix nas configurações do checkout:** com ele, `paid_amount < amount` e todo Pix seria recusado;
 7. pagamento que já está no `admin_log` para devolução → "recusado": nunca confirma outro pedido depois (o admin pode já ter
    devolvido, e o `payment_check` pode não amarrar o `order_nsu`, P8);
 8. aplica o pagamento (`aplicarPagamento`): `status`, `pago_em`, `valor` = `amount` do `payment_check` (ou `paid_amount` se não vier),
    `transaction_nsu`, `checkout_slug`, `capture_method` real, `confirmado_por = 'infinitepay'`, dias de acesso e `admin_log`, numa
-   instrução com UPDATE condicional pelo status aberto. `metodo` continua o escolhido. `transaction_nsu`/slug já usado (23505) →
+   instrução com UPDATE condicional pelo status aberto. `metodo` não muda. `transaction_nsu`/slug já usado (23505) →
    "ignorado"; fechou entre a leitura e a gravação → "sobra".
 
-**Meio diferente do escolhido:** como o checkout aceita os dois meios em qualquer link, o pagamento confirmado é aceito em qualquer
-meio, desde que o valor bata (passo 6). O `capture_method` real fica gravado e o admin marca quando ele difere do `metodo` escolhido.
-Nunca se recusa um pagamento confirmado por causa do meio.
+**Meio:** o checkout aceita Pix e cartão em qualquer link; o pagamento vale em qualquer meio, desde que o valor bata (passo 6). O
+`capture_method` real fica gravado e aparece no admin só como informação.
 
-**Dois links do mesmo pedido:** o primeiro pago confirma; o segundo encontra o pedido fechado e vira "sobra" (devolver). O UPDATE
+**Dois links do mesmo pedido (só pedidos antigos):** o primeiro pago confirma; o segundo encontra o pedido fechado e vira "sobra" (devolver). O UPDATE
 condicional e os `unique` de `transaction_nsu` e `checkout_slug` garantem uma confirmação só.
 
 **Webhook `api/infinitepay.js`:** só POST; nunca usa `amount` nem `paid` do corpo; lê `order_nsu`, `transaction_nsu` e `invoice_slug`
@@ -103,8 +104,7 @@ e chama `confirmarPagamento`; 200 (processado ou ignorado) ou 400 (temporário).
 ### Admin (`api/_admin.js`, `js/admin.js`)
 
 - `pedido_verificar { id }` (era `cartao_verificar`): roda o `payment_check` de novo com o `checkout_ref` guardado.
-- Detalhe do pedido: meio escolhido, meio pago (`capture_method`), **"Pago com meio diferente do escolhido"** quando não batem,
-  transação, e os links criados (Pix e cartão).
+- Detalhe do pedido: se tem link, transação, meio pago (`capture_method`, só informação) e quem confirmou.
 - Resumo: aviso dos pagamentos para devolver dos últimos 30 dias (pedido fechado ou valor menor).
 - Pedido antigo em `aguardando_confirmacao`: aparece na lista (filtro "Pix a conferir (antigo)") e no detalhe só com "Cancelar pedido",
   mostrando em modo leitura o que a pessoa mandou (nome, data do aviso, ID informado e comprovante), para decidir se devolve.
@@ -132,13 +132,13 @@ O dinheiro é sempre devolvido pelo dono no app do InfinitePay; o app só regist
 
 ### Telas
 
-- **"Como quer pagar?"** (depois de enviar o pedido, no Renovar e no "Pagar" do Perfil): "Pix — R$ 9,99" e "Cartão de crédito — R$ 11,99"
-  (R$ 4,99 e R$ 5,99 no novo treino), valores vindos do servidor. Os dois chamam `pagar` e levam ao checkout (`location.href`).
+- **Pagamento** (depois de enviar o pedido, no Renovar e no "Pagar" do Perfil): um botão "Pagar R$ 9,99" (R$ 4,99 no novo treino),
+  valor vindo do servidor, e a frase "Você escolhe Pix ou cartão na página segura da InfinitePay e volta para cá depois de pagar."
+  O botão chama `pagar` e leva ao checkout (`location.href`).
 - **Volta do checkout:** o app lê `order_nsu`, `transaction_nsu` e `slug`, guarda no `sessionStorage`, limpa a URL com
   `history.replaceState` e chama `confirmar_pagamento` uma vez.
 - **Voltou do checkout com os parâmetros, sem pagamento confirmado:** "Pagamento ainda não confirmado", com "Já paguei, verificar",
-  "Abrir o pagamento de novo" (o link do meio escolhido) e "Trocar meio de pagamento". Quem volta pelo botão Voltar (sem parâmetros)
-  vê "Como quer pagar?" de novo; escolher o mesmo meio reaproveita o link.
+  "Abrir o pagamento de novo" (o mesmo link). Quem volta pelo botão Voltar (sem parâmetros) vê o botão "Pagar" de novo, que reaproveita o link.
 - Saem da tela: código do pedido, `PIX_TITULAR_EXIBIDO`, link do Nubank, "Já paguei" com comprovante e ID da transação.
 - **Perfil** com pedido antigo em `aguardando_confirmacao`: "Seu pedido está em análise." (sem prazo).
 
@@ -147,7 +147,15 @@ O dinheiro é sempre devolvido pelo dono no app do InfinitePay; o app só regist
 - `aguardando_pagamento` há mais de 30 dias (de `greatest(criado, aviso_em)`) → `cancelado`, com fotos apagadas.
 - Fotos (e comprovante e nome de pedidos antigos) apagados 90 dias depois de pronto, cancelado ou erro.
 
-### Termo (versão `2026-11-16-2`, ainda não publicada, editada no lugar)
+### Termo (versão `2026-11-16-3`)
+
+Igual à `2026-11-16-2` (que pode já ter sido aceita), trocando:
+- 5.1: "O primeiro treino custa R$ 9,99, pago por Pix ou cartão de crédito, e inclui 30 dias de acesso. Para continuar vendo o treino,
+  pago a mensalidade de R$ 9,99 a cada 30 dias. Sem o pagamento, o treino deixa de aparecer no app até eu renovar. Meus check-ins e meu
+  histórico continuam guardados."
+- 5.2: "Depois de 8 semanas do plano, com o acesso em dia, posso pedir um novo treino por R$ 4,99."
+
+### Termo (versão `2026-11-16-2`)
 
 - 4.2: "Para isso, essas informações são enviadas à Anthropic, empresa dos Estados Unidos que fornece o serviço de inteligência artificial
   usado na montagem do plano, e podem ser processadas fora do Brasil. Ao pagar, meu nome e email são enviados à InfinitePay, que processa
@@ -170,14 +178,15 @@ O dinheiro é sempre devolvido pelo dono no app do InfinitePay; o app só regist
 
 ## Testes
 
-- Pix e cartão criam o link com o preço certo do meio; o segundo clique reaproveita; trocar de meio cria o outro sem apagar o primeiro;
-- pagamento com meio diferente do escolhido é aceito e o `capture_method` real é gravado (o admin marca);
-- valor pago menor que o do link é recusado e registrado para devolução; com link de Pix o mínimo é o preço do Pix;
-- os dois links do mesmo pedido não confirmam duas vezes (o segundo vira "sobra");
+- um link por pedido com o preço do tipo; o segundo clique reaproveita; pedido antigo reaproveita o link de Pix ou de cartão;
+- qualquer meio é aceito e o `capture_method` real é gravado;
+- valor pago menor que o do link, ou que o preço do tipo, é recusado e registrado para devolução (links antigos de R$ 11,99 incluídos);
+- os dois links de um pedido antigo não confirmam duas vezes (o segundo vira "sobra");
+- tela com um botão só ("Pagar R$ 9,99") e sem a escolha de meio (test-integracao/pagamento_ui.test.mjs);
 - ações e ops removidas respondem "Ação desconhecida." / "Operação desconhecida.";
 - a regra dos 30 dias;
 - continuam: corpo forjado, `order_nsu` trocado, `transaction_nsu`/slug repetido, limite de 10 s, formato inválido;
-- SQL real no PGlite e fluxo no jsdom, fora do repositório (sem dependência nova).
+- SQL real no PGlite e fluxo no jsdom em `test-integracao/` (`npm run test:integracao`).
 
 ## Análise de fraude
 
@@ -186,7 +195,7 @@ O dinheiro é sempre devolvido pelo dono no app do InfinitePay; o app só regist
 | Webhook ou volta forjados (`paid: true` no corpo) | Só o `payment_check` com o `handle` do servidor decide |
 | Criar um link próprio de R$ 1,00 com o `order_nsu` de um pedido (o `handle` é público) e pagar, até parcelado com juros | `amount` obrigatório e mínimo (passo 6); o dinheiro fica registrado para devolver |
 | Reusar em outro pedido um pagamento que ficou para devolução | Passo 7 |
-| Pagar o link do Pix (R$ 9,99) com cartão | Aceito por decisão (o checkout não restringe o meio); marcado no admin |
+| Pagar com outro meio | Não importa: preço único; o meio real fica no admin como informação |
 | Reusar um pagamento em outro pedido | `transaction_nsu` e `checkout_slug` únicos; `order_nsu` da resposta conferido quando vem (P8) |
 | Pagar os dois links | O segundo vira "sobra" e é devolvido |
 | Martelar o webhook para gastar a cota do InfinitePay | Uma consulta a cada 10 s por pedido |
@@ -213,11 +222,9 @@ O dinheiro é sempre devolvido pelo dono no app do InfinitePay; o app só regist
    responde `success: false`. `transaction_nsu` e `checkout_slug` únicos, a conferência do `order_nsu` da resposta (quando vier) e a recusa
    de pagamento já registrado para devolução barram o reuso. Também falta ver num pagamento real se a resposta traz `amount` (sem ele, o
    pagamento é recusado e vai para devolução: aparece logo no primeiro uso).
-3. **P9. Cartão pagando o link do Pix (decidido pelo dono em 2026-11-16: risco aceito).** Aceito, com a marcação "Pago com meio
-   diferente do escolhido" no admin. Custa no máximo R$ 2,00 por pedido (R$ 1,00 no novo treino), e qualquer pessoa consegue de propósito.
-   Alternativa futura, se virar problema: obter a API Key e usar um link só, no preço do cartão, com `options.discounts.pix`.
-4. **P10. Desconto do Pix nas configurações do checkout (decidido pelo dono em 2026-11-16: não ligar).** Com ele, `paid_amount < amount`
+3. **P10. Desconto do Pix nas configurações do checkout (decidido pelo dono em 2026-11-16: não ligar).** Com ele, `paid_amount < amount`
    e todo Pix seria recusado (passo 6).
 
 Decididas e encerradas pela mudança: P1 (recebedor do Pix), P3 (trocar de cartão para Pix), P4 (ID da transação do Pix).
+P9 (cartão pagando o link do Pix) deixou de existir com o preço único.
 P5 (`checkout_ref`), P6 (botão sem parcelas) e P7 (versão `2026-11-16-2`) continuam valendo.

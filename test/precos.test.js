@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ABERTOS, PRECOS, precoDe, metodosDisponiveis, podePedir, efeitoDoPagamento, acessoAtivo, planoVisivel } from "../api/_precos.js";
+import { ABERTOS, PRECOS, precoDe, pagamentoDisponivel, podePedir, efeitoDoPagamento, acessoAtivo, planoVisivel } from "../api/_precos.js";
 
 const AGORA = new Date("2026-11-15T12:00:00Z");
 const diasAtras = (n) => new Date(AGORA - n * 864e5).toISOString();
@@ -9,19 +9,18 @@ const treinos = [{ id: "A", nome: "A", exercicios: [["Leg press", "", 3, "10", 0
 const ia = (criadoHa, acesso) => ({ acesso_ate: acesso, dados: { plano: { nome: "P", origem: "ia", criado: diasAtras(criadoHa), treinos } } });
 const pdf = (acesso) => ({ acesso_ate: acesso, dados: { plano: { nome: "P", treinos } } });
 
-test("PRECOS em centavos por meio, num lugar só", () => {
-  assert.deepEqual(PRECOS, { pix: { inicial: 999, mensalidade: 999, novo_treino: 499 }, cartao: { inicial: 1199, mensalidade: 1199, novo_treino: 599 } });
+test("PRECOS em centavos, um valor por tipo, qualquer que seja o meio", () => {
+  assert.deepEqual(PRECOS, { inicial: 999, mensalidade: 999, novo_treino: 499 });
 });
 
 test("ABERTOS inclui aguardando_confirmacao (pedido antigo do Pix manual ainda bloqueia até o admin cancelar)", () => {
   assert.deepEqual(ABERTOS, ["aguardando_pagamento", "aguardando_confirmacao", "pago", "gerando"]);
 });
 
-test("precoDe: meio e tipo conhecidos; o resto é undefined", () => {
-  assert.equal(precoDe("pix", "novo_treino"), 499);
-  assert.equal(precoDe("cartao", "inicial"), 1199);
-  for (const [m, t] of [["boleto", "inicial"], ["pix", "gratis"], ["toString", "inicial"], ["pix", "toString"], ["__proto__", "inicial"], ["pix", "__proto__"], [undefined, undefined]])
-    assert.equal(precoDe(m, t), undefined, `${m}/${t}`);
+test("precoDe: tipo conhecido; o resto é undefined", () => {
+  assert.equal(precoDe("novo_treino"), 499);
+  assert.equal(precoDe("inicial"), 999);
+  for (const t of ["gratis", "toString", "__proto__", undefined, "pix"]) assert.equal(precoDe(t), undefined, String(t));
 });
 
 // Troca as variáveis só durante o teste e devolve como estavam.
@@ -32,15 +31,10 @@ const comEnv = (vars, fn) => {
   try { fn(); } finally { poe(antes); }
 };
 
-test("metodosDisponiveis: Pix e cartão pelo InfinitePay, com INFINITEPAY_HANDLE e SITE_URL; os links do Nubank não contam; tipo desconhecido não tem meio", () => {
-  comEnv({ PIX_LINK_999: "https://nubank.com.br/cobrar/x", PIX_LINK_499: "https://nubank.com.br/cobrar/y", INFINITEPAY_HANDLE: undefined, SITE_URL: undefined }, () => {
-    assert.deepEqual(metodosDisponiveis("inicial"), []);
-  });
-  comEnv({ INFINITEPAY_HANDLE: "exemplo", SITE_URL: "https://exemplo.app" }, () => {
-    assert.deepEqual(metodosDisponiveis("inicial"), ["pix", "cartao"]);
-    assert.deepEqual(metodosDisponiveis("toString"), []);
-  });
-  comEnv({ INFINITEPAY_HANDLE: "exemplo", SITE_URL: undefined }, () => assert.deepEqual(metodosDisponiveis("inicial"), []));
+test("pagamentoDisponivel: só com INFINITEPAY_HANDLE e SITE_URL; os links do Nubank não contam", () => {
+  comEnv({ PIX_LINK_999: "https://nubank.com.br/cobrar/x", INFINITEPAY_HANDLE: undefined, SITE_URL: undefined }, () => assert.equal(pagamentoDisponivel(), false));
+  comEnv({ INFINITEPAY_HANDLE: "exemplo", SITE_URL: "https://exemplo.app" }, () => assert.equal(pagamentoDisponivel(), true));
+  comEnv({ INFINITEPAY_HANDLE: "exemplo", SITE_URL: undefined }, () => assert.equal(pagamentoDisponivel(), false));
 });
 
 test("podePedir inicial: só sem plano de IA (PDF não conta)", () => {

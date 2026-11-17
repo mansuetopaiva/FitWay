@@ -75,7 +75,7 @@
         ...TEXTOS.filter(([k]) => f[k]).map(([k, rot]) => [rot, f[k]])])
       + item(3, [["Fotos", Object.keys(fotos).length ? FOTOS.filter(([k]) => fotos[k]).map(([, r]) => r).join(", ") : "Nenhuma"]])
       + item(4, [["Observações", f.observacoes || "Nenhuma"]])
-      + `<div class="row ped-total"><span>Valor do pedido</span><b>a partir de ${reais(st.precos[tipo])}</b></div>
+      + `<div class="row ped-total"><span>Valor do pedido</span><b>${reais(st.precos[tipo])}</b></div>
       <h3 class="ped-termo-tit" id="termoTit">Termo de Responsabilidade e Uso</h3>
       <div class="ped-termo" tabindex="0" role="region" aria-labelledby="termoTit">${window.FitWay.linkPrivacidade(esc(termo.texto), ' target="_blank" rel="noopener"')}</div>
       ${caixa("termo", "Li e aceito o Termo de Responsabilidade e Uso", f.termo)}

@@ -19,15 +19,15 @@ function sqlFalso(pedido, responder = () => []) {
 const pend = (o = {}) => ({ id: "p1", tipo: "inicial", status: "aguardando_pagamento", metodo: null, valor: 999, ...o });
 const eco = (q) => (q.startsWith("update pedidos") ? [{ id: "p1", status: "aguardando_pagamento" }] : []);
 
-test("pagamento: só pedido da própria conta; devolve os meios com o valor, sem link do Pix, recebedor nem código", async () => {
+test("pagamento: só pedido da própria conta; devolve o preço único e se está disponível, sem link, recebedor nem código", async () => {
   let s = sqlFalso(null);
   assert.equal((await acaoPagamento(s.sql, u, { acao: "pagamento", id: "p1" })).status, 404);
   assert.ok(s.chamadas[0].valores.includes("a@x.com"), "o select filtra pelo email da sessão");
   s = sqlFalso(pend({ tipo: "novo_treino" }));
   const r = await acaoPagamento(s.sql, u, { acao: "pagamento", id: "p1" });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.corpo.metodos, [{ metodo: "pix", valor: 499 }, { metodo: "cartao", valor: 599 }]);
-  assert.deepEqual(Object.keys(r.corpo).sort(), ["metodos", "pedido"]);
+  assert.equal(r.corpo.valor, 499); assert.equal(r.corpo.disponivel, true);
+  assert.deepEqual(Object.keys(r.corpo).sort(), ["disponivel", "pedido", "valor"]);
   assert.deepEqual(Object.keys(r.corpo.pedido).sort(), ["id", "metodo", "status", "tipo", "valor"], "nem o link guardado nem o código voltam pela tela");
   for (const id of [undefined, "a b", "x".repeat(41), 5]) assert.equal((await acaoPagamento(s.sql, u, { acao: "pagamento", id })).status, 400);
 });

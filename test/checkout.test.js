@@ -50,7 +50,6 @@ test("confirmarPagamento: pago de verdade grava com transaction_nsu, slug e capt
   assert.match(w.q, /\(\?::text is null or transaction_nsu is null\)/, "pedido já pago com um transaction_nsu não é pago de novo");
   assert.ok(guardouRef(s), "guarda o retorno para o admin verificar de novo");
   assert.match(s.chamadas[0].q, /\(checkout_url is not null or checkout_url_pix is not null\)/, "qualquer pedido com link do InfinitePay, Pix ou cartão");
-  assert.match(s.chamadas[0].q, /checkout_url_pix is not null as tem_pix/, "o mínimo depende de existir o link do Pix");
 });
 
 test("confirmarPagamento: corpo forjado, valor menor (pago ou do item) e order_nsu de outro pedido são recusados", async () => {
@@ -143,37 +142,40 @@ function sqlUsuario(pedido, extra = () => []) {
     chamadas.push({ q, valores });
     if (q.startsWith("select id, tipo, status, metodo")) return pedido && valores.includes(u.email) ? [pedido] : [];
     if (q.startsWith("select id from pedidos")) return pedido && valores.includes(u.email) ? [{ id: pedido.id }] : [];
-    if (q.startsWith("update pedidos set metodo")) return pedido && pedido.status === "aguardando_pagamento" ? [{ checkout_url: pedido.checkout_url, checkout_url_pix: pedido.checkout_url_pix || null }] : [];
+    if (q.startsWith("update pedidos set valor")) return pedido && pedido.status === "aguardando_pagamento" ? [{ checkout_url: pedido.checkout_url, checkout_url_pix: pedido.checkout_url_pix || null }] : [];
     return extra(q, valores);
   };
   return { sql, chamadas };
 }
 const pend = (o = {}) => ({ id: "p1", tipo: "inicial", status: "aguardando_pagamento", metodo: null, valor: 999, codigo: "FWABCDEF", mensagem_usuario: null, checkout_url: null, ...o });
 
-test("pagar (cartão): cria o link com o preço do servidor e guarda; o 2º clique reaproveita o link", async () => {
-  const s = sqlUsuario(pend()), f = fetchFalso({ json: { url: "https://checkout.infinitepay.io/exemplo/abc" } });
-  const r = await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "cartao", valor: 1 }, { fetch: f.fetch });
-  assert.equal(r.status, 200);
-  assert.equal(r.corpo.url, "https://checkout.infinitepay.io/exemplo/abc");
-  assert.equal(f.chamadas[0].url, "https://api.checkout.infinitepay.io/links");
-  const c = f.chamadas[0].corpo;
-  assert.deepEqual(c.items, [{ quantity: 1, price: 1199, description: "Treino personalizado FitWay" }]);
+test("pagar: cria um link com o preço único do tipo e guarda; o 2º clique reaproveita o link", async () => {
+  for (const [tipo, preco] of [["inicial", 999], ["mensalidade", 999], ["novo_treino", 499]]) {
+    const s = sqlUsuario(pend({ tipo })), f = fetchFalso({ json: { url: "https://checkout.infinitepay.io/exemplo/abc" } });
+    const r = await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "cartao", valor: 1 }, { fetch: f.fetch });
+    assert.equal(r.status, 200, tipo);
+    assert.equal(r.corpo.url, "https://checkout.infinitepay.io/exemplo/abc");
+    assert.equal(f.chamadas[0].url, "https://api.checkout.infinitepay.io/links");
+    assert.equal(f.chamadas[0].corpo.items[0].price, preco, `${tipo}: preço do servidor, o meio pedido não importa`);
+    const m = s.chamadas.find((x) => x.q.startsWith("update pedidos set valor"));
+    assert.deepEqual(m.valores[0], preco);
+    assert.doesNotMatch(m.q, /metodo/, "o meio não é mais escolhido no app");
+    assert.match(m.q, /where id = \? and email = \? and status = 'aguardando_pagamento'/);
+    const g = s.chamadas.find((x) => x.q.startsWith("update pedidos set checkout_url"));
+    assert.match(g.q, /checkout_url = coalesce\(checkout_url, \?\)/, "dois cliques: fica o primeiro link");
+  }
+  const c = (await (async () => { const f = fetchFalso({ json: { url: "https://checkout.infinitepay.io/x" } }); await acaoPagamento(sqlUsuario(pend()).sql, u, { acao: "pagar", id: "p1" }, { fetch: f.fetch }); return f.chamadas[0].corpo; })());
   assert.deepEqual([c.handle, c.order_nsu, c.redirect_url, c.webhook_url], ["exemplo", "p1", "https://exemplo.app/", "https://exemplo.app/api/infinitepay"]);
   assert.deepEqual(c.customer, { name: "Ana", email: "a@x.com" });
-  assert.deepEqual(s.chamadas.find((x) => x.q.startsWith("update pedidos set metodo")).valores.slice(0, 2), ["cartao", 1199]);
-  assert.match(s.chamadas.find((x) => x.q.startsWith("update pedidos set metodo")).q, /where id = \? and email = \? and status = 'aguardando_pagamento'/);
   const corrida = sqlUsuario(pend(), (q) => (q.startsWith("update pedidos set checkout_url") ? [{ checkout_url: "https://checkout.infinitepay.io/exemplo/primeiro", checkout_url_pix: null }] : []));
-  const r2 = await acaoPagamento(corrida.sql, u, { acao: "pagar", id: "p1", metodo: "cartao" }, { fetch: fetchFalso({ json: { url: "https://checkout.infinitepay.io/exemplo/segundo" } }).fetch });
+  const r2 = await acaoPagamento(corrida.sql, u, { acao: "pagar", id: "p1" }, { fetch: fetchFalso({ json: { url: "https://checkout.infinitepay.io/exemplo/segundo" } }).fetch });
   assert.equal(r2.corpo.url, "https://checkout.infinitepay.io/exemplo/primeiro", "o segundo clique recebe o link que ficou gravado");
-  const s2 = sqlUsuario(pend({ checkout_url: "https://checkout.infinitepay.io/exemplo/abc" })), f2 = fetchFalso(pago());
-  assert.equal((await acaoPagamento(s2.sql, u, { acao: "pagar", id: "p1", metodo: "cartao" }, { fetch: f2.fetch })).corpo.url, "https://checkout.infinitepay.io/exemplo/abc");
-  assert.equal(f2.chamadas.length, 0);
 });
 
 test("pagar: resposta sem URL válida, erro de rede ou sem variáveis dá Pagamento indisponível", async () => {
   for (const resp of [{ json: {} }, { json: { url: "javascript:alert(1)" } }, { json: { url: "http://x" } }, { json: { url: "https://x/\"><b>" } }, { status: 500, json: {} }, new Error("rede")]) {
     const s = sqlUsuario(pend());
-    const r = await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "cartao" }, { fetch: fetchFalso(resp).fetch });
+    const r = await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1" }, { fetch: fetchFalso(resp).fetch });
     assert.equal(r.status, 502, JSON.stringify(resp));
     assert.equal(r.corpo.erro, "Pagamento indisponível no momento.");
     assert.ok(!s.chamadas.some((x) => x.q.startsWith("update pedidos set checkout_url")));
@@ -182,12 +184,12 @@ test("pagar: resposta sem URL válida, erro de rede ou sem variáveis dá Pagame
   delete process.env.SITE_URL;
   try {
     const s = sqlUsuario(pend()), f = fetchFalso(pago());
-    assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "cartao" }, { fetch: f.fetch })).status, 400);
+    assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1" }, { fetch: f.fetch })).status, 400);
     assert.equal(f.chamadas.length, 0);
   } finally { process.env.SITE_URL = antes; }
   for (const status of ["aguardando_confirmacao", "pago", "cancelado"]) {
     const s = sqlUsuario(pend({ status }));
-    assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "cartao" }, { fetch: fetchFalso(pago()).fetch })).status, 400, status);
+    assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1" }, { fetch: fetchFalso(pago()).fetch })).status, 400, status);
   }
 });
 
@@ -235,29 +237,28 @@ test("pedido_verificar: só admin; sem retorno guardado avisa; com retorno roda 
 });
 
 // ---------- Pix e cartão pelo InfinitePay: meio diferente, valor mínimo, dois links ----------
-test("confirmarPagamento: pago com meio diferente do escolhido é aceito; grava o capture_method real e o valor do payment_check", async () => {
-  for (const [metodo, tem_pix, cm, amount] of [["cartao", true, "pix", 999], ["pix", true, "credit_card", 999], ["cartao", false, "pix", 1199]]) {
-    const s = sqlFalso({ pedido: { metodo, tem_pix } });
-    assert.equal(await confirmarPagamento(s.sql, ref, { fetch: fetchFalso(pago({ capture_method: cm, amount, paid_amount: amount })).fetch }), "pago", `${metodo} pago com ${cm}`);
+test("confirmarPagamento: qualquer meio vale; grava o capture_method real e o valor do payment_check", async () => {
+  for (const [cm, amount] of [["pix", 999], ["credit_card", 999], ["pix", 1199]]) {
+    const s = sqlFalso({ pedido: { metodo: null } });
+    assert.equal(await confirmarPagamento(s.sql, ref, { fetch: fetchFalso(pago({ capture_method: cm, amount, paid_amount: amount })).fetch }), "pago", `${cm} ${amount}`);
     const w = s.chamadas.find((c) => c.q.startsWith("with p as"));
     assert.ok(w.valores.includes(cm), "capture_method real");
     assert.ok(w.valores.includes(amount), "valor = amount do payment_check");
   }
 });
 
-test("confirmarPagamento: valor mínimo é o do link mais barato do pedido; pago abaixo dele é recusado e registrado para devolver", async () => {
+test("confirmarPagamento: mínimo = preço do tipo; pago >= valor do link; abaixo disso é recusado e registrado para devolver (links antigos de 11,99 incluídos)", async () => {
   const casos = [
-    // [tipo, tem link de Pix?, amount, paid_amount, resultado]
-    ["inicial", true, 999, 999, "pago"], ["inicial", true, 998, 998, "recusado"], ["inicial", true, 100, 999, "recusado"],
-    ["inicial", true, 999, 998, "recusado"], ["novo_treino", true, 499, 498, "recusado"], // link certo, pago um centavo abaixo
-    ["inicial", true, 1199, 999, "recusado"], ["inicial", false, 1199, 1198, "recusado"], // pago menos que o link pago (o de 11,99)
-    ["inicial", true, undefined, 998, "recusado"], ["inicial", true, undefined, 1500, "recusado"], // sem amount: não se sabe qual link foi pago
-    ["inicial", false, 999, 999, "recusado"], ["inicial", false, 1199, 1199, "pago"],
-    ["novo_treino", true, 499, 499, "pago"], ["novo_treino", true, 498, 498, "recusado"], ["novo_treino", false, 599, 599, "pago"], ["novo_treino", false, 499, 499, "recusado"],
+    // [tipo, amount (valor do link pago), paid_amount, resultado]
+    ["inicial", 999, 999, "pago"], ["inicial", 998, 998, "recusado"], ["inicial", 100, 999, "recusado"], ["inicial", 999, 998, "recusado"],
+    ["inicial", 1199, 1199, "pago"], ["inicial", 1199, 999, "recusado"], ["inicial", 1199, 1198, "recusado"], // link antigo do cartão
+    ["inicial", undefined, 998, "recusado"], ["inicial", undefined, 1500, "recusado"], // sem amount: não se sabe o valor do link
+    ["novo_treino", 499, 499, "pago"], ["novo_treino", 499, 498, "recusado"], ["novo_treino", 498, 498, "recusado"], ["novo_treino", 599, 599, "pago"],
+    ["mensalidade", 999, 999, "pago"],
   ];
-  for (const [tipo, tem_pix, amount, paid_amount, esperado] of casos) {
-    const s = sqlFalso({ pedido: { tipo, tem_pix } });
-    const nome = `${tipo} ${tem_pix ? "com" : "sem"} link de Pix, ${amount}/${paid_amount}`;
+  for (const [tipo, amount, paid_amount, esperado] of casos) {
+    const s = sqlFalso({ pedido: { tipo } });
+    const nome = `${tipo} ${amount}/${paid_amount}`;
     assert.equal(await confirmarPagamento(s.sql, ref, { fetch: fetchFalso(pago({ amount, paid_amount })).fetch }), esperado, nome);
     assert.equal(aplicou(s), esperado === "pago", nome);
     if (esperado === "recusado") {
@@ -268,13 +269,13 @@ test("confirmarPagamento: valor mínimo é o do link mais barato do pedido; pago
   }
 });
 
-test("confirmarPagamento: os dois links do mesmo pedido confirmam uma vez só; o segundo vira devolução", async () => {
+test("confirmarPagamento: pedido antigo com dois links (Pix e cartão) confirma uma vez só; o segundo vira devolução", async () => {
   let status = "aguardando_pagamento";
-  const banco = () => sqlFalso({ pedido: { status, tem_pix: true }, aplicar: () => { status = "pago"; return [{ status: "pago" }]; } });
+  const banco = () => sqlFalso({ pedido: { status }, aplicar: () => { status = "pago"; return [{ status: "pago" }]; } });
   const a = banco();
   assert.equal(await confirmarPagamento(a.sql, { order_nsu: "p1", transaction_nsu: "tx-pix", slug: "s-pix" }, { fetch: fetchFalso(pago({ amount: 999, paid_amount: 999, capture_method: "pix" })).fetch }), "pago");
   // O segundo chega dentro dos 10 s: temporário (o webhook reenvia depois), sem registrar nada ainda.
-  const cedo = sqlFalso({ pedido: { status, tem_pix: true }, livre: false });
+  const cedo = sqlFalso({ pedido: { status }, livre: false });
   assert.equal(await confirmarPagamento(cedo.sql, { order_nsu: "p1", transaction_nsu: "tx-cartao", slug: "s-cartao" }, { fetch: fetchFalso(pago()).fetch }), "temporario");
   assert.equal(sobrou(cedo), undefined);
   const b = banco();
@@ -288,44 +289,26 @@ test("confirmarPagamento: os dois links do mesmo pedido confirmam uma vez só; o
 });
 
 // ---------- pagar { id, metodo } ----------
-test("pagar: Pix e cartão criam o link com o preço do meio e guardam cada um na sua coluna", async () => {
-  for (const [tipo, metodo, preco, coluna] of [["inicial", "pix", 999, "checkout_url_pix"], ["mensalidade", "pix", 999, "checkout_url_pix"], ["novo_treino", "pix", 499, "checkout_url_pix"],
-    ["inicial", "cartao", 1199, "checkout_url"], ["novo_treino", "cartao", 599, "checkout_url"]]) {
-    const s = sqlUsuario(pend({ tipo })), f = fetchFalso({ json: { url: "https://checkout.infinitepay.io/exemplo/abc" } });
-    const r = await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo, valor: 1 }, { fetch: f.fetch });
-    assert.equal(r.status, 200, `${tipo}/${metodo}`);
-    assert.equal(r.corpo.url, "https://checkout.infinitepay.io/exemplo/abc");
-    assert.equal(f.chamadas[0].corpo.items[0].price, preco, `${tipo}/${metodo}: preço do servidor`);
-    const m = s.chamadas.find((x) => x.q.startsWith("update pedidos set metodo"));
-    assert.deepEqual(m.valores.slice(0, 2), [metodo, preco]);
-    const g = s.chamadas.find((x) => x.q.startsWith("update pedidos set checkout_url"));
-    assert.match(g.q, new RegExp(`${coluna} = case when \\? = '${metodo}' then coalesce\\(${coluna}, \\?\\)`), "dois cliques: fica o primeiro link");
+test("pagar: pedido antigo com link de Pix ou de cartão reaproveita o que tiver, sem criar outro", async () => {
+  for (const [linha, esperado] of [[{ checkout_url_pix: "https://checkout.infinitepay.io/exemplo/pix" }, "pix"], [{ checkout_url: "https://checkout.infinitepay.io/exemplo/cartao" }, "cartao"],
+    [{ checkout_url: "https://checkout.infinitepay.io/exemplo/cartao", checkout_url_pix: "https://checkout.infinitepay.io/exemplo/pix" }, "cartao"]]) {
+    const s = sqlUsuario(pend(linha)), f = fetchFalso({ json: { url: "https://checkout.infinitepay.io/exemplo/novo" } });
+    assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1" }, { fetch: f.fetch })).corpo.url, "https://checkout.infinitepay.io/exemplo/" + esperado);
+    assert.equal(f.chamadas.length, 0, "Abrir o pagamento de novo não cria outro link");
   }
 });
 
-test("pagar: o link do meio já criado é reaproveitado; trocar de meio cria o do outro sem apagar o primeiro", async () => {
-  const comPix = pend({ checkout_url_pix: "https://checkout.infinitepay.io/exemplo/pix" });
-  let s = sqlUsuario(comPix), f = fetchFalso({ json: { url: "https://checkout.infinitepay.io/exemplo/novo" } });
-  assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "pix" }, { fetch: f.fetch })).corpo.url, "https://checkout.infinitepay.io/exemplo/pix");
-  assert.equal(f.chamadas.length, 0, "Abrir o pagamento de novo não cria outro link");
-  s = sqlUsuario(comPix); f = fetchFalso({ json: { url: "https://checkout.infinitepay.io/exemplo/cartao" } });
-  assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "cartao" }, { fetch: f.fetch })).corpo.url, "https://checkout.infinitepay.io/exemplo/cartao");
-  assert.equal(f.chamadas.length, 1);
-  const g = s.chamadas.find((x) => x.q.startsWith("update pedidos set checkout_url"));
-  assert.match(g.q, /else checkout_url_pix end/, "o link do Pix fica como estava");
-});
 
-test("pagar: meio inválido ou pedido fora de aguardando_pagamento é recusado sem chamar o InfinitePay", async () => {
-  for (const metodo of ["boleto", "toString", "__proto__", undefined]) {
-    const s = sqlUsuario(pend()), f = fetchFalso(pago());
-    assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo }, { fetch: f.fetch })).status, 400, String(metodo));
-    assert.equal(f.chamadas.length, 0);
-    assert.ok(!s.chamadas.some((x) => x.q.startsWith("update")));
-  }
+
+test("pagar: pedido fora de aguardando_pagamento é recusado sem chamar o InfinitePay; o meio pedido é ignorado", async () => {
   for (const status of ["aguardando_confirmacao", "pago", "cancelado"]) {
     const s = sqlUsuario(pend({ status })), f = fetchFalso(pago());
     assert.equal((await acaoPagamento(s.sql, u, { acao: "pagar", id: "p1", metodo: "pix" }, { fetch: f.fetch })).status, 400, status);
     assert.equal(f.chamadas.length, 0);
+  }
+  for (const metodo of ["boleto", "toString", undefined]) {
+    const f = fetchFalso({ json: { url: "https://checkout.infinitepay.io/x" } });
+    assert.equal((await acaoPagamento(sqlUsuario(pend()).sql, u, { acao: "pagar", id: "p1", metodo }, { fetch: f.fetch })).status, 200, String(metodo));
   }
 });
 
@@ -341,15 +324,13 @@ test("ações antigas do cartão (pagar_cartao, confirmar_cartao) e cartao_verif
   assert.equal(r.corpo.erro, "Operação desconhecida.");
 });
 
-test("admin, pedido: o meio escolhido é o do link pago (pelo valor); sem pagamento, o último escolhido", async () => {
-  const base = { id: "p1", email: "a@x.com", nome: "Ana", tipo: "inicial", status: "pronto", metodo: "cartao", checkout_url: "https://c/1199", checkout_url_pix: "https://c/999" };
-  for (const [linha, meio] of [[{ valor: 999, transaction_nsu: "t", capture_method: "credit_card" }, "pix"], [{ valor: 1199, transaction_nsu: "t", capture_method: "pix" }, "cartao"],
-    [{ valor: 999, transaction_nsu: "t", checkout_url_pix: null }, "cartao"], [{ valor: 999, transaction_nsu: null, status: "aguardando_pagamento" }, "cartao"], [{ valor: 5000, transaction_nsu: "t" }, "cartao"]]) {
-    const r = await acaoAdmin(async () => [{ ...base, ...linha }], { email: "dono@x.com" }, { op: "pedido", id: "p1" });
-    assert.equal(r.corpo.meioEscolhido, meio, JSON.stringify(linha));
-    assert.equal(r.corpo.captureMethod, linha.capture_method);
-    assert.equal(r.corpo.checkout_url_pix, undefined, "os links não vão para o painel, só se existem");
-  }
+test("admin, pedido: o meio pago aparece só como informação; sem marcação de meio diferente; os links não vão para o painel", async () => {
+  const base = { id: "p1", email: "a@x.com", nome: "Ana", tipo: "inicial", status: "pronto", metodo: "cartao", checkout_url: "https://c/1", checkout_url_pix: null, valor: 999, transaction_nsu: "t", capture_method: "pix" };
+  const r = await acaoAdmin(async () => [base], { email: "dono@x.com" }, { op: "pedido", id: "p1" });
+  assert.equal(r.corpo.captureMethod, "pix");
+  assert.equal(r.corpo.meioEscolhido, undefined);
+  assert.equal(r.corpo.temLink, true);
+  assert.equal(r.corpo.checkout_url, undefined);
 });
 
 test("confirmarPagamento: pagamento já registrado para devolução nunca confirma outro pedido (P8)", async () => {

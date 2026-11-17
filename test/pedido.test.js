@@ -98,8 +98,8 @@ test("limparFotos: só JPEG base64, 4 chaves conhecidas, até 300 KB cada", () =
 });
 
 test("termo: marcadores trocados pelas variáveis, nenhum sobrando no texto mostrado; versão desconhecida dá null", () => {
-  assert.deepEqual(TERMOS.map((t) => t.versao), ["2026-11-16-2", "2026-11-16"], "a atual no topo; a anterior continua para consulta (a 2026-11-15 nunca foi usada)");
-  assert.equal(TERMO_VERSAO, "2026-11-16-2");
+  assert.deepEqual(TERMOS.map((t) => t.versao), ["2026-11-16-3", "2026-11-16-2", "2026-11-16"], "a atual no topo; as anteriores continuam para consulta (a 2026-11-15 nunca foi usada)");
+  assert.equal(TERMO_VERSAO, "2026-11-16-3");
   const m = TERMOS[0].modelo;
   for (const k of Object.keys(CAMPOS)) assert.ok(m.includes(`{{${k}}}`), `modelo tem {{${k}}}`);
   assert.doesNotMatch(m, /\[[^\]]*\]/, "nenhum campo entre colchetes");
@@ -115,8 +115,8 @@ test("termo: marcadores trocados pelas variáveis, nenhum sobrando no texto most
   assert.equal(montarTermo({}), null);
 });
 
-test("termo 2026-11-16-2: só o 4.2, o 4.5 (novo), o 6.1 e o item 5 mudam, e os valores do texto batem com PRECOS", () => {
-  const [nova, antiga] = TERMOS.map((t) => t.modelo);
+test("termo 2026-11-16-2: só o 4.2, o 4.5 (novo), o 6.1 e o item 5 mudam (preços por meio, como foi aceito)", () => {
+  const [, nova, antiga] = TERMOS.map((t) => t.modelo);
   const sem = (m) => m.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/, "").replace(/\n4\.2\. .*/, "").replace(/\n6\.1\. .*/, "").replace(/\n4\.5\. .*/, "");
   assert.notEqual(nova, antiga);
   assert.equal(sem(nova), sem(antiga), "o resto do texto é igual");
@@ -128,14 +128,23 @@ test("termo 2026-11-16-2: só o 4.2, o 4.5 (novo), o 6.1 e o item 5 mudam, e os 
   assert.doesNotMatch(nova, /comprovante|Nubank|link de cobrança|conferência é manual|24 horas/i);
   const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
   const item5 = nova.match(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/)[0];
-  assert.match(item5, new RegExp(`primeiro treino custa ${reais(PRECOS.pix.inicial)} no Pix ou ${reais(PRECOS.cartao.inicial)} no cartão de crédito`.replace(/\$/g, "\\$")));
-  assert.match(item5, new RegExp(`mensalidade de ${reais(PRECOS.pix.mensalidade)} no Pix ou ${reais(PRECOS.cartao.mensalidade)} no cartão a cada 30 dias`.replace(/\$/g, "\\$")));
-  assert.match(item5, new RegExp(`novo treino por ${reais(PRECOS.pix.novo_treino)} no Pix ou ${reais(PRECOS.cartao.novo_treino)} no cartão`.replace(/\$/g, "\\$")));
+  assert.match(item5, /primeiro treino custa R\$ 9,99 no Pix ou R\$ 11,99 no cartão de crédito/, "o texto aceito nesta versão não muda");
   assert.match(item5, /\n5\.3\. Os pagamentos por Pix e por cartão são processados pela InfinitePay e confirmados automaticamente\. O acesso e o treino são liberados assim que o pagamento é confirmado\.\n/);
   assert.match(item5, /\n5\.4\. Pedidos sem pagamento em 30 dias são cancelados, e as fotos enviadas são apagadas\.\n/);
   assert.match(item5, /\n5\.5\. Posso desistir da compra em até 7 dias/);
-  const todos = new Set(Object.values(PRECOS).flatMap((m) => Object.values(m)).map(reais));
+});
+
+test("termo 2026-11-16-3: igual à 2026-11-16-2, só o 5.1 e o 5.2 com preço único; os valores batem com PRECOS", () => {
+  const [nova, antiga] = TERMOS.map((t) => t.modelo);
+  const sem = (m) => m.replace(/\n5\.1\. .*/, "").replace(/\n5\.2\. .*/, "");
+  assert.equal(sem(nova), sem(antiga));
+  assert.ok(nova.includes("\n5.1. O primeiro treino custa R$ 9,99, pago por Pix ou cartão de crédito, e inclui 30 dias de acesso. Para continuar vendo o treino, pago a mensalidade de R$ 9,99 a cada 30 dias. Sem o pagamento, o treino deixa de aparecer no app até eu renovar. Meus check-ins e meu histórico continuam guardados.\n"));
+  assert.ok(nova.includes("\n5.2. Depois de 8 semanas do plano, com o acesso em dia, posso pedir um novo treino por R$ 4,99.\n"));
+  const reais = (c) => "R$ " + (c / 100).toFixed(2).replace(".", ",");
+  const item5 = nova.match(/5\. Pagamento e acesso[\s\S]*?(?=\n\n6\.)/)[0];
+  const todos = new Set(Object.values(PRECOS).map(reais));
   for (const v of item5.match(/R\$ \d+,\d\d/g)) assert.ok(todos.has(v), `${v} está em PRECOS`);
+  assert.doesNotMatch(item5, /11,99|5,99/);
 });
 
 test("termo: variável faltando aparece na lista e o marcador fica visível; valor com $& não vira padrão de troca", () => {

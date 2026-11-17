@@ -121,7 +121,7 @@ export async function criarPedido(sql, u, b, headers, agora, { admin = false } =
   // O índice único pedidos_um_aberto recusa um 2º pedido aberto mesmo em dois cliques simultâneos.
   // metodo vazio até a pessoa escolher; o valor do Pix (o menor) é provisório, só para a lista do admin.
   const [p] = await sql`insert into pedidos (id, email, tipo, status, valor, codigo, respostas, fotos, aceite)
-    values (${id}, ${u.email}, ${b.tipo}, 'aguardando_pagamento', ${PRECOS.pix[b.tipo]}, ${codigo}, ${js(respostas)}::jsonb, ${js(fotos)}::jsonb, ${js(aceite)}::jsonb)
+    values (${id}, ${u.email}, ${b.tipo}, 'aguardando_pagamento', ${PRECOS[b.tipo]}, ${codigo}, ${js(respostas)}::jsonb, ${js(fotos)}::jsonb, ${js(aceite)}::jsonb)
     on conflict do nothing returning id, tipo, status, metodo, valor, codigo, criado, pago_em, gerado_em`;
   if (!p) return { status: 400, corpo: { erro: "Você já tem um pedido em andamento." } };
   return { status: 200, corpo: { pedido: p } };

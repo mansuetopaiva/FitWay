@@ -37,8 +37,9 @@ test("política: valor com $& não vira padrão de troca", () => {
   finally { process.env.TERMO_RESPONSAVEL = r; }
 });
 
-test("termo 2026-11-16-2 aponta para a Política de privacidade no item 4; a versão publicada não muda", () => {
-  const [nova, antiga] = TERMOS.map((t) => t.modelo);
+test("termo 2026-11-16-2 (e a -3) aponta para a Política de privacidade no item 4; a versão publicada não muda", () => {
+  const [atual, nova, antiga] = TERMOS.map((t) => t.modelo);
+  assert.match(atual, /\n4\.5\. .*Política de privacidade/);
   assert.match(nova, /\n4\.5\. .*Política de privacidade/);
   assert.doesNotMatch(antiga, /Política de privacidade/);
 });

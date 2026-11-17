@@ -876,8 +876,7 @@
     let h = `<h2>Treino personalizado</h2>`;
     if (!ia) return h + `<p class="muted">Carregando…</p>`;
     const p = ia.pedido, agora = Date.now();
-    // Preço do Pix (o menor); o cartão aparece na tela de pagamento.
-    const botao = (tipo, txt) => `<button class="btn" data-pedir="${tipo}">${txt} — a partir de ${reais(ia.precos[tipo])}</button>`;
+    const botao = (tipo, txt) => `<button class="btn" data-pedir="${tipo}">${txt} — ${reais(ia.precos[tipo])}</button>`;
     if (p && p.status === "aguardando_pagamento") {
       h += `<p class="ia-status">${NOME_PEDIDO[p.tipo]} — ${reais(p.valor)}</p>
         <p class="muted" style="margin-bottom:10px">Aguardando pagamento. Assim que ele for confirmado, ${p.tipo === "mensalidade" ? "seu acesso é renovado" : "seu treino começa a ser montado"}.</p>
@@ -916,7 +915,7 @@
     app.querySelectorAll("[data-pedir]").forEach((b) => b.onclick = async () => {
       const tipo = b.dataset.pedir;
       if (tipo !== "mensalidade") return (location.hash = "#/pedido/" + tipo);
-      if (!confirm(`Pedir a renovação do acesso (a partir de ${reais(ia.precos.mensalidade)})? Em seguida você escolhe como pagar.`)) return;
+      if (!confirm(`Pedir a renovação do acesso (${reais(ia.precos.mensalidade)})? Em seguida você vai para o pagamento.`)) return;
       b.disabled = true;
       try { const r = await api("pedido_criar", { tipo }); location.hash = "#/pagamento/" + encodeURIComponent(r.pedido.id); return; }
       catch (e) { toast(e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }

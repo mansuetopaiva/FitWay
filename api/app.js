@@ -321,7 +321,7 @@ export default async function handler(req, res) {
       const agora = new Date(), aberto = !!pedido && ABERTOS.includes(pedido.status), plano = x.dados && x.dados.plano;
       // Função desligada (TREINO_IA_ATIVO): usuário comum não vê pedido inicial nem novo treino; renovar continua.
       const ativo = iaAtiva() || (ehAdmin(u.email) && !termoFaltando().length);
-      const pode = Object.fromEntries(Object.keys(PRECOS.pix).map((t) => [t, (ativo || t === "mensalidade") && !podePedir(t, x, agora, aberto).erro]));
+      const pode = Object.fromEntries(Object.keys(PRECOS).map((t) => [t, (ativo || t === "mensalidade") && !podePedir(t, x, agora, aberto).erro]));
       // novo_treino: o formulário vem com as últimas respostas; os consentimentos precisam ser marcados de novo.
       let ultimas = null;
       if (pode.novo_treino) {
@@ -330,7 +330,7 @@ export default async function handler(req, res) {
       }
       return res.json({
         pedido, ativo, acessoAte: x.acesso_ate, temPlanoIA: !!plano && plano.origem === "ia", planoCriado: (plano && plano.criado) || null,
-        pode, precos: PRECOS.pix, termo: TERMO_VERSAO, ultimas, plano: visivel(x, x.dados).plano || null, suporteNaoLido: await naoLido(sql, u.email),
+        pode, precos: PRECOS, termo: TERMO_VERSAO, ultimas, plano: visivel(x, x.dados).plano || null, suporteNaoLido: await naoLido(sql, u.email),
         ...(b.form === true ? { form: { parq: PARQ, opcoes: OPCOES, textos: TEXTOS } } : {}),
       });
     }

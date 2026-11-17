@@ -56,7 +56,12 @@ const V_2026_11_16_2 = V_2026_11_16.replace(/5\. Pagamento e acesso[\s\S]*?(?=\n
   .replace(/^4\.4\. .*$/m, (m) => m + "\n4.5. A Política de privacidade do FitWay, disponível no app, explica com mais detalhes como meus dados são tratados.")
   .replace(/^6\.1\. .*$/m, () => "6.1. Este termo pode ser atualizado. Quando isso acontecer, vou precisar aceitar a nova versão no próximo pedido de treino.");
 
-export const TERMOS = [{ versao: "2026-11-16-2", modelo: V_2026_11_16_2 }, { versao: "2026-11-16", modelo: V_2026_11_16 }];
+// 2026-11-16-3: preço único, qualquer que seja o meio (o 5.1 e o 5.2 deixam de ter o preço do cartão).
+const V_2026_11_16_3 = V_2026_11_16_2
+  .replace(/^5\.1\. .*$/m, () => "5.1. O primeiro treino custa R$ 9,99, pago por Pix ou cartão de crédito, e inclui 30 dias de acesso. Para continuar vendo o treino, pago a mensalidade de R$ 9,99 a cada 30 dias. Sem o pagamento, o treino deixa de aparecer no app até eu renovar. Meus check-ins e meu histórico continuam guardados.")
+  .replace(/^5\.2\. .*$/m, () => "5.2. Depois de 8 semanas do plano, com o acesso em dia, posso pedir um novo treino por R$ 4,99.");
+
+export const TERMOS = [{ versao: "2026-11-16-3", modelo: V_2026_11_16_3 }, { versao: "2026-11-16-2", modelo: V_2026_11_16_2 }, { versao: "2026-11-16", modelo: V_2026_11_16 }];
 export const TERMO_VERSAO = TERMOS[0].versao;
 
 const valor = (k) => (process.env[CAMPOS[k]] || "").trim();

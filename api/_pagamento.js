@@ -1,8 +1,8 @@
 // Pagamento dos pedidos pelo checkout do InfinitePay. O "_" impede a Vercel de expor como rota.
 // Recebe sql (e fetch) por parâmetro para o teste. Nenhuma ação do usuário grava "pago": só aplicarPagamento, chamado por confirmarPagamento.
 // O checkout aceita Pix e cartão em qualquer link (a documentação: "o cartão fica sempre ligado"; restringir exige API Key):
-// cada pedido tem até um link por meio, com o preço daquele meio, e qualquer um deles pago confirma o pedido uma vez.
-import { efeitoDoPagamento, metodosDisponiveis, precoDe } from "./_precos.js";
+// preço único por tipo e um link por pedido. Pedidos antigos podem ter dois (Pix e cartão): qualquer um pago confirma uma vez.
+import { efeitoDoPagamento, pagamentoDisponivel, precoDe } from "./_precos.js";
 
 export const ACOES = ["pagamento", "pagar", "confirmar_pagamento"];
 const idValido = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(v);
@@ -10,7 +10,6 @@ const ok = (corpo) => ({ status: 200, corpo });
 const falha = (status, erro) => ({ status, corpo: { erro } });
 const INDISPONIVEL = "Pagamento indisponível no momento.";
 
-const meios = (tipo) => metodosDisponiveis(tipo).map((metodo) => ({ metodo, valor: precoDe(metodo, tipo) }));
 
 // Marca como pago numa instrução só: pedido, dias de acesso e admin_log. UPDATE condicional: dois cliques ou um
 // webhook repetido não somam dias (a 2ª chamada não acha a linha). Sem linha devolvida, nada mudou.
@@ -65,7 +64,7 @@ export async function confirmarPagamento(sql, ref, { fetch = globalThis.fetch } 
   const order_nsu = txt(ref.order_nsu), transaction_nsu = txt(ref.transaction_nsu), slug = txt(ref.slug);
   if (!handle || !idValido(order_nsu) || !REF.test(transaction_nsu) || !REF.test(slug)) return "ignorado";
   // Pedido com algum link do InfinitePay, em qualquer status: um link pago depois do pedido fechado também precisa aparecer.
-  const [p] = await sql`select id, tipo, status, email, transaction_nsu, checkout_url_pix is not null as tem_pix from pedidos
+  const [p] = await sql`select id, tipo, status, email, transaction_nsu from pedidos
     where id = ${order_nsu} and (checkout_url is not null or checkout_url_pix is not null)`;
   if (!p || p.transaction_nsu === transaction_nsu) return "ignorado"; // sem link, ou webhook repetido de um pagamento já aplicado
   // O webhook não tem assinatura nem login: no máximo uma consulta ao InfinitePay a cada 10 s por pedido.
@@ -105,12 +104,12 @@ export async function confirmarPagamento(sql, ref, { fetch = globalThis.fetch } 
   };
   const sobra = async () => { await devolver("pedido_fechado"); return "sobra"; };
   if (!ABERTO.includes(p.status)) return sobra();
-  // Mínimo: o preço do link mais barato do pedido. O handle é público: alguém pode criar um link próprio de R$ 1,00 com
-  // este order_nsu; o valor é o que barra. Pagar o link do Pix com cartão (ou o contrário) vale: o checkout não restringe o meio.
+  // Mínimo: o preço do tipo (preço único). O handle é público: alguém pode criar um link próprio de R$ 1,00 com este
+  // order_nsu; o valor é o que barra. Links antigos (de Pix ou de cartão, com preços por meio) continuam valendo com a mesma regra.
   // O pago também não pode ser menor que o valor do próprio link (amount). paid_amount pode passar de amount (juros do
   // parcelamento pagos pelo comprador). Desconto do Pix ligado nas configurações do checkout faria paid_amount < amount: fica recusado.
   // Sem amount não dá para saber o valor do link pago (um link próprio barato, parcelado com juros, passaria): recusa e registra.
-  const base = precoDe(p.tem_pix ? "pix" : "cartao", p.tipo);
+  const base = precoDe(p.tipo);
   if (pago === null && amount === null) return "recusado";
   if (amount === null || pago === null || amount < base || pago < Math.max(base, amount)) { await devolver("valor_menor"); return "recusado"; }
   // Pagamento que já ficou para devolução (pedido fechado ou valor menor) nunca confirma outro pedido depois: o admin pode
@@ -141,19 +140,19 @@ export async function acaoPagamento(sql, u, b, { fetch = globalThis.fetch } = {}
   if (!p) return falha(404, "Pedido não encontrado.");
   const pendente = p.status === "aguardando_pagamento";
 
-  if (b.acao === "pagamento") return ok({ pedido: p, metodos: meios(p.tipo) });
+  if (b.acao === "pagamento") return ok({ pedido: p, valor: precoDe(p.tipo), disponivel: pagamentoDisponivel() });
 
   if (b.acao === "pagar") {
-    const disponiveis = metodosDisponiveis(p.tipo);
-    if (!disponiveis.length) { diagnostico("pagar sem INFINITEPAY_HANDLE ou SITE_URL"); return falha(400, INDISPONIVEL); }
-    if (!disponiveis.includes(b.metodo)) return falha(400, "Escolha Pix ou cartão.");
+    if (!pagamentoDisponivel()) { diagnostico("pagar sem INFINITEPAY_HANDLE ou SITE_URL"); return falha(400, INDISPONIVEL); }
     if (!pendente) return falha(400, "Este pedido não está aguardando pagamento.");
-    const metodo = b.metodo, valor = precoDe(metodo, p.tipo);
-    const [x] = await sql`update pedidos set metodo = ${metodo}, valor = ${valor}, atualizado = now()
+    const valor = precoDe(p.tipo);
+    // Um link por pedido. Pedido antigo com link de Pix ou de cartão (preços por meio) reaproveita o que tiver: a conferência
+    // do valor (confirmarPagamento) aceita qualquer um que pague pelo menos o preço do tipo.
+    const [x] = await sql`update pedidos set valor = ${valor}, atualizado = now()
       where id = ${p.id} and email = ${u.email} and status = 'aguardando_pagamento' returning checkout_url, checkout_url_pix`;
     if (!x) return falha(400, "Este pedido não está aguardando pagamento.");
-    const salvo = (r) => r && (metodo === "pix" ? r.checkout_url_pix : r.checkout_url);
-    if (salvo(x)) return ok({ url: salvo(x) }); // "Abrir o pagamento de novo": o mesmo link, nunca um terceiro
+    const salvo = (r) => r && (r.checkout_url || r.checkout_url_pix);
+    if (salvo(x)) return ok({ url: salvo(x) }); // "Abrir o pagamento de novo": o mesmo link, nunca outro
     const site = process.env.SITE_URL.replace(/\/+$/, "");
     const NOMES = { inicial: "Treino personalizado FitWay", mensalidade: "Renovação do acesso FitWay (30 dias)", novo_treino: "Novo treino FitWay" };
     let url;
@@ -175,10 +174,8 @@ export async function acaoPagamento(sql, u, b, { fetch = globalThis.fetch } = {}
       diagnostico("POST /links falhou", { erro: `${e && e.name}: ${e && e.message}`, ocultar });
       return falha(502, INDISPONIVEL);
     }
-    // Dois cliques ao mesmo tempo: fica o primeiro link gravado daquele meio, e os dois recebem o mesmo. O link do outro meio fica como está.
-    const [g] = await sql`update pedidos set checkout_url = case when ${metodo} = 'cartao' then coalesce(checkout_url, ${url}) else checkout_url end,
-        checkout_url_pix = case when ${metodo} = 'pix' then coalesce(checkout_url_pix, ${url}) else checkout_url_pix end
-      where id = ${p.id} returning checkout_url, checkout_url_pix`;
+    // Dois cliques ao mesmo tempo: fica o primeiro link gravado, e os dois recebem o mesmo.
+    const [g] = await sql`update pedidos set checkout_url = coalesce(checkout_url, ${url}) where id = ${p.id} returning checkout_url, checkout_url_pix`;
     return ok({ url: salvo(g) || url });
   }
   return falha(400, "Ação desconhecida.");

@@ -107,14 +107,14 @@ para quem souber o endereço, por isso não guarda nenhum segredo.
 ## Treino com IA
 
 Fluxo: a pessoa pede o treino no Perfil e preenche o formulário (Você, Rotina, Saúde com PAR-Q, Fotos, Observações e Resumo com o termo).
-O pedido fica **aguardando pagamento** e a pessoa escolhe como pagar (ver [Pagamento](#pagamento)). Com o pagamento confirmado,
+O pedido fica **aguardando pagamento** e a pessoa vai para o pagamento (ver [Pagamento](#pagamento)). Com o pagamento confirmado,
 a IA monta um plano de 8 semanas, que aparece na aba Treinos com o cartão "Como funciona seu plano".
 
-| Pedido | Pix | Cartão | O que libera |
-|---|---|---|---|
-| Treino inicial | R$ 9,99 | R$ 11,99 | 30 dias de acesso e o treino |
-| Mensalidade | R$ 9,99 | R$ 11,99 | +30 dias de acesso (a partir do fim do acesso atual) |
-| Novo treino | R$ 4,99 | R$ 5,99 | um plano novo; só depois de 8 semanas do atual e com acesso ativo |
+| Pedido | Preço (Pix ou cartão) | O que libera |
+|---|---|---|
+| Treino inicial | R$ 9,99 | 30 dias de acesso e o treino |
+| Mensalidade | R$ 9,99 | +30 dias de acesso (a partir do fim do acesso atual) |
+| Novo treino | R$ 4,99 | um plano novo; só depois de 8 semanas do atual e com acesso ativo |
 
 Os preços ficam em `api/_precos.js`. Regras de saúde: qualquer "Sim" no PAR-Q exige a caixa de liberação médica (o servidor confere),
 e o pedido é só para maiores de 18 anos. As fotos são apagadas 90 dias depois do treino pronto; as respostas ficam.
@@ -157,17 +157,16 @@ se falhar, o pedido tenta mais uma vez e, na segunda falha, fica como **Erro** p
 
 ## Pagamento
 
-Spec: [docs/pagamento.md](docs/pagamento.md). Depois de enviar o pedido (ou tocar em **Pagar** no Perfil), a pessoa escolhe
-**Pix** ou **Cartão de crédito**. Os dois levam ao checkout do InfinitePay, com o preço do meio escolhido, e são confirmados
-automaticamente: na volta para o app, pelo webhook `/api/infinitepay` ou pelo **Verificar no InfinitePay** do painel. Em todos os
+Spec: [docs/pagamento.md](docs/pagamento.md). Preço único, qualquer que seja o meio: treino R$ 9,99, mensalidade R$ 9,99 e novo
+treino R$ 4,99 (`PRECOS` em `api/_precos.js`). Depois de enviar o pedido (ou tocar em **Pagar** no Perfil), a pessoa toca em
+**Pagar R$ 9,99** e escolhe Pix ou cartão na página do checkout do InfinitePay. O pagamento é confirmado automaticamente: na volta para o app, pelo webhook `/api/infinitepay` ou pelo **Verificar no InfinitePay** do painel. Em todos os
 casos o servidor pergunta ao InfinitePay (`payment_check`) se o pagamento existe e de quanto foi: o que chega no navegador ou no
 webhook nunca vale como prova. Não há confirmação manual.
 
-- Cada pedido tem no máximo um link por meio. "Abrir o pagamento de novo" reaproveita o link; trocar de meio cria o do outro sem
-  apagar o primeiro. Qualquer um dos dois pago confirma o pedido, uma vez só.
-- O checkout do InfinitePay não deixa restringir o meio (o cartão fica sempre ligado), então a pessoa pode pagar o link do Pix com
-  cartão. Isso é aceito, desde que o valor bata; o painel marca **Pago com meio diferente do escolhido**.
-- Valor pago menor que o do link mais barato do pedido é recusado. Esse dinheiro, e o de um link pago depois do pedido fechado
+- Um link por pedido; "Abrir o pagamento de novo" reaproveita o mesmo. Pedidos antigos, com link de Pix e de cartão (quando os
+  preços eram por meio), continuam podendo ser pagos por qualquer um deles, uma vez só.
+- O meio usado (Pix ou cartão) aparece no detalhe do pedido no painel, só como informação.
+- Valor pago menor que o do link, ou que o preço do tipo, é recusado. Esse dinheiro, e o de um link pago depois do pedido fechado
   (os dois links pagos, ou pedido cancelado), aparece no topo do resumo do admin por 30 dias: devolva pelo InfinitePay.
 - Sem `INFINITEPAY_HANDLE` ou `SITE_URL`, a tela diz "Pagamento indisponível no momento".
 - **Não ligue o desconto do Pix** nas configurações do checkout do InfinitePay: o servidor exige que o valor pago não seja menor que o do link,

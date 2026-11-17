@@ -476,7 +476,7 @@
   const pedLista = { status: "aguardando_pagamento", tipo: "", pagina: 0, itens: [], temMais: false, estado: "carregando", erro: "" };
   let ped = null, pedId = "", pedEstado = "", pedErro = "", versaoPed = 0, versaoPedLista = 0, fotoGrande = "", termoVisto = null, estornando = false;
   const MOTIVOS_ESTORNO = { desistencia: "Desistência em 7 dias", duplicado: "Pagamento duplicado", outro: "Outro" };
-  const METODOS = { pix: "Pix", cartao: "Cartão" }, FORMAS = { pix: "Pix", credit_card: "Cartão de crédito" };
+  const FORMAS = { pix: "Pix", credit_card: "Cartão de crédito" };
 
   function renderPedidos(id) {
     const antes = pedId;
@@ -598,7 +598,7 @@
         <h2 id="admDetTit" tabindex="-1">${esc(TIPOS[p.tipo])} · ${reais(p.valor)}</h2>
         <p class="muted">${p.contaExcluida ? "Conta excluída (pedido guardado sem dados pessoais)" : `<a href="#/admin/${encodeURIComponent(p.email)}">${esc(p.nome)} · ${esc(p.email)}</a>`}</p>
         <div class="row"><span>Status</span><span>${selo(p.status)}</span></div>
-        ${linha("Código", p.codigo || "—")}${linha("Meio", METODOS[p.metodo] || "Não escolhido")}
+        ${linha("Código", p.codigo || "—")}
         ${linha("Pedido em", quando(p.criado))}${p.pagoEm ? linha("Pago em", quando(p.pagoEm)) : ""}${p.geradoEm ? linha("Treino gerado em", quando(p.geradoEm)) : ""}
         ${p.modelo ? linha("Modelo da IA", p.modelo) : ""}${p.tentativas ? linha("Tentativas de geração", p.tentativas) : ""}
         ${linha("Acesso do usuário", acessoTxt(p.acessoAte))}
@@ -639,15 +639,11 @@
       <p class="muted">Este pedido é do Pix pelo link do Nubank, que saiu. Confira no app do banco; não há como confirmar por aqui, só cancelar.</p>
       ${linha("Valor", reais(p.valor))}${linha("Quem pagou", pa.pagador || "—")}${pa.aviso ? linha("Aviso em", quando(pa.aviso)) : ""}${linha("ID da transação informado", pa.e2e || "—")}
       ${comp ? `<img class="adm-foto-grande" src="${esc(comp)}" alt="Comprovante enviado">` : ""}</div>` : "";
-    if (!(p.metodo || p.transactionNsu || p.checkoutRef) || !(p.links && (p.links.pix || p.links.cartao)) && !p.transactionNsu) return antigo;
+    if (!p.temLink && !p.transactionNsu && !p.checkoutRef) return antigo;
     const ref = p.checkoutRef || {};
-    const links = p.links ? ["pix", "cartao"].filter((m) => p.links[m]).map((m) => METODOS[m]).join(" e ") : "";
-    // O checkout aceita Pix e cartão em qualquer link: o meio pago pode não ser o escolhido (aceito, só marcado).
-    const escolhido = p.meioEscolhido || p.metodo;
-    const diferente = p.captureMethod && escolhido && ({ pix: "pix", credit_card: "cartao" }[p.captureMethod] !== escolhido);
+    // Preço único: o meio é escolhido no checkout e aparece aqui só como informação (capture_method).
     return `<div class="card"><h2 class="adm-tit">Pagamento (InfinitePay)</h2>
-      ${diferente ? `<p class="adm-erro" role="note"><b>Pago com meio diferente do escolhido:</b> o link pago era de ${esc(METODOS[escolhido] || escolhido)}, e o pagamento foi com ${esc(FORMAS[p.captureMethod] || p.captureMethod)}.</p>` : ""}
-      ${links ? linha("Links criados", links) : ""}
+      ${linha("Link criado", p.temLink ? "Sim" : "Não")}
       ${p.transactionNsu ? linha("Transação", p.transactionNsu) : ""}${p.captureMethod ? linha("Pago com", FORMAS[p.captureMethod] || p.captureMethod) : ""}
       ${!p.transactionNsu && ref.transaction_nsu ? linha("Último retorno (não confirmado)", ref.transaction_nsu) : ""}
       ${p.confirmadoPor ? linha("Confirmado por", p.confirmadoPor === "infinitepay" ? "InfinitePay (automático)" : p.confirmadoPor) : ""}
