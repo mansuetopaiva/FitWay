@@ -119,7 +119,8 @@
       const antes = f.parq.includes(true);
       f.parq[+n.slice(4)] = el.value === "sim";
       if (antes !== f.parq.includes(true)) { pintar(false); const a = $(`[name="${n}"][value="${el.value}"]`); if (a) a.focus(); }
-    } else if (n === "liberacao" || n === "termo") f[n] = el.checked;
+    } else if (n === "objetivo") f.objetivo = [...app.querySelectorAll('[name="objetivo"]:checked')].map((i) => i.value);
+    else if (n === "liberacao" || n === "termo") f[n] = el.checked;
     else if (n === "cdados") f.consentimentos.dados = el.checked;
     else if (n === "cfotos") f.consentimentos.fotos = el.checked;
     else if (["idade", "altura", "peso", "dias", "minutos"].includes(n)) f[n] = el.value === "" ? undefined : Number(el.value);
