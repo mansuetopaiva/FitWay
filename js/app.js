@@ -486,6 +486,13 @@
       ? { id: s.id, inicio: s.inicio, feitas: s.feitas, aberta: Number.isInteger(s.aberta) ? s.aberta : -1 } : null;
   }
 
+  // Plano trocado por fora (IA pronta, renovação, vencimento): a sessão só continua se o treino dela existe no plano de agora e o plano é o mesmo.
+  function trocouPlano(novo) {
+    const antigo = data.plano;
+    data.plano = novo;
+    if (sessao && !(novo && antigo && novo.pedido === antigo.pedido && treino(sessao.id))) { stopRest(); sessao = null; saveSessao(); }
+  }
+
   function ordem() {
     const i = Math.max(0, plano().treinos.findIndex((t) => t.id === data.proximo));
     return plano().treinos.slice(i).concat(plano().treinos.slice(0, i));
@@ -931,7 +938,7 @@
     if (location.hash.split("/")[1] !== "perfil" || !$("#ia")) return;
     if (ia && JSON.stringify(data.plano) !== JSON.stringify(ia.plano)) { // treino pronto, acesso renovado ou vencido
       if (ia.plano && (!data.plano || data.plano.pedido !== ia.plano.pedido)) data.proximo = ia.plano.treinos[0].id; // plano novo começa no 1º treino
-      data.plano = ia.plano;
+      trocouPlano(ia.plano);
       return render();
     }
     if (!ia) { $("#ia").innerHTML = `<h2>Treino personalizado</h2><p class="err">Sem conexão com o servidor.</p>`; return; }
