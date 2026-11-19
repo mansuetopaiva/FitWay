@@ -72,7 +72,7 @@ test("aba escondida não consulta; ao voltar, consulta na hora", async () => {
   await n.espera(() => vistos.filter((a) => a === "chamado").length > parado, 100);
 });
 
-test("falhas: espera 16, 32... até 60 s (em escala) e volta para 8 s quando dá certo, sem mostrar erro", async () => {
+test("falhas: espera 16, 32... até 60 s e volta para 8 s quando dá certo, sem mostrar erro", async () => {
   const A = await conta("eli@x.com");
   const id = (await chamar({ acao: "chamado_abrir", assunto: "app", texto: "oi" }, A)).corpo.id;
   let falhar = false; const horas = [];
@@ -82,14 +82,17 @@ test("falhas: espera 16, 32... até 60 s (em escala) e volta para 8 s quando dá
   }, { hash: "#/suporte/" + id, token: A, rapido: true });
   await n.espera(() => n.$("#supResp"));
   await n.espera(() => horas.length >= 1);
+  // Confere os tempos pedidos ao setTimeout (8000, 16000...), não o relógio: o teste não depende da velocidade da máquina.
+  // Só entram os de 8 s ou mais (o do toast e o do cartão da IA são menores).
+  const atrasos = []; const original = n.w.setTimeout;
+  n.w.setTimeout = (f, ms, ...a) => { if (ms >= 8000) atrasos.push(ms); return original(f, ms, ...a); };
   falhar = true; const ini = horas.length;
-  await n.espera(() => horas.length >= ini + 4, 5000);
-  const gaps = horas.slice(ini, ini + 4).map((h, i, a) => (i ? h - a[i - 1] : 0)).slice(1);
-  assert.ok(gaps[1] > gaps[0] * 1.5 && gaps[2] > gaps[1] * 1.5, "intervalo cresce: " + gaps);
-  falhar = false; const ok = horas.length;
-  await n.espera(() => horas.length >= ok + 3, 5000);
-  const g2 = horas[ok + 2] - horas[ok + 1];
-  assert.ok(g2 < 200, "voltou para 8 s (80 ms em escala): " + g2);
+  await n.espera(() => atrasos.length >= 3, 5000);
+  assert.deepEqual(atrasos.slice(0, 3), [16000, 32000, 60000], "dobra a cada falha e para em 60 s");
+  falhar = false;
+  await n.espera(() => atrasos.includes(8000), 5000);
+  assert.equal(atrasos[atrasos.indexOf(8000) - 1] >= 32000, true, "o 8000 vem depois de uma falha");
+  assert.ok(horas.length > ini);
   assert.doesNotMatch(n.$("#toast").textContent, /conexão|rede/i, "sem aviso de erro");
 });
 
