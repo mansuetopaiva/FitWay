@@ -5,7 +5,7 @@
 import { neon } from "@neondatabase/serverless";
 import { createHash, randomBytes } from "node:crypto";
 import { acaoAdmin, ehAdmin } from "./_admin.js";
-import { DIA, juntar, limpar } from "./_dados.js";
+import { DIA, hojeBR, juntar, limpar } from "./_dados.js";
 import { gerarSeDevido } from "./_ia.js";
 import { ACOES as ACOES_PAGAMENTO, acaoPagamento } from "./_pagamento.js";
 import { LETRAS, OPCOES, PARQ, TEXTOS, criarPedido, limparPedidos } from "./_pedido.js";
@@ -367,9 +367,10 @@ export default async function handler(req, res) {
       if (grupo !== u.grupo) await sql`update usuarios set grupo = ${grupo} where email = ${u.email}`;
       if (!grupo) return res.json({ codigo: null, membros: [] });
       // Os outros membros veem só nome e contagens, nunca o email.
+      const hoje = hojeBR(); // datas futuras que já estejam gravadas não contam
       const membros = await sql`select nome, email = ${u.email} as eu,
-          (select count(*) from jsonb_array_elements_text(dados->'checkins') as d(dia) where dia >= ${b.semana})::int as semana,
-          (select count(*) from jsonb_array_elements_text(dados->'checkins') as d(dia) where dia >= ${b.mes})::int as mes
+          (select count(*) from jsonb_array_elements_text(dados->'checkins') as d(dia) where dia >= ${b.semana} and dia <= ${hoje})::int as semana,
+          (select count(*) from jsonb_array_elements_text(dados->'checkins') as d(dia) where dia >= ${b.mes} and dia <= ${hoje})::int as mes
         from usuarios where grupo = ${grupo}`;
       return res.json({ codigo: grupo, membros });
     }

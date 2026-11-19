@@ -55,7 +55,7 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
         coalesce(sum((select count(*) from jsonb_array_elements_text(coalesce(dados->'checkins', '[]')) c(dia)
           where dia = to_char((select d from hoje), 'YYYY-MM-DD'))), 0)::int as checkins_hoje,
         coalesce(sum((select count(*) from jsonb_array_elements_text(coalesce(dados->'checkins', '[]')) c(dia)
-          where dia >= to_char((select d - extract(dow from d)::int from hoje), 'YYYY-MM-DD'))), 0)::int as checkins_semana,
+          where dia >= to_char((select d - extract(dow from d)::int from hoje), 'YYYY-MM-DD') and dia <= to_char((select d from hoje), 'YYYY-MM-DD'))), 0)::int as checkins_semana,
         col_description('usuarios'::regclass, (select attnum from pg_attribute where attrelid = 'usuarios'::regclass and attname = 'criado')) as cadastro_antes
       from usuarios`;
     await limparPedidos(sql, null); // prazos de pedidos e fotos (sem cron: roda aqui e no pedido_status)

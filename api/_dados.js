@@ -3,8 +3,13 @@ import { foto } from "./_treino.js";
 
 export const DIA = /^\d{4}-\d{2}-\d{2}$/;
 
+// O dia de hoje em Brasília (UTC-3, sem horário de verão desde 2019), "AAAA-MM-DD". Check-in depois de hoje não vale.
+const FUSO = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" });
+export const hojeBR = (agora = new Date(Date.now())) => FUSO.format(agora);
+
 // Nunca confia no que vem do navegador: devolve só o formato esperado, com limites.
-export function limpar(d) {
+// Check-ins com data depois de hoje (em Brasília) são descartados, também os que já estavam gravados: não contam em lugar nenhum.
+export function limpar(d, hoje = hojeBR()) {
   d = d && typeof d === "object" ? d : {};
   const cargas = {};
   if (d.cargas && typeof d.cargas === "object")
@@ -14,7 +19,7 @@ export function limpar(d) {
   const plano = d.plano && Array.isArray(d.plano.treinos) && d.plano.treinos.length ? { plano: d.plano } : {};
   return {
     checkins: Array.isArray(d.checkins)
-      ? [...new Set(d.checkins.filter((x) => typeof x === "string" && DIA.test(x)))].sort().slice(-4000)
+      ? [...new Set(d.checkins.filter((x) => typeof x === "string" && DIA.test(x) && x <= hoje))].sort().slice(-4000)
       : [],
     sessoes: Number.isInteger(d.sessoes) && d.sessoes >= 0 && d.sessoes <= 100000 ? d.sessoes : 0,
     proximo: typeof d.proximo === "string" && d.proximo.length <= 10 ? d.proximo : "B",
