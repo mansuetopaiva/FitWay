@@ -102,8 +102,11 @@ export async function acaoSuporte(sql, u, b) {
     const depois = depoisDe(b.depois_de);
     if (depois < 0) return falha(400, "Requisição inválida.");
     // Abrir a conversa (e cada atualização com ela aberta) marca as respostas como lidas.
-    const [c] = await sql`update chamados set lido_aluno_em = now() where id = ${id} and email = ${email}
-      returning id, assunto, status, pedido_id, criado, atualizado, fechado_em`;
+    // Só grava quando há resposta do suporte ainda não lida: a consulta de 8 s sem mensagem nova não escreve nada.
+    const [c] = await sql`with u as (update chamados set lido_aluno_em = now() where id = ${id} and email = ${email}
+        and exists (select 1 from chamado_mensagens m where m.chamado_id = chamados.id and m.autor = 'admin'
+          and m.criado > coalesce(chamados.lido_aluno_em, '-infinity'::timestamptz)) returning id)
+      select id, assunto, status, pedido_id, criado, atualizado, fechado_em from chamados where id = ${id} and email = ${email}`;
     if (!c) return naoAchou();
     // Sem o anexo (só se existe) e sem o email de quem respondeu.
     const mensagens = await sql`select id, autor, texto, anexo is not null as anexo, criado from chamado_mensagens

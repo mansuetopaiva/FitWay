@@ -90,7 +90,7 @@ test("abrir a conversa marca as respostas como lidas e não devolve o anexo inte
   const r = await acaoSuporte(s.sql, aluno, { acao: "chamado", id: "c1" });
   assert.equal(r.status, 200);
   assert.equal(r.corpo.mensagens[0].texto, "<b>oi</b>", "o servidor devolve o texto cru; a tela escapa");
-  const m = s.chamadas.find((c) => c.q.includes("from chamado_mensagens"));
+  const m = s.chamadas.find((c) => c.q.includes("from chamado_mensagens") && !c.q.includes("update chamados"));
   assert.match(m.q, /anexo is not null as anexo/);
   assert.doesNotMatch(m.q, /admin_email/, "o aluno não vê qual admin respondeu");
 });
@@ -217,7 +217,7 @@ test("depois_de: só as mensagens de id maior, no SQL e só do chamado da própr
   const r = await acaoSuporte(s.sql, aluno, { acao: "chamado", id: "c1", depois_de: 7 });
   assert.equal(r.status, 200);
   assert.match(s.chamadas[0].q, /where id = \? and email = \?/, "chamado da própria conta");
-  const m = s.chamadas.find((c) => c.q.includes("from chamado_mensagens"));
+  const m = s.chamadas.find((c) => c.q.includes("from chamado_mensagens") && !c.q.includes("update chamados"));
   assert.match(m.q, /chamado_id = \? and id > \?/); assert.ok(m.valores.includes(7));
   const a = sqlFalso((q) => (q.includes("update chamados set lido_admin_em") ? [{ id: "c1" }] : []));
   assert.equal((await acaoAdmin(a.sql, dono, { op: "suporte_chamado", id: "c1", depois_de: 4 })).status, 200);
