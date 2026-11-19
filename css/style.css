@@ -189,7 +189,7 @@ img.avatar { display: block; object-fit: cover; border: 2px solid var(--line); }
 #app.largo { max-width: 1100px; }
 .adm-tit { font-size: 16px; font-weight: 500; margin-bottom: 8px; }
 .adm-resumo { margin-top: 4px; }
-.adm-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.adm-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
 .adm-lista { margin-top: 16px; }
 .adm input:not([type="file"]) {
   width: 100%; min-height: 40px; border-radius: 8px; border: 1px solid var(--line);
@@ -452,3 +452,9 @@ button.link { background: none; border: 0; padding: 8px 4px; min-height: 44px; c
 .pag-trocar, .pag-voltar { min-height: 44px; }
 /* Link que está sozinho numa linha (rodapé, termo): a área de toque ganha altura sem mudar o texto. */
 .login-links a, .login-aceite a, .ia-termo a, .link-legal { display: inline-block; padding: 15px 4px; }
+
+/* admin em 320 px: o botão da data passa para baixo do campo em vez de espremer o texto em 3 linhas */
+.adm-data div { flex-wrap: wrap; }
+.adm-data input { min-width: 160px; }
+.adm-data .btn-sec { white-space: nowrap; flex: 1 0 auto; }
+.adm-secoes { max-width: 100%; }
