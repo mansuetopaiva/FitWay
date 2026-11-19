@@ -200,8 +200,11 @@
     const k = input.dataset.foto, arq = input.files[0];
     input.value = "";
     if (!arq) return;
+    const meus = fotos; // a leitura é assíncrona: se a pessoa saiu desta etapa (ou o formulário recomeçou), a foto não entra
+    const aindaAqui = () => fotos === meus && etapa === 3 && !!$("#f_" + k);
     let img;
-    try { img = await createImageBitmap(arq); } catch (e) { return toast("Não consegui abrir esta imagem."); }
+    try { img = await createImageBitmap(arq); } catch (e) { return aindaAqui() && toast("Não consegui abrir esta imagem."); }
+    if (!aindaAqui()) { if (img.close) img.close(); return; }
     const s = Math.min(1, 768 / Math.max(img.width, img.height)), c = document.createElement("canvas");
     c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
     c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);

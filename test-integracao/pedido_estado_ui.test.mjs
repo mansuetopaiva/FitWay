@@ -37,3 +37,20 @@ test("o Resumo falha ao ser desenhado: a etapa não avança, a tela fica inteira
   assert.ok(!/aceite o Termo/.test(n.texto()), "a validação é a da etapa 5");
   assert.match(n.texto(), /Etapa 5 de 6/);
 });
+
+test("foto lida devagar: se a pessoa já saiu da etapa das fotos, a foto não entra (sem consentimento) nem quebra a tela", async () => {
+  const n = await formulario(4);
+  n.w.HTMLCanvasElement.prototype.getContext = () => ({ drawImage() {} });
+  n.w.HTMLCanvasElement.prototype.toDataURL = () => "data:image/jpeg;base64,/9j/AAAA";
+  let abrirFoto; n.w.createImageBitmap = () => new Promise((r) => { abrirFoto = () => r({ width: 10, height: 10 }); });
+  const arq = n.$("#f_frente");
+  Object.defineProperty(arq, "files", { value: [new n.w.File(["x"], "f.jpg", { type: "image/jpeg" })], configurable: true });
+  arq.dispatchEvent(new n.w.Event("change", { bubbles: true }));
+  await n.continuar(5); // sai da etapa das fotos antes de a foto ficar pronta
+  abrirFoto();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.match(n.texto(), /Etapa 5 de 6/);
+  await n.continuar(6);
+  assert.match(n.texto(), /Fotos\s*Nenhuma/, "nenhuma foto no pedido");
+  assert.deepEqual(n.erros.map(String), []);
+});
