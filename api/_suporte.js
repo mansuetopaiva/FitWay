@@ -35,10 +35,13 @@ export async function naoLido(sql, email) {
 
 // Prazos, sem cron: roda na lista do aluno, no resumo e na lista do admin. email null = todos.
 export async function limparChamados(sql, email) {
-  await sql`update chamados set status = 'fechado', fechado_em = now()
-    where (${email}::text is null or email = ${email}) and status = 'respondido' and atualizado < now() - interval '7 days'`;
-  await sql`update chamado_mensagens set anexo = null where anexo is not null and chamado_id in (select id from chamados
-    where (${email}::text is null or email = ${email}) and status = 'fechado' and fechado_em < now() - interval '90 days')`;
+  const [f] = await sql`with x as (update chamados set status = 'fechado', fechado_em = now()
+    where (${email}::text is null or email = ${email}) and status = 'respondido' and atualizado < now() - interval '7 days' returning 1)
+    select count(*)::int as n from x`;
+  const [a] = await sql`with x as (update chamado_mensagens set anexo = null where anexo is not null and chamado_id in (select id from chamados
+    where (${email}::text is null or email = ${email}) and status = 'fechado' and fechado_em < now() - interval '90 days') returning 1)
+    select count(*)::int as n from x`;
+  return { fechados: (f && f.n) || 0, anexos: (a && a.n) || 0 };
 }
 
 export async function acaoSuporte(sql, u, b) {

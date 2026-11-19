@@ -1,5 +1,6 @@
 {
   "functions": { "api/app.js": { "maxDuration": 60, "includeFiles": "api/_material_apoio.md" } },
+  "crons": [{ "path": "/api/cron", "schedule": "0 6 * * *" }],
   "headers": [
     {
       "source": "/(.*)",
