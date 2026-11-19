@@ -15,6 +15,7 @@
   };
 
   let tipo, st, termo, f, fotos, etapa, chave, enviando = false;
+  const lendo = {}; // por posição: número da leitura de foto mais recente; trocar de etapa invalida as que ainda estão lendo
 
   async function render(t) {
     tipo = t === "novo_treino" ? "novo_treino" : "inicial";
@@ -116,6 +117,7 @@
   function irPara(nova, foco = true) {
     const antes = etapa;
     etapa = nova;
+    for (const [k] of FOTOS) lendo[k] = (lendo[k] || 0) + 1;
     try { pintar(foco); } catch (e) {
       etapa = antes; pintar(foco);
       $("#pedErr").textContent = "Não consegui abrir esta etapa. Tente de novo ou recarregue a página.";
@@ -206,8 +208,9 @@
     const k = input.dataset.foto, arq = input.files[0];
     input.value = "";
     if (!arq) return;
-    const meus = fotos; // a leitura é assíncrona: se a pessoa saiu desta etapa (ou o formulário recomeçou), a foto não entra
-    const aindaAqui = () => fotos === meus && etapa === 3 && !!$("#f_" + k);
+    const meus = fotos, vez = lendo[k] = (lendo[k] || 0) + 1;
+    // a leitura é assíncrona: a foto só entra se a pessoa continua nesta etapa, o formulário não recomeçou e não escolheu outra foto depois
+    const aindaAqui = () => fotos === meus && lendo[k] === vez && etapa === 3 && !!$("#f_" + k);
     let img;
     try { img = await createImageBitmap(arq); } catch (e) { return aindaAqui() && toast("Não consegui abrir esta imagem."); }
     if (!aindaAqui()) { if (img.close) img.close(); return; }

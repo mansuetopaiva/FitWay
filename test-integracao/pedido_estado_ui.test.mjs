@@ -76,3 +76,27 @@ test("termo mudou com o formulário aberto: recarrega o termo, pede o aceite de 
     assert.deepEqual(n.erros.map(String), []);
   } finally { process.env.TERMO_FORO = "Cidade"; }
 });
+
+// Duas fotos para a mesma posição lendo ao mesmo tempo: vale a última escolhida, mesmo que a anterior termine depois.
+async function duasLeituras(voltarEntre) {
+  const n = await formulario(4);
+  let ultimo = 0;
+  n.w.HTMLCanvasElement.prototype.getContext = () => ({ drawImage(img) { ultimo = img.width; } });
+  n.w.HTMLCanvasElement.prototype.toDataURL = () => "data:image/jpeg;base64,/9j/" + (ultimo === 10 ? "AAAA" : "BBBB");
+  const abrir = [];
+  n.w.createImageBitmap = (arq) => new Promise((r) => abrir.push(() => r({ width: arq.name === "a.jpg" ? 10 : 20, height: 10 })));
+  const escolher = (nome) => {
+    const arq = n.$("#f_frente");
+    Object.defineProperty(arq, "files", { value: [new n.w.File(["x"], nome, { type: "image/jpeg" })], configurable: true });
+    arq.dispatchEvent(new n.w.Event("change", { bubbles: true }));
+  };
+  escolher("a.jpg");
+  if (voltarEntre) { await n.continuar(5); n.clicar("#voltar"); await n.espera(() => /Etapa 4 de 6/.test(n.texto())); }
+  escolher("b.jpg");
+  abrir[1](); await n.espera(() => n.$(".ped-foto img"));
+  abrir[0](); await new Promise((r) => setTimeout(r, 100));
+  assert.match(n.$(".ped-foto img").src, /BBBB$/, "fica a foto escolhida por último");
+  assert.deepEqual(n.erros.map(String), []);
+}
+test("foto trocada enquanto a anterior ainda lê: vale a última escolhida", () => duasLeituras(false));
+test("a pessoa sai da etapa, volta e troca a foto enquanto a anterior ainda lê: vale a última escolhida", () => duasLeituras(true));
