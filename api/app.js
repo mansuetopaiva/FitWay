@@ -24,8 +24,9 @@ const TRINTA_DIAS = 2592000;
 const ERRO_CADASTRO = "Não foi possível criar a conta com este email. Se você já tem conta, use a aba Entrar ou Esqueci a senha.";
 
 // Cria as tabelas na primeira chamada de cada instância; não precisa rodar SQL à mão.
-let pronto;
-const schema = () => pronto ||= (async () => {
+// Os ~35 comandos só rodam quando a versão gravada no banco difere da deste código. A versão é o hash do texto de
+// aplicarSchema(): qualquer mudança no schema troca a versão sozinha, sem ninguém lembrar de somar um número.
+async function aplicarSchema() {
   await sql`create table if not exists usuarios (
     email text primary key,
     nome text not null,
@@ -160,6 +161,16 @@ const schema = () => pronto ||= (async () => {
     atualizado timestamptz not null default now()
   )`;
   await sql`create unique index if not exists admin_log_devolvido on admin_log ((detalhes->>'transaction_nsu')) where acao = 'devolvido'`;
+}
+const VERSAO_SCHEMA = createHash("sha256").update(aplicarSchema.toString()).digest("hex").slice(0, 16);
+let pronto;
+const schema = () => pronto ||= (async () => {
+  let atual;
+  try { [atual] = await sql`select versao from schema_versao where id = 1`; } catch (e) { /* tabela ainda não existe: banco novo */ }
+  if (atual && atual.versao === VERSAO_SCHEMA) return; // partida a frio: 1 comando em vez de dezenas
+  await aplicarSchema();
+  await sql`create table if not exists schema_versao (id int primary key, versao text not null)`;
+  await sql`insert into schema_versao (id, versao) values (1, ${VERSAO_SCHEMA}) on conflict (id) do update set versao = excluded.versao`;
 })().catch((e) => { pronto = null; throw e; });
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
