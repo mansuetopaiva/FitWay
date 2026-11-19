@@ -355,6 +355,8 @@
     const item = (href, ic, label, id) =>
       `<a href="${href}" class="${tab === id ? "on" : ""}" ${tab === id ? 'aria-current="page"' : ""} ${id === "perfil" ? "data-aba-perfil" : ""}><span>${icon(ic)}${id === "perfil" ? ponto() : ""}</span>${label}${id === "perfil" ? pontoSr() : ""}</a>`;
     app.classList.toggle("largo", tab === "admin"); // só o painel usa a tela larga no computador
+    const eraTitulo = !!(document.activeElement && document.activeElement.matches && document.activeElement.matches(".topbar h1")); // "Carregando…" e depois a tela: o foco acompanha
+    const trocouTela = shell.ultimo !== title || !app.querySelector(".topbar"); shell.ultimo = title;
     app.innerHTML = `
       <header class="topbar"><h1>${title}</h1></header>
       <main class="screen">${body}</main>
@@ -365,6 +367,9 @@
         ${item("#/perfil", "user", "Perfil", "perfil")}
         ${adminUser ? item("#/admin", "shield", "Admin", "admin") : ""}
       </nav>`;
+    // Tela nova: o foco vai para o título (o leitor de tela lê onde a pessoa está e o Tab segue dali). A tela pode mandar o foco para
+    // um campo logo depois; repintar a mesma tela (mesmo título) não mexe no foco.
+    if (trocouTela || eraTitulo) { const h = app.querySelector(".topbar h1"); h.tabIndex = -1; h.focus({ preventScroll: true }); }
   }
 
   // ---------- telas baixadas só quando abertas: js/admin.js (só admin), js/pedido.js (formulário) e js/pagamento.js ----------
@@ -679,6 +684,7 @@
         </button>${body}</section>`;
     }).join("");
 
+    const telaNova = shell.ultimo !== "treino:" + id; shell.ultimo = "treino:" + id; // só trocar de treino leva o foco; marcar série não
     app.innerHTML = `
       <header class="topbar center">
         <a class="icon-btn" href="#/treinos" aria-label="Voltar para a lista de treinos">${icon("back")}</a><h1>Treinos</h1>
@@ -693,6 +699,7 @@
       </main>
       <div class="bottom"></div>`;
     paintBottom();
+    if (telaNova) { const nome = app.querySelector(".switch b"); nome.tabIndex = -1; nome.focus({ preventScroll: true }); }
     // fotos do banco público: alterna os dois quadros para dar ideia do movimento
     clearInterval(quadroTimer);
     const foto = $("img[data-db]");

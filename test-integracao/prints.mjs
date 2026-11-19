@@ -78,7 +78,15 @@ const medir = () => {
     const razao = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), px = parseFloat(st.fontSize), grande = px >= 24 || (px >= 18.66 && +st.fontWeight >= 700);
     if (razao < (grande ? 3 : 4.5) && !e.matches(":disabled, [disabled]")) contraste.push(`${(e.textContent || "").trim().replace(/\s+/g, " ").slice(0, 30)} ${razao.toFixed(2)}`);
   }
-  const out = { contraste, rolagemH: document.documentElement.scrollWidth > innerWidth ? document.documentElement.scrollWidth : 0, alvos: [], transborda: [], atrasDaBarra: [] };
+  // Nome acessível: botão/link só com ícone precisa de aria-label (ou texto); campo precisa de <label> de verdade (ou aria-label).
+  const semNome = [];
+  for (const e of document.querySelectorAll("#app button, #app a[href], #app input:not([type=hidden]), #app select, #app textarea")) {
+    if (e.closest("[hidden]") || e.closest(".sr") && !e.matches("input[type=file]")) continue;
+    const tem = (e.getAttribute("aria-label") || "").trim() || (e.getAttribute("aria-labelledby") || "").trim();
+    if (e.matches("button, a")) { if (!tem && !e.textContent.trim()) semNome.push(`${e.tagName.toLowerCase()}#${e.id || e.className}`); }
+    else if (!tem && !(e.labels && [...e.labels].some((l) => l.textContent.trim()))) semNome.push(`${e.tagName.toLowerCase()}#${e.id || e.name}`);
+  }
+  const out = { semNome, contraste, rolagemH: document.documentElement.scrollWidth > innerWidth ? document.documentElement.scrollWidth : 0, alvos: [], transborda: [], atrasDaBarra: [] };
   const nome = (e) => (e.getAttribute("aria-label") || e.textContent || e.id || e.tagName).trim().replace(/\s+/g, " ").slice(0, 40);
   const nav = document.querySelector("nav.tabbar, .tabbar, nav");
   const topoNav = nav && getComputedStyle(nav).position === "fixed" ? nav.getBoundingClientRect().top : Infinity;
@@ -117,6 +125,26 @@ async function foto(nome, conta, hash, passo, largura) {
   await pg.goto(BASE + hash); await pg.waitForLoadState("networkidle"); await pg.waitForTimeout(300);
   if (passo) { await passo(pg); await pg.waitForLoadState("networkidle"); await pg.waitForTimeout(300); }
   const m = await pg.evaluate(medir);
+  // Teclado: Tab por tudo o que recebe foco; cada elemento precisa mostrar um indicador (contorno ou sombra; no caso de campo
+  // escondido com opção desenhada ao lado, o irmão ou o label).
+  if (largura === 375) {
+    m.focoInvisivel = [];
+    await pg.evaluate(() => document.activeElement && document.activeElement.blur());
+    const vistos = new Set();
+    for (let i = 0; i < 80; i++) {
+      await pg.keyboard.press("Tab");
+      const r = await pg.evaluate(() => {
+        const e = document.activeElement; if (!e || e === document.body) return null;
+        const marca = (x) => { const c = getComputedStyle(x); return (c.outlineStyle !== "none" && parseFloat(c.outlineWidth) > 0) || c.boxShadow !== "none"; };
+        let ok = marca(e);
+        if (!ok && +getComputedStyle(e).opacity === 0) { const lab = e.labels && e.labels[0]; ok = marca(e.nextElementSibling || e) || (lab && marca(lab)); }
+        return { nome: (e.getAttribute("aria-label") || e.textContent || e.id || e.tagName).trim().replace(/\s+/g, " ").slice(0, 40), ok, chave: e.tagName + (e.id || e.name || e.textContent.slice(0, 20)) };
+      });
+      if (!r) break;
+      if (vistos.has(r.chave)) break; vistos.add(r.chave);
+      if (!r.ok) m.focoInvisivel.push(r.nome);
+    }
+  }
   if (!process.env.PRINTS_SEM_FOTO) await pg.screenshot({ path: join(SAIDA, `${nome}-${largura}.png`), fullPage: true });
   (relatorio[nome] ||= {})[largura] = { ...m, erros };
   await ctx.close();
