@@ -83,7 +83,17 @@
     // Sem o plano: ele só vem do servidor (um plano de IA vencido não pode voltar por uma cópia antiga).
     const k = dataKey(), copia = { ...data, plano: undefined };
     store.set(k, copia);
-    api("salvar", { dados: copia }).then(() => store.del(k), () => {
+    api("salvar", { dados: copia }).then((r) => {
+      store.del(k);
+      // O servidor descarta o que não vale (check-in com data depois de hoje em Brasília): o app fica com o que ele guardou.
+      const guardados = new Set(r && r.dados && Array.isArray(r.dados.checkins) ? r.dados.checkins : copia.checkins);
+      const fora = data && data.checkins.filter((c) => copia.checkins.includes(c) && !guardados.has(c));
+      if (fora && fora.length) {
+        data.checkins = data.checkins.filter((c) => !fora.includes(c));
+        toast("Esta data não foi registrada: o check-in não pode ser depois de hoje. Confira a data do aparelho.");
+        if (location.hash.split("/")[1] === "inicio" || !location.hash.split("/")[1]) viewInicio();
+      }
+    }, () => {
       store.set(k, copia);
       toast("Sem conexão: salvo só neste aparelho por enquanto.");
     });
