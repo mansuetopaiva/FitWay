@@ -125,6 +125,7 @@ async function foto(nome, conta, hash, passo, largura) {
   await pg.goto(BASE + hash); await pg.waitForLoadState("networkidle"); await pg.waitForTimeout(300);
   if (passo) { await passo(pg); await pg.waitForLoadState("networkidle"); await pg.waitForTimeout(300); }
   const m = await pg.evaluate(medir);
+  if (!process.env.PRINTS_SEM_FOTO) await pg.screenshot({ path: join(SAIDA, `${nome}-${largura}.png`), fullPage: true });
   // Teclado: Tab por tudo o que recebe foco; cada elemento precisa mostrar um indicador (contorno ou sombra; no caso de campo
   // escondido com opção desenhada ao lado, o irmão ou o label).
   if (largura === 375) {
@@ -145,7 +146,6 @@ async function foto(nome, conta, hash, passo, largura) {
       if (!r.ok) m.focoInvisivel.push(r.nome);
     }
   }
-  if (!process.env.PRINTS_SEM_FOTO) await pg.screenshot({ path: join(SAIDA, `${nome}-${largura}.png`), fullPage: true });
   (relatorio[nome] ||= {})[largura] = { ...m, erros };
   await ctx.close();
 }
