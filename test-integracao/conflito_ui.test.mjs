@@ -35,3 +35,14 @@ test("servidor: email repetido e grupo cheio respondem 400; só a troca de conta
   const troca = await chamar({ acao: "eu", conta: "outra@x.com" }, dono);
   assert.equal(troca.status, 409); assert.equal(troca.corpo.trocaConta, true);
 });
+
+test("troca de conta de verdade (outra conta entrou no navegador): 409 com trocaConta mostra o aviso e recarrega o app", async () => {
+  const ana = (await chamar({ acao: "criar", nome: "Ana2", email: "ana2@x.com", senha: "senha123" })).token;
+  const bia = (await chamar({ acao: "criar", nome: "Bia2", email: "bia2@x.com", senha: "senha123" })).token;
+  const n = await navegador(chamar, { hash: "#/perfil", token: ana });
+  await n.espera(() => /Ana2|Perfil/.test(n.texto()) && n.$("#sair"));
+  n.token = bia; // outra aba entrou com outra conta: o cookie agora é da Bia
+  n.ir("#/ranking");
+  await n.espera(() => /Outra conta entrou/.test(n.$("#toast").textContent));
+  await n.espera(() => n.erros.some((e) => /navigation/.test(String(e))), 2500); // location.reload() (o jsdom não implementa e registra)
+});
