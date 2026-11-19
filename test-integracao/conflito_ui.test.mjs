@@ -15,9 +15,9 @@ test("cadastro com email que já tem conta: mensagem no lugar, campos mantidos, 
   n.clicar("[data-mode=criar]");
   n.$("#nome").value = "Outra Ana"; n.$("#email").value = "ana@x.com"; n.$("#senha").value = "outra123";
   n.$("form .btn").click();
-  await n.espera(() => /Já existe uma conta/.test(n.$(".err").textContent));
+  await n.espera(() => /Não foi possível criar a conta/.test(n.$(".err").textContent));
   await parar(1600); // o recarregamento antigo vinha 1,2 s depois
-  assert.match(n.$(".err").textContent, /Já existe uma conta/);
+  assert.match(n.$(".err").textContent, /Não foi possível criar a conta/);
   assert.equal(n.$("#nome").value, "Outra Ana"); assert.equal(n.$("#email").value, "ana@x.com"); assert.equal(n.$("#senha").value, "outra123");
   assert.deepEqual(n.erros.map(String), [], "nenhuma navegação (reload) foi tentada");
 });

@@ -20,6 +20,7 @@ import { MSG_LOGIN, bloqueado, registrarErro, zerar } from "./_login.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
+const ERRO_CADASTRO = "Não foi possível criar a conta com este email. Se você já tem conta, use a aba Entrar ou Esqueci a senha.";
 
 // Cria as tabelas na primeira chamada de cada instância; não precisa rodar SQL à mão.
 let pronto;
@@ -205,10 +206,11 @@ export default async function handler(req, res) {
         const nome = texto(b.nome, 1, 40) ? b.nome.trim() : "";
         if (!nome) return res.status(400).json({ erro: "Digite seu nome." });
         // Email listado em ADMIN_EMAILS sem conta: quem cadastrasse primeiro viraria admin. A conta tem de existir antes.
-        if (ehAdmin(email)) return res.status(403).json({ erro: "Este email não pode ser cadastrado por aqui." });
+        // A recusa é a mesma do email que já tem conta (mesmo status e texto): não revela quais emails são de admin.
+        if (ehAdmin(email)) return res.status(400).json({ erro: ERRO_CADASTRO });
         [u] = await sql`insert into usuarios (email, nome, senha) values (${email}, ${nome}, ${senhaHash(b.senha)})
           on conflict do nothing returning email, nome, dados`;
-        if (!u) return res.status(400).json({ erro: "Já existe uma conta com este email. Use a aba Entrar." });
+        if (!u) return res.status(400).json({ erro: ERRO_CADASTRO });
       } else {
         const ip = ipDe(req), admin = ehAdmin(email), preso = await bloqueado(sql, email, ip, admin);
         [u] = await sql`select email, nome, senha, dados, foto, acesso_ate from usuarios where email = ${email}`;
