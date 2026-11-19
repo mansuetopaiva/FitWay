@@ -201,7 +201,7 @@ export default async function handler(req, res) {
         if (ehAdmin(email)) return res.status(403).json({ erro: "Este email não pode ser cadastrado por aqui." });
         [u] = await sql`insert into usuarios (email, nome, senha) values (${email}, ${nome}, ${senhaHash(b.senha)})
           on conflict do nothing returning email, nome, dados`;
-        if (!u) return res.status(409).json({ erro: "Já existe uma conta com este email. Use a aba Entrar." });
+        if (!u) return res.status(400).json({ erro: "Já existe uma conta com este email. Use a aba Entrar." });
       } else {
         [u] = await sql`select email, nome, senha, dados, foto, acesso_ate from usuarios where email = ${email}`;
         // Sem conta, confere contra um hash falso: o tempo é o mesmo do email com conta.
@@ -249,7 +249,7 @@ export default async function handler(req, res) {
     if (!u) return res.status(401).json({ erro: "Entre na sua conta." });
     // O cookie é do navegador inteiro: se alguém entrou em outra conta em outra aba, esta aba ainda acha que é
     // a conta antiga. Sem esta checagem, ela gravaria check-ins, cargas e o PDF na conta errada.
-    if (b.conta !== undefined && b.conta !== u.email) return res.status(409).json({ erro: "Outra conta entrou neste navegador. Recarregando…" });
+    if (b.conta !== undefined && b.conta !== u.email) return res.status(409).json({ erro: "Outra conta entrou neste navegador. Recarregando…", trocaConta: true });
     if (b.acao === "eu") return res.json({ ...publico(u), suporteNaoLido: await naoLido(sql, u.email) });
     if (b.acao === "admin") { const r = await acaoAdmin(sql, u, b, { gerar }); return res.status(r.status).json(r.corpo); }
     if (b.acao === "salvar") {
@@ -348,7 +348,7 @@ export default async function handler(req, res) {
         const codigo = texto(b.codigo, 6, 6) ? b.codigo.toUpperCase() : "";
         const [{ n }] = await sql`select count(*)::int as n from usuarios where grupo = ${codigo}`;
         if (!n) return res.status(404).json({ erro: "Não encontrei um grupo com este código." });
-        if (n >= 50) return res.status(409).json({ erro: "Este grupo já está cheio." });
+        if (n >= 50) return res.status(400).json({ erro: "Este grupo já está cheio." });
         grupo = codigo;
       }
       if (grupo !== u.grupo) await sql`update usuarios set grupo = ${grupo} where email = ${u.email}`;

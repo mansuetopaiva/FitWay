@@ -49,7 +49,7 @@
   async function api(acao, corpo) {
     const r = await fetch("/api/app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ acao, conta: email || undefined, ...corpo }) });
     const j = await r.json().catch(() => ({}));
-    if (r.status === 409) { toast(j.erro); setTimeout(() => location.reload(), 1200); } // a conta do cookie mudou (409 é só para isso)
+    if (r.status === 409 && j.trocaConta) { toast(j.erro); setTimeout(() => location.reload(), 1200); } // só a troca de conta recarrega: nenhuma outra recusa usa trocaConta
     if (!r.ok) throw Object.assign(new Error(j.erro || "Erro no servidor. Tente de novo."), { status: r.status });
     return j;
   }
