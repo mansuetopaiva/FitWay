@@ -7,11 +7,11 @@ after(() => abertas.forEach((w) => w.close()));
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 const REPO = fileURLToPath(new URL("../", import.meta.url)), R = REPO; // raiz do repositório
-export async function navegador(chamar, { hash = "", confirmar = true, token: tk = null, rapido = false } = {}) {
+export async function navegador(chamar, { hash = "", busca = "", confirmar = true, token: tk = null, rapido = false } = {}) {
   let token = tk; const erros = [];
   const vc = new VirtualConsole(); vc.on("jsdomError", (e) => erros.push(e)); vc.on("error", (e) => erros.push(e));
   const html = readFileSync(R + "index.html", "utf8").replace(/<meta http-equiv[^>]*>/, "").replace(/<script src[^>]*><\/script>/, "");
-  const dom = new JSDOM(html, { url: "https://fitway.test/" + hash, runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc,
+  const dom = new JSDOM(html, { url: "https://fitway.test/" + busca + hash, runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc,
     beforeParse(w) {
       w.confirm = () => (typeof confirmar === "function" ? confirmar() : confirmar);
       w.scrollTo = () => {};

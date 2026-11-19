@@ -172,8 +172,10 @@
         return erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
       }
       restoreSessao();
-      location.hash = data.plano ? "#/inicio" : "#/perfil"; // conta nova começa enviando o PDF
-      render();
+      // Quem chegou pela volta do checkout (ou por um pedido) sem sessão continua na tela de destino; os outros vão ao início
+      // (a conta nova começa enviando o PDF). Mudar o hash redesenha uma vez só (hashchange); sem mudança, redesenha aqui.
+      const destino = /^#\/(pagamento|pedido)\//.test(location.hash) ? location.hash : data.plano ? "#/inicio" : "#/perfil";
+      if (location.hash !== destino) location.hash = destino; else render();
     };
     $(criar ? "#nome" : "#email").focus();
   }
