@@ -106,10 +106,23 @@
     const form = $("#pedForm");
     form.oninput = form.onchange = (ev) => ler(ev.target);
     form.onsubmit = (ev) => { ev.preventDefault(); avancar(); };
-    if (etapa) $("#voltar").onclick = () => { etapa--; guardar(); pintar(); };
-    app.querySelectorAll("[data-ir]").forEach((b) => b.onclick = () => { etapa = +b.dataset.ir; pintar(); });
+    if (etapa) $("#voltar").onclick = () => irPara(etapa - 1);
+    app.querySelectorAll("[data-ir]").forEach((b) => b.onclick = () => irPara(+b.dataset.ir));
     app.querySelectorAll("[data-foto]").forEach((i) => i.onchange = () => lerFoto(i));
     app.querySelectorAll("[data-tirar]").forEach((b) => b.onclick = () => { delete fotos[b.dataset.tirar]; pintar(false); $("#f_" + b.dataset.tirar).focus(); });
+  }
+
+  // A etapa só muda depois que a tela da nova etapa foi desenhada; se o desenho falhar, volta à de antes (e ao rascunho dela).
+  function irPara(nova, foco = true) {
+    const antes = etapa;
+    etapa = nova;
+    try { pintar(foco); } catch (e) {
+      etapa = antes; pintar(foco);
+      $("#pedErr").textContent = "Não consegui abrir esta etapa. Tente de novo ou recarregue a página.";
+      return false;
+    }
+    guardar();
+    return true;
   }
 
   function ler(el) {
@@ -161,7 +174,7 @@
   async function avancar() {
     const erro = erroDaEtapa(), err = $("#pedErr");
     if (erro) return (err.textContent = erro);
-    if (etapa < ETAPAS.length - 1) { etapa++; guardar(); return pintar(); }
+    if (etapa < ETAPAS.length - 1) return irPara(etapa + 1);
     if (enviando) return;
     enviando = true; pintar(false);
     const respostas = { ...f, consentimentos: { dados: f.consentimentos.dados, fotos: !!Object.keys(fotos).length && f.consentimentos.fotos } };
