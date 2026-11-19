@@ -2,7 +2,7 @@
    As perguntas, opções e limites vêm do servidor (pedido_status com form), que confere tudo de novo no envio. */
 (function () {
   "use strict";
-  const { api, esc, toast, shell, $, app } = window.FitWay;
+  const { api, esc, toast, shell, $, app, erro } = window.FitWay;
   const ETAPAS = ["Você", "Rotina", "Saúde", "Fotos", "Observações", "Resumo"];
   const FOTOS = [["frente", "Frente"], ["costas", "Costas"], ["direito", "Perfil direito"], ["esquerdo", "Perfil esquerdo"]];
   const TEXTOS = [["lesoes", "Lesões ou dores"], ["cirurgias", "Cirurgias"], ["doencas", "Problemas de saúde"],
@@ -120,7 +120,7 @@
     for (const [k] of FOTOS) lendo[k] = (lendo[k] || 0) + 1;
     try { pintar(foco); } catch (e) {
       etapa = antes; pintar(foco);
-      $("#pedErr").textContent = "Não consegui abrir esta etapa. Tente de novo ou recarregue a página.";
+      erro($("#pedErr"), "Não consegui abrir esta etapa. Tente de novo ou recarregue a página.");
       return false;
     }
     guardar();
@@ -145,37 +145,39 @@
   }
 
   // Mesmos limites do servidor (api/_pedido.js), para avisar já na etapa; o servidor confere de novo.
+  // Devolve [mensagem, campo]: o campo recebe aria-invalid, aria-describedby e o foco (ver erro() em js/app.js).
   function erroDaEtapa() {
     const faixa = (v, a, b, int = true) => typeof v === "number" && Number.isFinite(v) && v >= a && v <= b && (!int || Number.isInteger(v));
     if (etapa === 0) {
-      if (!f.objetivo.length) return "Escolha pelo menos um objetivo.";
-      if (!f.nivel) return "Escolha o nível de experiência.";
-      if (typeof f.idade === "number" && f.idade < 18) return "O treino personalizado é só para quem tem 18 anos ou mais.";
-      if (!faixa(f.idade, 18, 90)) return "A idade precisa ser de 18 a 90 anos.";
-      if (!f.sexo) return "Escolha o sexo.";
-      if (!faixa(f.altura, 120, 230)) return "A altura precisa ser de 120 a 230 cm.";
-      if (!faixa(f.peso, 30, 300, false)) return "O peso precisa ser de 30 a 300 kg.";
+      if (!f.objetivo.length) return ["Escolha pelo menos um objetivo.", '[name="objetivo"]'];
+      if (!f.nivel) return ["Escolha o nível de experiência.", '[name="nivel"]'];
+      if (typeof f.idade === "number" && f.idade < 18) return ["O treino personalizado é só para quem tem 18 anos ou mais.", "#p_idade"];
+      if (!faixa(f.idade, 18, 90)) return ["A idade precisa ser de 18 a 90 anos.", "#p_idade"];
+      if (!f.sexo) return ["Escolha o sexo.", '[name="sexo"]'];
+      if (!faixa(f.altura, 120, 230)) return ["A altura precisa ser de 120 a 230 cm.", "#p_altura"];
+      if (!faixa(f.peso, 30, 300, false)) return ["O peso precisa ser de 30 a 300 kg.", "#p_peso"];
     }
     if (etapa === 1) {
-      if (!faixa(f.dias, 2, 6)) return "Escolha quantos dias por semana.";
-      if (!st.form.opcoes.minutos.includes(f.minutos)) return "Escolha o tempo por treino.";
+      if (!faixa(f.dias, 2, 6)) return ["Escolha quantos dias por semana.", '[name="dias"]'];
+      if (!st.form.opcoes.minutos.includes(f.minutos)) return ["Escolha o tempo por treino.", '[name="minutos"]'];
     }
     if (etapa === 2) {
       const i = f.parq.findIndex((x) => x !== true && x !== false);
-      if (i >= 0) return `Responda a pergunta ${i + 1} do questionário de saúde.`;
-      if (f.parq.includes(true) && !f.liberacao) return "Você respondeu Sim no questionário de saúde. Para continuar, é preciso ter liberação médica para fazer musculação e marcar a caixa.";
+      if (i >= 0) return [`Responda a pergunta ${i + 1} do questionário de saúde.`, `[name="parq${i}"]`];
+      if (f.parq.includes(true) && !f.liberacao) return ["Você respondeu Sim no questionário de saúde. Para continuar, é preciso ter liberação médica para fazer musculação e marcar a caixa.", '[name="liberacao"]'];
     }
-    if (etapa === 3 && Object.keys(fotos).length && !f.consentimentos.fotos) return "Para enviar fotos, marque a autorização das fotos (ou remova as fotos).";
+    if (etapa === 3 && Object.keys(fotos).length && !f.consentimentos.fotos) return ["Para enviar fotos, marque a autorização das fotos (ou remova as fotos).", '[name="cfotos"]'];
     if (etapa === 5) {
-      if (!f.termo) return "Para enviar, leia e aceite o Termo de Responsabilidade e Uso.";
-      if (!f.consentimentos.dados) return "Para enviar, autorize guardar seus dados de saúde.";
+      if (!f.termo) return ["Para enviar, leia e aceite o Termo de Responsabilidade e Uso.", '[name="termo"]'];
+      if (!f.consentimentos.dados) return ["Para enviar, autorize guardar seus dados de saúde.", '[name="cdados"]'];
     }
-    return "";
+    return null;
   }
 
   async function avancar() {
-    const erro = erroDaEtapa(), err = $("#pedErr");
-    if (erro) return (err.textContent = erro);
+    const falha = erroDaEtapa(), err = $("#pedErr");
+    if (falha) return erro(err, falha[0], $(falha[1]));
+    erro(err, "");
     if (etapa < ETAPAS.length - 1) return irPara(etapa + 1);
     if (enviando) return;
     enviando = true; pintar(false);
@@ -192,10 +194,10 @@
         try { termo = await api("termo"); f.termo = false; } catch (_) { /* segue com o termo que já tem; o aviso abaixo basta */ }
         if (location.hash.split("/")[1] !== "pedido") return;
         pintar(false);
-        return ($("#pedErr").textContent = "O termo foi atualizado. Leia de novo e aceite para enviar o pedido.");
+        return erro($("#pedErr"), "O termo foi atualizado. Leia de novo e aceite para enviar o pedido.", $('[name="termo"]'));
       }
       pintar(false);
-      return ($("#pedErr").textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
+      return erro($("#pedErr"), e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
     }
     enviando = false;
     store.del(chave);

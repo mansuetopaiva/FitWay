@@ -2,7 +2,7 @@
    O servidor confere a conta em toda ação (api/_suporte.js). Todo texto vem do usuário ou do admin: sempre esc(), nunca HTML. */
 (function () {
   "use strict";
-  const { api, esc, toast, shell, $, app, icon } = window.FitWay;
+  const { api, esc, toast, shell, $, app, icon, erro } = window.FitWay;
   const TIT = "Ajuda e suporte";
   const ASSUNTOS = {
     pagamento: { nome: "Pagamento", ajuda: "Paguei e não liberou, cobrança errada, desistência ou devolução." },
@@ -149,16 +149,16 @@
       ev.preventDefault();
       if (enviando) return;
       const m = app.querySelector("[name=assunto]:checked"), texto = $("#supTexto").value.trim(), err = $("#supErr");
-      if (preparando) return (err.textContent = "Espere a imagem ficar pronta.");
-      if (!m) { err.textContent = "Escolha o assunto."; return app.querySelector("[name=assunto]").focus(); }
-      if (!texto) { err.textContent = "Escreva a mensagem."; return $("#supTexto").focus(); }
+      if (preparando) return erro(err, "Espere a imagem ficar pronta.");
+      if (!m) return erro(err, "Escolha o assunto.", app.querySelector("[name=assunto]"));
+      if (!texto) return erro(err, "Escreva a mensagem.", $("#supTexto"));
       const pedido_id = m.value === "pagamento" && $("#supPedido").value ? $("#supPedido").value : undefined;
-      enviando = true; $("#supForm .btn").disabled = true; err.textContent = "";
+      enviando = true; $("#supForm .btn").disabled = true; erro(err, "");
       try {
         const r = await api("chamado_abrir", { assunto: m.value, texto, pedido_id, anexo: anexo || undefined });
         anexo = ""; toast("Chamado aberto. Vamos responder por aqui.");
         location.hash = "#/suporte/" + encodeURIComponent(r.id);
-      } catch (e) { enviando = false; if ($("#supForm")) { $("#supForm .btn").disabled = false; err.textContent = sem(e); } }
+      } catch (e) { enviando = false; if ($("#supForm")) { $("#supForm .btn").disabled = false; erro(err, sem(e)); } }
     };
   }
 
@@ -231,11 +231,11 @@
       ev.preventDefault();
       if (enviando) return;
       const texto = $("#supTexto").value.trim(), err = $("#supErr");
-      if (preparando) return (err.textContent = "Espere a imagem ficar pronta.");
-      if (!texto) { err.textContent = "Escreva a mensagem."; return $("#supTexto").focus(); }
-      enviando = true; $("#supResp .btn").disabled = true; err.textContent = "";
+      if (preparando) return erro(err, "Espere a imagem ficar pronta.");
+      if (!texto) return erro(err, "Escreva a mensagem.", $("#supTexto"));
+      enviando = true; $("#supResp .btn").disabled = true; erro(err, "");
       try { await api("chamado_responder", { id, texto, anexo: anexo || undefined }); anexo = ""; enviando = false; toast("Mensagem enviada."); if (aqui(id)) conversa(id, true); }
-      catch (e) { enviando = false; if ($("#supResp")) { $("#supResp .btn").disabled = false; err.textContent = sem(e); } }
+      catch (e) { enviando = false; if ($("#supResp")) { $("#supResp .btn").disabled = false; erro(err, sem(e)); } }
     };
   }
 

@@ -3,7 +3,7 @@
    Toda proteção está no servidor (api/_admin.js confere ADMIN_EMAILS a cada chamada). */
 (function () {
   "use strict";
-  const { api, esc, toast, icon, shell, $, app } = window.FitWay;
+  const { api, esc, toast, icon, shell, $, app, erro } = window.FitWay;
   const TZ = "America/Sao_Paulo";
 
   // ---------- estado (sobrevive à troca entre lista e detalhe) ----------
@@ -437,7 +437,7 @@
     if (ev.target.id === "admExcluir") {
       ev.preventDefault();
       const alvo = det.email, conf = $("#admExEmail").value.trim().toLowerCase(), b = ev.target.querySelector("[type=submit]");
-      if (conf !== alvo.toLowerCase()) { $("#admExErr").textContent = "O email digitado não é o desta conta."; $("#admExEmail").setAttribute("aria-invalid", "true"); return $("#admExEmail").focus(); }
+      if (conf !== alvo.toLowerCase()) return erro($("#admExErr"), "O email digitado não é o desta conta.", $("#admExEmail"));
       if (!confirm(`Excluir a conta de ${det.nome} para sempre?`)) return;
       b.disabled = true;
       try { await api("admin", { op: "usuario_excluir", email: alvo, confirmacao: conf }); }
@@ -623,8 +623,9 @@
     if (f) f.onsubmit = (ev) => {
       ev.preventDefault();
       const m = f.querySelector("[name=motivo]:checked"), texto = $("#pedEstornoTxt").value.trim(), err = $("#pedEstornoErr");
-      if (!m) { err.textContent = "Escolha o motivo."; return f.querySelector("[name=motivo]").focus(); }
-      if (m.value === "outro" && !texto) { err.textContent = "Descreva o motivo."; return $("#pedEstornoTxt").focus(); }
+      if (!m) return erro(err, "Escolha o motivo.", f.querySelector("[name=motivo]"));
+      if (m.value === "outro" && !texto) return erro(err, "Descreva o motivo.", $("#pedEstornoTxt"));
+      erro(err, "");
       if (!confirm(`Confirmar a devolução deste pedido de ${ped.nome}? O pedido será cancelado${dias ? `, o acesso perde ${dias} dias` : ""}${p.tipo === "mensalidade" ? "" : " e, se o treino atual veio dele, o treino sai da conta (volta o anterior, se houver)"}. Isso não devolve o dinheiro: faça a devolução no app do InfinitePay.`)) return;
       estornando = false;
       acaoPedido("pedido_estornar", "Devolução registrada e pedido cancelado.", f.querySelector("[type=submit]"), { motivo: m.value, ...(m.value === "outro" ? { texto } : {}) });
@@ -902,7 +903,7 @@
     if (f) f.onsubmit = (ev) => {
       ev.preventDefault();
       const texto = $("#chTexto").value.trim();
-      if (!texto) { $("#chErr").textContent = "Escreva a resposta."; return $("#chTexto").focus(); }
+      if (!texto) return erro($("#chErr"), "Escreva a resposta.", $("#chTexto"));
       acaoChamado({ op: "suporte_responder", texto }, "Resposta enviada.", f.querySelector("[type=submit]"));
     };
   }

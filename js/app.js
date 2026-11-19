@@ -36,6 +36,21 @@
   };
   const icon = (n, cls) => `<svg class="i ${cls || ""}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
 
+  // Erro de formulário: o texto vai para o <p class="err" role="alert"> (anunciado por leitor de tela) e, quando o erro é de um
+  // campo, o campo ganha aria-invalid e aria-describedby apontando para a mensagem, e recebe o foco. Mensagem vazia limpa tudo.
+  let nErr = 0;
+  function erro(err, msg, campo) {
+    if (!err) return msg && toast(msg);
+    (err.closest("form") || err.parentElement).querySelectorAll("[aria-invalid]").forEach((i) => i.removeAttribute("aria-invalid"));
+    err.id ||= "err" + (++nErr);
+    err.textContent = msg;
+    if (campo && msg) {
+      campo.setAttribute("aria-invalid", "true");
+      campo.setAttribute("aria-describedby", [...new Set((campo.getAttribute("aria-describedby") || "").split(" ").filter(Boolean).concat(err.id))].join(" "));
+      campo.focus();
+    }
+  }
+  document.addEventListener("input", (ev) => { if (ev.target.removeAttribute) ev.target.removeAttribute("aria-invalid"); }); // a pessoa está corrigindo
   let toastTimer;
   function toast(msg) {
     const t = $("#toast");
@@ -145,16 +160,16 @@
       const em = $("#email").value.trim().toLowerCase();
       const pw = $("#senha").value;
       const nome = criar ? $("#nome").value.trim() : "";
-      if (criar && !nome) return (err.textContent = "Digite seu nome.");
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return (err.textContent = "Digite um email válido, como nome@exemplo.com.");
-      if (pw.length < 6) return (err.textContent = "A senha precisa ter pelo menos 6 caracteres.");
+      if (criar && !nome) return erro(err, "Digite seu nome.", $("#nome"));
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return erro(err, "Digite um email válido, como nome@exemplo.com.", $("#email"));
+      if (pw.length < 6) return erro(err, "A senha precisa ter pelo menos 6 caracteres.", $("#senha"));
       const botao = $("form .btn");
       botao.disabled = true;
-      err.textContent = "";
+      erro(err, "");
       try { await entrou(await api(criar ? "criar" : "entrar", { nome, email: em, senha: pw })); }
       catch (e) {
         botao.disabled = false;
-        return (err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
+        return erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
       }
       restoreSessao();
       location.hash = data.plano ? "#/inicio" : "#/perfil"; // conta nova começa enviando o PDF
@@ -200,11 +215,11 @@
     $("#esqForm").onsubmit = async (ev) => {
       ev.preventDefault();
       const err = $("#esqForm .err"), em = $("#email").value.trim().toLowerCase(), botao = $("#esqForm .btn");
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { err.textContent = "Digite um email válido, como nome@exemplo.com."; return $("#email").focus(); }
-      botao.disabled = true; botao.textContent = "Enviando…"; err.textContent = "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return erro(err, "Digite um email válido, como nome@exemplo.com.", $("#email"));
+      botao.disabled = true; botao.textContent = "Enviando…"; erro(err, "");
       let r;
       try { r = await api("senha_pedir", { email: em }); }
-      catch (e) { botao.disabled = false; botao.textContent = "Enviar link"; err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return; }
+      catch (e) { botao.disabled = false; botao.textContent = "Enviar link"; erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); return; }
       if (!corpoEl.isConnected) return; // a pessoa saiu e voltou: a resposta antiga não sobrescreve a tela nova
       corpoEl.innerHTML = `<p class="ia-status ${r.indisponivel ? "" : "ok"}" tabindex="-1" id="esqOk">${esc(r.mensagem)}</p>`;
       $("#esqOk").focus();
@@ -267,15 +282,15 @@
     $("#novaForm").onsubmit = async (ev) => {
       ev.preventDefault();
       const err = $("#novaForm .err"), a = $("#nova1").value, b = $("#nova2").value, botao = $("#novaForm .btn");
-      if (a.length < 6) { err.textContent = "A senha precisa ter pelo menos 6 caracteres."; return $("#nova1").focus(); }
-      if (a !== b) { err.textContent = "As duas senhas não são iguais."; return $("#nova2").focus(); }
-      botao.disabled = true; botao.textContent = "Salvando…"; err.textContent = "";
+      if (a.length < 6) return erro(err, "A senha precisa ter pelo menos 6 caracteres.", $("#nova1"));
+      if (a !== b) return erro(err, "As duas senhas não são iguais.", $("#nova2"));
+      botao.disabled = true; botao.textContent = "Salvando…"; erro(err, "");
       let u;
       try { u = await api("senha_nova", { token: tokenSenha, senha: a }); }
       catch (e) {
         botao.disabled = false; botao.textContent = "Salvar senha nova";
         if (e.status === 400 && e.message === MSG_LINK_APP) { tokenSenha = ""; return viewNovaSenha("vencido"); }
-        err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return;
+        erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); return;
       }
       tokenSenha = "";
       if (u.semSessao) { toast(u.mensagem); history.replaceState(null, "", location.pathname + "#/"); loginMode = "entrar"; return render(); }
@@ -388,7 +403,7 @@
       () => toast("Não consegui abrir o pagamento. Tente de novo."));
   }
   // O painel, o formulário e o pagamento usam estas peças do app; ficam expostas só depois do login.
-  const expor = () => { window.FitWay = { api, esc, toast, icon, shell, $, pad, app, avisoSuporte, linkPrivacidade, repetir, get email() { return email; }, get nome() { return nomeUser; } }; };
+  const expor = () => { window.FitWay = { api, esc, toast, erro, icon, shell, $, pad, app, avisoSuporte, linkPrivacidade, repetir, get email() { return email; }, get nome() { return nomeUser; } }; };
 
   // ---------- início: check-in + gráfico ----------
   let chartMode = "semana", diaRender = "";
@@ -816,7 +831,7 @@
       const f = ev.target.files[0];
       ev.target.value = ""; // permite escolher o mesmo arquivo de novo depois de um erro
       if (!f || !f.size) return;
-      if (f.size > 3e6) return (pdfErr.textContent = "O PDF precisa ter no máximo 3 MB.");
+      if (f.size > 3e6) return erro(pdfErr, "O PDF precisa ter no máximo 3 MB.", $("#pdf"));
       const fr = new FileReader();
       fr.onload = () => trocarPlano({ pdf: String(fr.result).split(",")[1] });
       fr.onerror = () => (pdfErr.textContent = "Não consegui ler o arquivo.");
@@ -832,12 +847,12 @@
         sf.onsubmit = async (ev) => {
           ev.preventDefault();
           const err = sf.querySelector(".err"), atual = $("#senhaAtual").value, a = $("#senhaNova1").value, b = $("#senhaNova2").value, botao = sf.querySelector(".btn");
-          if (!atual) { err.textContent = "Digite a senha atual."; return $("#senhaAtual").focus(); }
-          if (a.length < 6) { err.textContent = "A senha precisa ter pelo menos 6 caracteres."; return $("#senhaNova1").focus(); }
-          if (a !== b) { err.textContent = "As duas senhas não são iguais."; return $("#senhaNova2").focus(); }
-          botao.disabled = true; botao.textContent = "Salvando…"; err.textContent = "";
+          if (!atual) return erro(err, "Digite a senha atual.", $("#senhaAtual"));
+          if (a.length < 6) return erro(err, "A senha precisa ter pelo menos 6 caracteres.", $("#senhaNova1"));
+          if (a !== b) return erro(err, "As duas senhas não são iguais.", $("#senhaNova2"));
+          botao.disabled = true; botao.textContent = "Salvando…"; erro(err, "");
           try { await api("senha_alterar", { atual, nova: a }); }
-          catch (e) { botao.disabled = false; botao.textContent = "Salvar nova senha"; err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return; }
+          catch (e) { botao.disabled = false; botao.textContent = "Salvar nova senha"; erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); return; }
           trocandoSenha = false;
           toast("Senha trocada. Os outros aparelhos foram desconectados.");
           if (location.hash.split("/")[1] === "perfil") { viewPerfil(true); $("#trocarSenha").focus(); }
@@ -872,13 +887,13 @@
     $("form").onsubmit = async (ev) => {
       ev.preventDefault();
       const err = $(".err"), botao = $("form .btn"), nome = $("#nome").value.trim();
-      if (!nome) return (err.textContent = "Digite seu nome.");
+      if (!nome) return erro(err, "Digite seu nome.", $("#nome"));
       botao.disabled = true;
-      err.textContent = "";
+      erro(err, "");
       try { nomeUser = (await api("perfil", { nome })).nome; }
       catch (e) {
         botao.disabled = false;
-        return (err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
+        return erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
       }
       toast("Nome atualizado.");
       if (location.hash.split("/")[1] === "perfil") fechar(); else editandoPerfil = false;
@@ -1023,7 +1038,7 @@
       $("form").onsubmit = (ev) => {
         ev.preventDefault();
         const codigo = $("#codigo").value.trim().toUpperCase();
-        if (codigo.length !== 6) return ($(".err").textContent = "O código tem 6 letras ou números.");
+        if (codigo.length !== 6) return erro($(".err"), "O código tem 6 letras ou números.", $("#codigo"));
         viewRanking({ op: "entrar", codigo });
       };
       return;
