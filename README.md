@@ -38,8 +38,8 @@ api/_material_apoio.md  material de apoio que entra no prompt
 api/_termo.js       Termo de Responsabilidade e Uso (versão atual e antigas)
 api/_dados.js       validação e fusão dos dados, validarPlano e escaparLike (testado em test/)
 api/_treino.js      leitura do PDF de treino e escolha da foto de cada exercício
-img/fitway-logo.png     logo da tela de login
-img/fitway-favicon.png  ícone da aba e da tela inicial do celular
+img/fitway-logo.webp    logo da tela de login (600 px, ~55 KB; o index.html faz o preload)
+img/fitway-icone-32.png e fitway-icone-180.png  ícone da aba e da tela inicial do celular
 ```
 
 ## Banco de dados

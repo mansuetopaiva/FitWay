@@ -106,7 +106,7 @@
     const criar = loginMode === "criar";
     app.innerHTML = `
       <main class="login">
-        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
+        <h1><img class="logo" src="img/fitway-logo.webp" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
         <p class="sub">${criar ? "Crie sua conta para registrar seus treinos." : "Entre para ver seus treinos e check-ins."}</p>
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected="${!criar}" class="${criar ? "" : "on"}" data-mode="entrar">Entrar</button>
@@ -175,7 +175,7 @@
   async function viewEsqueci() {
     app.innerHTML = `
       <main class="login">
-        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
+        <h1><img class="logo" src="img/fitway-logo.webp" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
         <h2 class="esq-tit" id="esqTit" tabindex="-1">Esqueci a senha</h2>
         <div id="esqCorpo"><p class="muted" role="status">Carregando…</p></div>
         <p class="login-links"><button type="button" class="link" id="voltarLogin">Voltar para Entrar</button></p>
@@ -225,7 +225,7 @@
     const fora = !email;
     const casca = (corpo) => {
       app.innerHTML = `<main class="login">
-        <h1><img class="logo" src="img/fitway-logo.png" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
+        <h1><img class="logo" src="img/fitway-logo.webp" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>
         <h2 class="esq-tit" id="esqTit" tabindex="-1">Criar uma senha nova</h2>${corpo}
         <p class="login-links">${fora ? `<a class="link-alto" href="#/">Voltar para Entrar</a>` : `<a class="link-alto" href="#/perfil">Voltar ao app</a>`}</p></main>`;
       $("#esqTit").focus();
