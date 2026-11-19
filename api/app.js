@@ -16,6 +16,7 @@ import { ACOES as ACOES_SUPORTE, acaoSuporte, naoLido } from "./_suporte.js";
 import { ERRO_SENHA, alterarSenha, avisarTroca, confere, pedirLink, senhaHash, senhaValida, trocarPorToken, verToken } from "./_senha.js";
 import { emailDisponivel, mensagemIndisponivel, transporteGmail } from "./_email.js";
 import { lerPdf } from "./_treino.js";
+import { MSG_LOGIN, bloqueado, registrarErro, zerar } from "./_login.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
@@ -150,6 +151,12 @@ const schema = () => pronto ||= (async () => {
   )`;
   await sql`create index if not exists senha_pedidos_email on senha_pedidos (email_hash, criado)`;
   await sql`create index if not exists senha_pedidos_ip on senha_pedidos (ip, criado)`;
+  await sql`create table if not exists login_tentativas (
+    chave text primary key,
+    falhas int not null default 0,
+    bloqueado_ate timestamptz,
+    atualizado timestamptz not null default now()
+  )`;
   await sql`create unique index if not exists admin_log_devolvido on admin_log ((detalhes->>'transaction_nsu')) where acao = 'devolvido'`;
 })().catch((e) => { pronto = null; throw e; });
 
@@ -203,9 +210,13 @@ export default async function handler(req, res) {
           on conflict do nothing returning email, nome, dados`;
         if (!u) return res.status(400).json({ erro: "Já existe uma conta com este email. Use a aba Entrar." });
       } else {
+        const ip = ipDe(req), admin = ehAdmin(email), preso = await bloqueado(sql, email, ip, admin);
         [u] = await sql`select email, nome, senha, dados, foto, acesso_ate from usuarios where email = ${email}`;
-        // Sem conta, confere contra um hash falso: o tempo é o mesmo do email com conta.
-        if (!confere(b.senha, u ? u.senha : HASH_FALSO) || !u) return res.status(401).json({ erro: "Email ou senha incorretos." });
+        // Sem conta, confere contra um hash falso: o tempo é o mesmo do email com conta (e o do bloqueio, que também confere).
+        const certa = confere(b.senha, u ? u.senha : HASH_FALSO) && !!u;
+        // Senha errada, conta inexistente e bloqueio: a mesma resposta, para não revelar quais contas existem nem qual está bloqueada.
+        if (preso || !certa) { if (!preso) await registrarErro(sql, email, ip, admin); return res.status(401).json({ erro: MSG_LOGIN }); }
+        await zerar(sql, email);
         await sql`delete from sessoes where expira < now()`;
       }
       await abrirSessao(res, u.email);

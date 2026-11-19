@@ -21,7 +21,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const site = () => (process.env.SITE_URL || "").trim().replace(/\/+$/, "");
 // IPv6: um atacante tem um /64 inteiro; conta o bloco, não o endereço.
-const grupoIp = (ip) => { ip = typeof ip === "string" ? ip.trim().slice(0, 64) : ""; return ip.includes(":") ? ip.split(":").slice(0, 4).join(":") + "::/64" : ip; };
+export const grupoIp = (ip) => { ip = typeof ip === "string" ? ip.trim().slice(0, 64) : ""; return ip.includes(":") ? ip.split(":").slice(0, 4).join(":") + "::/64" : ip; };
 const PISO = 2500; // ms: a resposta do "Esqueci a senha" leva sempre isso, com ou sem conta
 
 // "Esqueci a senha". A resposta é sempre MSG_PEDIDO: com ou sem conta, dentro ou fora do limite, email válido ou não,
