@@ -144,10 +144,25 @@ test("validarPlanoIA: nome fora da lista, limites e fases são recusados", () =>
   assert.ok(com((p) => { p.treinos = Array(7).fill(p.treinos[0]); }));
   assert.ok(com((p) => { p.treinos[0].exercicios = p.treinos[0].exercicios.slice(0, 2); }), "2 exercícios");
   assert.ok(com((p) => { p.treinos[0].exercicios = Array(11).fill(p.treinos[0].exercicios[0]); }), "11 exercícios");
-  for (const [k, v] of [["series", 0], ["series", 7], ["series", 3.5], ["reps", "x".repeat(13)], ["reps", ""], ["descanso_s", 29], ["descanso_s", 241]])
+  for (const [k, v] of [["series", 0], ["series", 7], ["series", 3.5], ["reps", ""], ["descanso_s", 29], ["descanso_s", 241]])
     assert.ok(com((p) => { p.treinos[0].exercicios[0][k] = v; }), `${k}=${v}`);
   assert.ok(validarPlanoIA(null, CTX).erro);
   assert.ok(validarPlanoIA([], CTX).erro);
+});
+
+test("validarPlanoIA: reps e semanas longos demais são cortados no limite, não recusam o plano pago; vazios continuam recusados", () => {
+  const p = planoIA();
+  p.treinos[0].exercicios[0].reps = "10-12 repetições para cada lado, com pausa no alto";
+  p.fases[0].semanas = "semanas 1 a 2 (adaptação)";
+  const r = validarPlanoIA(p, CTX);
+  assert.equal(r.erro, undefined);
+  assert.ok(r.plano.treinos[0].exercicios[0][3].length <= 12, r.plano.treinos[0].exercicios[0][3]);
+  assert.ok(r.plano.guia.fases[0].semanas.length <= 10, r.plano.guia.fases[0].semanas);
+  assert.match(r.plano.treinos[0].exercicios[0][3], /^10-12/);
+  const vazio = planoIA(); vazio.treinos[0].exercicios[0].reps = "  ";
+  assert.ok(validarPlanoIA(vazio, CTX).erro);
+  const vazio2 = planoIA(); vazio2.fases[0].semanas = "";
+  assert.ok(validarPlanoIA(vazio2, CTX).erro);
 });
 
 test("validarPlanoIA: texto livre longo demais é cortado no limite (palavra inteira e reticências), não derruba o plano pago", () => {
