@@ -733,7 +733,8 @@
 
   // ---------- perfil ----------
   let editandoPerfil = false, trocandoSenha = false, pararAviso = () => {};
-  function viewPerfil() {
+  // repintura = true: Editar, Cancelar, Trocar senha... redesenham o Perfil com o pedido que já veio (nada de nova consulta).
+  function viewPerfil(repintura = false) {
     const u = { nome: nomeUser };
     shell("Perfil", `
       <section class="card profile">
@@ -782,7 +783,7 @@
       <p class="muted login-links"><a href="#/privacidade">Política de privacidade</a></p>`, "perfil");
     $("#sair").onclick = sair;
     ligarIA();
-    atualizarIA();
+    atualizarIA(repintura);
     // Resposta nova no suporte enquanto o Perfil está aberto: o ponto aparece em até 30 s.
     pararAviso();
     pararAviso = repetir(async () => { const r = await api("suporte_aviso"); if (r.naoLido !== suporteAviso) avisoSuporte(r.naoLido); },
@@ -822,11 +823,11 @@
       fr.readAsDataURL(f);
     };
     if (!editandoPerfil) {
-      $("#editar").onclick = () => { editandoPerfil = true; trocandoSenha = false; viewPerfil(); $("#nome").focus(); };
-      $("#trocarSenha").onclick = () => { trocandoSenha = !trocandoSenha; viewPerfil(); (trocandoSenha ? $("#senhaAtual") : $("#trocarSenha")).focus(); };
+      $("#editar").onclick = () => { editandoPerfil = true; trocandoSenha = false; viewPerfil(true); $("#nome").focus(); };
+      $("#trocarSenha").onclick = () => { trocandoSenha = !trocandoSenha; viewPerfil(true); (trocandoSenha ? $("#senhaAtual") : $("#trocarSenha")).focus(); };
       const sf = $("#senhaForm");
       if (sf) {
-        $("#senhaCancelar").onclick = () => { trocandoSenha = false; viewPerfil(); $("#trocarSenha").focus(); };
+        $("#senhaCancelar").onclick = () => { trocandoSenha = false; viewPerfil(true); $("#trocarSenha").focus(); };
         ligarMostrar("senhaVer", sf);
         sf.onsubmit = async (ev) => {
           ev.preventDefault();
@@ -839,7 +840,7 @@
           catch (e) { botao.disabled = false; botao.textContent = "Salvar nova senha"; err.textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo."; return; }
           trocandoSenha = false;
           toast("Senha trocada. Os outros aparelhos foram desconectados.");
-          if (location.hash.split("/")[1] === "perfil") { viewPerfil(); $("#trocarSenha").focus(); }
+          if (location.hash.split("/")[1] === "perfil") { viewPerfil(true); $("#trocarSenha").focus(); }
         };
       }
       return;
@@ -850,7 +851,7 @@
       toast(foto ? "Foto atualizada." : "Foto removida.");
       if (location.hash.split("/")[1] !== "perfil" || !editandoPerfil) return;
       const nome = $("#nome").value; // mantém o nome que estava sendo digitado
-      viewPerfil(); $("#nome").value = nome; $("#trocarFoto").focus();
+      viewPerfil(true); $("#nome").value = nome; $("#trocarFoto").focus();
     };
     $("#trocarFoto").onclick = () => $("#fotoArq").click();
     $("#fotoArq").onchange = async (ev) => {
@@ -866,7 +867,7 @@
       salvarFoto(c.toDataURL("image/jpeg", 0.85));
     };
     if (fotoUser) $("#tirarFoto").onclick = () => { if (confirm("Remover sua foto de perfil?")) salvarFoto(""); };
-    const fechar = () => { editandoPerfil = false; viewPerfil(); $("#editar").focus(); };
+    const fechar = () => { editandoPerfil = false; viewPerfil(true); $("#editar").focus(); };
     $("#cancelar").onclick = fechar;
     $("form").onsubmit = async (ev) => {
       ev.preventDefault();
@@ -940,10 +941,10 @@
     });
   }
   // Consulta o pedido; enquanto ele está pago ou gerando, de novo a cada 4 s (só nesta tela).
-  async function atualizarIA() {
+  async function atualizarIA(doCache = false) {
     clearTimeout(iaTimer);
     if (document.hidden && ia) { iaTimer = setTimeout(atualizarIA, 4000); return; } // aba escondida: não consulta
-    try { ia = await api("pedido_status"); } catch (e) { if (e.status === 401) return; }
+    if (!(doCache && ia)) { try { ia = await api("pedido_status"); } catch (e) { if (e.status === 401) return; } }
     if (ia && typeof ia.suporteNaoLido === "boolean" && ia.suporteNaoLido !== suporteAviso) avisoSuporte(ia.suporteNaoLido);
     if (location.hash.split("/")[1] !== "perfil" || !$("#ia")) return;
     if (ia && JSON.stringify(data.plano) !== JSON.stringify(ia.plano)) { // treino pronto, acesso renovado ou vencido
