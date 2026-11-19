@@ -30,6 +30,8 @@
     // Rascunho sem fotos; no novo treino, começa com as últimas respostas. Os consentimentos são sempre marcados de novo.
     f = Object.assign({ parq: Array(st.form.parq.length).fill(null), liberacao: false }, tipo === "novo_treino" ? st.ultimas || {} : {}, rasc && rasc.f || {});
     f.consentimentos = { dados: false, fotos: false }; f.termo = false;
+    // Rascunho de quando o questionário tinha outro número de perguntas: refaz as respostas (senão passaria na etapa e falharia no envio).
+    if (!Array.isArray(f.parq) || f.parq.length !== st.form.parq.length) { f.parq = Array(st.form.parq.length).fill(null); f.liberacao = false; }
     f.objetivo = f.objetivo ? [].concat(f.objetivo) : []; // pedido e rascunho antigos guardavam um texto só
     fotos = {};
     etapa = rasc && Number.isInteger(rasc.etapa) ? Math.min(rasc.etapa, 4) : 0;
