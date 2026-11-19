@@ -480,13 +480,13 @@
 
   // ---------- treinos ----------
   const treino = (id) => plano() && plano().treinos.find((t) => t.id === id);
-  // "db:Nome" = par de fotos (0.jpg e 1.jpg) do free-exercise-db, domínio público; "" = exercício sem imagem.
-  // shortcut: as fotos são carregadas direto do GitHub desse projeto; copiar para cá se ele sair do ar ou ficar lento.
-  const DB = "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/";
+  // "db:Nome" = fotos do free-exercise-db (domínio público) copiadas para img/ex/<Nome>/ por scripts/fotos-exercicios.mjs:
+  // 0.webp e 1.webp (480 px) e t.webp (miniatura 96 px). "" = exercício sem imagem.
+  const DB = "img/ex/";
   const SEM_FOTO = "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -12 48 48"><path fill="#bdbdbd" d="${ICON.gym}"/></svg>`);
   const ehFoto = (nome) => nome.startsWith("db:");
-  const gif = (nome, quadro) => ehFoto(nome) ? `${DB}${encodeURIComponent(nome.slice(3))}/${quadro ? 1 : 0}.jpg` : SEM_FOTO;
-  const thumb = gif;
+  const gif = (nome, quadro) => ehFoto(nome) ? `${DB}${encodeURIComponent(nome.slice(3))}/${quadro ? 1 : 0}.webp` : SEM_FOTO;
+  const thumb = (nome) => ehFoto(nome) ? `${DB}${encodeURIComponent(nome.slice(3))}/t.webp` : SEM_FOTO;
   let quadroTimer = null;
   let sessao = null; // { id, inicio, feitas: {idx: n}, aberta: idx, editando: bool }
   let restTimer = null, rest = 0, restEnd = 0, tickTimer = null;
