@@ -112,7 +112,7 @@ export async function criarPedido(sql, u, b, headers, agora, { admin = false } =
   let respostas = null, fotos = null, aceite = null;
   if (b.tipo !== "mensalidade") { // inicial e novo_treino têm formulário de saúde: termo, fotos e respostas de novo
     const a = registrarAceite(b.termo, b.termoHash, headers || {}, agora);
-    if (a.erro) return { status: 400, corpo: { erro: a.erro } };
+    if (a.erro) return { status: 400, corpo: { erro: a.erro, termoMudou: a.termoMudou } }; // termoMudou: o app recarrega o termo
     const f = limparFotos(b.fotos);
     if (f.erro) return { status: 400, corpo: { erro: f.erro } };
     const r = limparRespostas(b.respostas, { temFotos: !!f.fotos, agora });

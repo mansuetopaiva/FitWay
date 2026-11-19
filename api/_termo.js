@@ -81,8 +81,8 @@ export function montarTermo(versao = TERMO_VERSAO) {
 // vêm dos cabeçalhos (na Vercel, x-real-ip e x-forwarded-for são preenchidos pela própria Vercel).
 export function registrarAceite(versao, hash, headers, agora) {
   const atual = montarTermo();
-  if (versao !== TERMO_VERSAO || termoFaltando().length) return { erro: "Aceite a versão atual do Termo de Responsabilidade e Uso para enviar o pedido." };
-  if (hash !== atual.hash) return { erro: "O termo foi atualizado. Leia de novo e aceite para enviar o pedido." };
+  if (versao !== TERMO_VERSAO || termoFaltando().length) return { erro: "Aceite a versão atual do Termo de Responsabilidade e Uso para enviar o pedido.", termoMudou: !termoFaltando().length };
+  if (hash !== atual.hash) return { erro: "O termo foi atualizado. Leia de novo e aceite para enviar o pedido.", termoMudou: true };
   const h = (k) => (typeof headers[k] === "string" ? headers[k] : "");
   return { aceite: { versao, hash, aceito_em: agora.toISOString(), ip: (h("x-real-ip") || h("x-forwarded-for").split(",")[0]).trim().slice(0, 64), user_agent: h("user-agent").slice(0, 200) } };
 }

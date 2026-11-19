@@ -186,6 +186,12 @@
     } catch (e) {
       enviando = false;
       if (location.hash.split("/")[1] !== "pedido") return toast(e.message);
+      if (e.termoMudou) { // o termo mudou com o formulário aberto: busca o novo e pede o aceite de novo; as respostas ficam
+        try { termo = await api("termo"); f.termo = false; } catch (_) { /* segue com o termo que já tem; o aviso abaixo basta */ }
+        if (location.hash.split("/")[1] !== "pedido") return;
+        pintar(false);
+        return ($("#pedErr").textContent = "O termo foi atualizado. Leia de novo e aceite para enviar o pedido.");
+      }
       pintar(false);
       return ($("#pedErr").textContent = e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
     }

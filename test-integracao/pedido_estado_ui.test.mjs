@@ -23,6 +23,7 @@ async function formulario(ate, adaptar = (b, r) => r) {
   if (ate > 2) { marcar('[name="dias"]'); marcar('[name="minutos"]'); await continuar(3); }
   if (ate > 3) { for (let i = 0; i < 7; i++) marcar(`[name="parq${i}"][value="nao"]`); await continuar(4); }
   if (ate > 4) await continuar(5);
+  if (ate > 5) await continuar(6);
   return { ...n, marcar, digitar, continuar };
 }
 
@@ -53,4 +54,25 @@ test("foto lida devagar: se a pessoa já saiu da etapa das fotos, a foto não en
   await n.continuar(6);
   assert.match(n.texto(), /Fotos\s*Nenhuma/, "nenhuma foto no pedido");
   assert.deepEqual(n.erros.map(String), []);
+});
+
+test("termo mudou com o formulário aberto: recarrega o termo, pede o aceite de novo e mantém as respostas", async () => {
+  const n = await formulario(6);
+  const { $ } = n;
+  assert.match($(".ped-termo").textContent, /Cidade/);
+  n.marcar('[name="termo"]'); n.marcar('[name="cdados"]');
+  process.env.TERMO_FORO = "Outra Cidade Nova"; // o termo muda no servidor depois de o Resumo abrir
+  try {
+    n.clicar("#pedForm .btn");
+    await n.espera(() => /O termo foi atualizado/.test($("#pedErr").textContent));
+    assert.match($(".ped-termo").textContent, /Outra Cidade Nova/, "mostra o termo novo");
+    assert.equal($('[name="termo"]').checked, false, "o aceite do texto antigo não vale");
+    assert.match(n.texto(), /Emagrecer|Definir|Ganhar|Saúde|Resumo/);
+    assert.match(n.texto(), /Etapa 6 de 6/);
+    assert.match($(".ped-res").textContent, /30 anos/, "as respostas continuam");
+    n.marcar('[name="termo"]');
+    n.clicar("#pedForm .btn");
+    await n.espera(() => n.w.location.hash.startsWith("#/pagamento/"));
+    assert.deepEqual(n.erros.map(String), []);
+  } finally { process.env.TERMO_FORO = "Cidade"; }
 });
