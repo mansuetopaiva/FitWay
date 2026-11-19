@@ -428,3 +428,27 @@ button.link { background: none; border: 0; padding: 8px 4px; min-height: 44px; c
 .esq-tit:focus { outline: none; }
 .mostrar-senhas { margin: 0 0 10px; }
 .link-alto { display: inline-flex; align-items: center; min-height: 44px; color: var(--green); }
+
+/* ---------- alvos de toque de pelo menos 44 x 44 px (WCAG 2.5.8 / orientação do iOS e do Android) ---------- */
+.icon-btn { width: 44px; height: 44px; }
+.topbar.center h1 { margin-right: 44px; }
+.pw button { width: 44px; height: 44px; top: 2px; right: 2px; display: grid; place-items: center; }
+.tabs button { min-height: 44px; height: 44px; }
+.seg button { min-height: 44px; min-width: 44px; padding: 4px 14px; }
+.sets button { min-height: 44px; min-width: 44px; }
+.tools button { min-height: 44px; }
+.load button { width: 44px; height: 44px; }
+.load input { height: 44px; }
+.rest button { min-height: 44px; min-width: 44px; }
+.btn-sec, .btn-perigo { min-height: 44px; }
+.adm input:not([type="file"]):not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
+.adm select { min-height: 44px; }
+.adm-voltar { min-height: 44px; padding-right: 8px; }
+.adm-abas [role="tab"] { min-width: 44px; min-height: 44px; }
+.adm-secoes a { min-height: 44px; }
+.ped-ops span { min-height: 44px; }
+.ped-caixa { min-height: 44px; align-items: center; }
+.sup-assunto { min-height: 44px; align-items: center; }
+.pag-trocar, .pag-voltar { min-height: 44px; }
+/* Link que está sozinho numa linha (rodapé, termo): a área de toque ganha altura sem mudar o texto. */
+.login-links a, .login-aceite a, .ia-termo a, .link-legal { display: inline-block; padding: 15px 4px; }

@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test --experimental-test-module-mocks \"test/**/*.test.js\"",
-    "test:integracao": "node --test --experimental-test-module-mocks \"test-integracao/*.test.mjs\""
+    "test:integracao": "node --test --experimental-test-module-mocks \"test-integracao/*.test.mjs\"",
+    "prints": "node --experimental-test-module-mocks test-integracao/prints.mjs",
+    "test:layout": "PRINTS_ASSERT=1 PRINTS_SEM_FOTO=1 PRINTS_LARGURAS=320,375,768 node --experimental-test-module-mocks test-integracao/prints.mjs /tmp/fitway-layout"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.1",
