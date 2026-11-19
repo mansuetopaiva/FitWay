@@ -175,7 +175,8 @@ const schema = () => pronto ||= (async () => {
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
 const cookie = (t, idade) => `mt=${t}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${idade}`;
-const HASH_FALSO = senhaHash(randomBytes(16).toString("hex"));
+let falso; // hash de uma senha aleatória, para o tempo do login sem conta ser o mesmo; o scrypt só roda na primeira vez que é preciso
+const HASH_FALSO = () => falso ||= senhaHash(randomBytes(16).toString("hex"));
 const texto = (v, min, max) => typeof v === "string" && v.length >= min && v.length <= max;
 
 // O banco guarda só o hash do token: um vazamento do banco não entrega sessões abertas.
@@ -226,7 +227,7 @@ export default async function handler(req, res) {
         const ip = ipDe(req.headers), admin = ehAdmin(email), preso = await bloqueado(sql, email, ip, admin);
         [u] = await sql`select email, nome, senha, dados, foto, acesso_ate from usuarios where email = ${email}`;
         // Sem conta, confere contra um hash falso: o tempo é o mesmo do email com conta (e o do bloqueio, que também confere).
-        const certa = confere(b.senha, u ? u.senha : HASH_FALSO) && !!u;
+        const certa = confere(b.senha, u ? u.senha : HASH_FALSO()) && !!u;
         // Senha errada, conta inexistente e bloqueio: a mesma resposta, para não revelar quais contas existem nem qual está bloqueada.
         if (preso || !certa) { if (!preso) await registrarErro(sql, email, ip, admin); return res.status(401).json({ erro: MSG_LOGIN }); }
         await zerar(sql, email);

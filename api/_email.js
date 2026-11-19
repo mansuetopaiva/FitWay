@@ -1,6 +1,6 @@
 // Envio de email pelo Gmail do FitWay (SMTP, docs/senha.md). O "_" impede a Vercel de expor como rota.
 // O transporte vem por parâmetro: os testes usam um falso e nenhum email real sai.
-import nodemailer from "nodemailer";
+// O nodemailer (~400 ms para carregar) só é importado no primeiro envio: a partida a frio de quem não envia email não paga por ele.
 
 const env = (k) => (process.env[k] || "").trim();
 const DEZ_S = 10000;
@@ -8,11 +8,13 @@ const DEZ_S = 10000;
 // Serviço "Gmail" do nodemailer: smtp.gmail.com, 465, TLS. Os tempos padrão vão de 30 s a 10 min; aqui, 10 s.
 export function transporteGmail() {
   if (!env("SMTP_USER") || !env("SMTP_SENHA_APP")) return null;
-  return nodemailer.createTransport({
+  const options = {
     host: "smtp.gmail.com", port: 465, secure: true,
     auth: { user: env("SMTP_USER"), pass: env("SMTP_SENHA_APP") },
     connectionTimeout: DEZ_S, greetingTimeout: DEZ_S, socketTimeout: DEZ_S,
-  });
+  };
+  let real;
+  return { options, async sendMail(m) { real ||= (await import("nodemailer")).default.createTransport(options); return real.sendMail(m); } };
 }
 
 // O link de troca precisa do SITE_URL.
