@@ -31,14 +31,14 @@
 
   let conta = "";
   // A conversa aberta se atualiza sozinha (FitWay.repetir); sair dela ou abrir outra para a consulta anterior.
-  let pararConversa = () => {}, geracao = 0;
+  let pararConversa = () => {}, geracao = 0, telaN = 0;
   const msgHtml = (m) => `<li class="sup-msg ${m.autor === "admin" ? "sup-admin" : "sup-eu"}">
         <p class="sup-quem"><b>${m.autor === "admin" ? "Suporte FitWay" : "Você"}</b> <span class="muted">${esc(quando(m.criado))}</span></p>
         <div class="sup-texto">${esc(m.texto)}</div>
         ${m.anexo ? `<div class="sup-img"><button type="button" class="btn-sec" data-ver="${esc(String(m.id))}">Ver imagem</button></div>` : ""}</li>`;
   async function render(arg) {
     pararConversa();
-    anexo = ""; enviando = false; preparando = false;
+    anexo = ""; enviando = false; preparando = false; telaN++;
     if (conta !== window.FitWay.email) { conta = window.FitWay.email; pedidos = null; novo = null; } // outra conta no mesmo aparelho
     if (!arg) return lista();
     if (arg === "novo") return formNovo();
@@ -91,9 +91,14 @@
       const f = ev.target.files[0];
       ev.target.value = "";
       if (!f) return;
+      const tela = telaN; // a leitura é assíncrona: se a pessoa já foi para outra tela, a imagem não entra
       preparando = true; $("#supAnexo").innerHTML = `<p class="muted sup-preparando" role="status">Preparando imagem…</p>`;
-      try { anexo = await reduzir(f); } catch (e) { toast(e.message === "grande" ? "Imagem grande demais. Tente um print menor." : "Não consegui abrir esta imagem."); }
+      let url = "", erro = null;
+      try { url = await reduzir(f); } catch (e) { erro = e; }
+      if (tela !== telaN) return; // render() já zerou anexo e preparando
       preparando = false;
+      if (erro) toast(erro.message === "grande" ? "Imagem grande demais. Tente um print menor." : "Não consegui abrir esta imagem.");
+      else anexo = url;
       if (!$("#supAnexo")) return;
       pintar(); (anexo ? $("#supTirar") : $("#supAnexar")).focus();
     };
