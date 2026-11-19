@@ -68,6 +68,9 @@ const respostas = () => ({
 });
 const iaOk = (contador) => async () => { contador.n++; await new Promise((r) => setTimeout(r, 15)); return { stop_reason: "end_turn", model: "m", content: [{ type: "text", text: JSON.stringify(planoIA()) }] }; };
 
+// Limite: a proteção é o UPDATE condicional (where status = 'pago'); no Postgres real a 2ª chamada espera o bloqueio da linha e
+// reavalia o where já com 'gerando'. O PGlite tem uma conexão só e enfileira as consultas: aqui se prova que a condição é
+// exclusiva (a 2ª não acha a linha), não a concorrência de verdade entre conexões.
 test("plano gerado é gravado no aluno certo, em dados.plano, com proximo 'A', sem apagar o resto; uma só chamada à IA", async () => {
   await aluno("g@x.com", 30, { checkins: ["2026-11-01"], cargas: { x: 1 } }); await aluno("h@x.com", 30, { plano: { origem: "pdf" } });
   await pedido("g1", "g@x.com", "inicial", "pago", { respostas: respostas() });
