@@ -83,7 +83,8 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
     if (!paginaValida(b.pagina)) return falha(400, "Página inválida.");
     const pagina = b.pagina || 0;
     const q = "%" + escaparLike(busca) + "%";
-    const xs = await sql`select nome, email, criado, acesso_ate, coalesce(jsonb_array_length(dados->'checkins'), 0)::int as checkins, dados->'checkins'->>-1 as ultimo, dados->'plano' is not null as tem_treino from usuarios
+    const xs = await sql`select nome, email, criado, acesso_ate, (select count(*) from jsonb_array_elements_text(coalesce(dados->'checkins', '[]')) c(dia) where dia <= to_char(now() at time zone 'America/Sao_Paulo', 'YYYY-MM-DD'))::int as checkins,
+      (select max(dia) from jsonb_array_elements_text(coalesce(dados->'checkins', '[]')) c(dia) where dia <= to_char(now() at time zone 'America/Sao_Paulo', 'YYYY-MM-DD')) as ultimo, dados->'plano' is not null as tem_treino from usuarios
       where nome ilike ${q} or email ilike ${q}
       order by criado desc nulls last, email limit 21 offset ${pagina * 20}`;
     return ok({ itens: xs.slice(0, 20).map(linha), temMais: xs.length > 20 });
@@ -254,7 +255,8 @@ export async function acaoAdmin(sql, u, b, opc = {}) {
 
   if (b.op === "usuario") {
     const [x] = await sql`select nome, email, criado, acesso_ate, dados, grupo,
-      coalesce(jsonb_array_length(dados->'checkins'), 0)::int as checkins, dados->'checkins'->>-1 as ultimo, dados->'plano' is not null as tem_treino from usuarios where email = ${alvo}`;
+      (select count(*) from jsonb_array_elements_text(coalesce(dados->'checkins', '[]')) c(dia) where dia <= to_char(now() at time zone 'America/Sao_Paulo', 'YYYY-MM-DD'))::int as checkins,
+      (select max(dia) from jsonb_array_elements_text(coalesce(dados->'checkins', '[]')) c(dia) where dia <= to_char(now() at time zone 'America/Sao_Paulo', 'YYYY-MM-DD')) as ultimo, dados->'plano' is not null as tem_treino from usuarios where email = ${alvo}`;
     if (!x) return falha(404, "Usuário não encontrado.");
     const historico = await sql`select criado, admin_email, acao, detalhes from admin_log where alvo_email = ${alvo} order by criado desc limit 20`;
     const d = limpar(x.dados);
