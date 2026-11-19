@@ -191,7 +191,8 @@ test("aceite do termo: recusado sem aceite, com versão antiga, com hash diferen
   assert.equal(aceite.aceito_em, AGORA.toISOString(), "hora do servidor");
   assert.equal(aceite.ip, "203.0.113.7");
   assert.equal(aceite.user_agent.length, 200);
-  assert.equal(registrarAceite(TERMO_VERSAO, hash, { "x-real-ip": "198.51.100.1", "x-forwarded-for": "1.1.1.1" }, AGORA).aceite.ip, "198.51.100.1");
+  assert.equal(registrarAceite(TERMO_VERSAO, hash, { "x-vercel-forwarded-for": "192.0.2.9", "x-real-ip": "198.51.100.1", "x-forwarded-for": "1.1.1.1" }, AGORA).aceite.ip, "192.0.2.9", "o IP é o da Vercel, não o que o cliente manda");
+  assert.equal(registrarAceite(TERMO_VERSAO, hash, { "x-real-ip": "198.51.100.1", "x-forwarded-for": "1.1.1.1" }, AGORA).aceite.ip, "198.51.100.1", "fora da Vercel");
   assert.equal(registrarAceite(TERMO_VERSAO, hash, {}, AGORA).aceite.ip, "");
 });
 

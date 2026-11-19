@@ -16,6 +16,7 @@ import { ACOES as ACOES_SUPORTE, acaoSuporte, naoLido } from "./_suporte.js";
 import { ERRO_SENHA, alterarSenha, avisarTroca, confere, pedirLink, senhaHash, senhaValida, trocarPorToken, verToken } from "./_senha.js";
 import { emailDisponivel, mensagemIndisponivel, transporteGmail } from "./_email.js";
 import { lerPdf } from "./_treino.js";
+import { ipDe } from "./_ip.js";
 import { MSG_LOGIN, bloqueado, registrarErro, zerar } from "./_login.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
@@ -165,7 +166,6 @@ const sha = (t) => createHash("sha256").update(t).digest("hex");
 const cookie = (t, idade) => `mt=${t}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${idade}`;
 const HASH_FALSO = senhaHash(randomBytes(16).toString("hex"));
 const texto = (v, min, max) => typeof v === "string" && v.length >= min && v.length <= max;
-const ipDe = (req) => { const h = (k) => (typeof req.headers[k] === "string" ? req.headers[k] : ""); return (h("x-real-ip") || h("x-forwarded-for").split(",")[0]).trim().slice(0, 64); };
 
 // O banco guarda só o hash do token: um vazamento do banco não entrega sessões abertas.
 async function abrirSessao(res, email) {
@@ -212,7 +212,7 @@ export default async function handler(req, res) {
           on conflict do nothing returning email, nome, dados`;
         if (!u) return res.status(400).json({ erro: ERRO_CADASTRO });
       } else {
-        const ip = ipDe(req), admin = ehAdmin(email), preso = await bloqueado(sql, email, ip, admin);
+        const ip = ipDe(req.headers), admin = ehAdmin(email), preso = await bloqueado(sql, email, ip, admin);
         [u] = await sql`select email, nome, senha, dados, foto, acesso_ate from usuarios where email = ${email}`;
         // Sem conta, confere contra um hash falso: o tempo é o mesmo do email com conta (e o do bloqueio, que também confere).
         const certa = confere(b.senha, u ? u.senha : HASH_FALSO) && !!u;
@@ -229,7 +229,7 @@ export default async function handler(req, res) {
 
     // Esqueci a senha (sem login). A resposta do pedido é sempre a mesma, com ou sem conta.
     if (b.acao === "senha_disponivel") return res.json(emailDisponivel() ? { disponivel: true } : { disponivel: false, mensagem: mensagemIndisponivel() });
-    if (b.acao === "senha_pedir") return res.json(await pedirLink(sql, { email: b.email, ip: ipDe(req) }, { transporte: transporteGmail() }));
+    if (b.acao === "senha_pedir") return res.json(await pedirLink(sql, { email: b.email, ip: ipDe(req.headers) }, { transporte: transporteGmail() }));
     if (b.acao === "senha_conta") { const e = await verToken(sql, b.token); return e ? res.json({ email: e }) : res.status(400).json({ erro: "Este link não vale mais. Peça um novo em Esqueci a senha." }); }
     if (b.acao === "senha_nova") {
       const r = await trocarPorToken(sql, { token: b.token, senha: b.senha });

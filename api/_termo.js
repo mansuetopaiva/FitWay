@@ -3,6 +3,7 @@
 // Os dados pessoais do responsável NÃO ficam no código (o repositório é público): os marcadores {{...}} são
 // trocados na hora pelas variáveis de ambiente de CAMPOS. Faltando alguma, o treino com IA não pode ser ligado.
 import { createHash } from "node:crypto";
+import { ipDe } from "./_ip.js";
 
 export const CAMPOS = { responsavel: "TERMO_RESPONSAVEL", documento: "TERMO_DOCUMENTO", email_contato: "TERMO_EMAIL", foro: "TERMO_FORO" };
 
@@ -78,11 +79,11 @@ export function montarTermo(versao = TERMO_VERSAO) {
 
 // Só vale o aceite da versão atual, com o termo completo e o hash do texto que o app mostrou (vem da ação "termo").
 // Assim o aceite prova o texto exato, mesmo que as variáveis mudem depois. A hora é a do servidor; IP e navegador
-// vêm dos cabeçalhos (na Vercel, x-real-ip e x-forwarded-for são preenchidos pela própria Vercel).
+// vêm dos cabeçalhos (o IP, de x-vercel-forwarded-for: ver _ip.js).
 export function registrarAceite(versao, hash, headers, agora) {
   const atual = montarTermo();
   if (versao !== TERMO_VERSAO || termoFaltando().length) return { erro: "Aceite a versão atual do Termo de Responsabilidade e Uso para enviar o pedido.", termoMudou: !termoFaltando().length };
   if (hash !== atual.hash) return { erro: "O termo foi atualizado. Leia de novo e aceite para enviar o pedido.", termoMudou: true };
   const h = (k) => (typeof headers[k] === "string" ? headers[k] : "");
-  return { aceite: { versao, hash, aceito_em: agora.toISOString(), ip: (h("x-real-ip") || h("x-forwarded-for").split(",")[0]).trim().slice(0, 64), user_agent: h("user-agent").slice(0, 200) } };
+  return { aceite: { versao, hash, aceito_em: agora.toISOString(), ip: ipDe(headers), user_agent: h("user-agent").slice(0, 200) } };
 }
