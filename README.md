@@ -25,6 +25,7 @@ css/style.css       visual (tema escuro + verde)
 js/app.js           telas, check-in, gráfico, ranking e chamadas ao servidor
 js/admin.js         painel de administração (só é baixado por quem é admin)
 js/pedido.js        formulário do treino personalizado (só é baixado ao abrir o formulário)
+js/recorte.js       recorte da foto de perfil (baixado ao escolher a foto; ver docs/foto-perfil.md)
 js/pagamento.js     tela de pagamento do pedido: Pix ou cartão (só é baixado ao abrir)
 api/app.js          backend: criar conta, entrar, sair, carregar e salvar dados, pedidos
 api/_admin.js       ações do painel de administração, inclusive pedidos

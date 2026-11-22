@@ -49,12 +49,38 @@ const BASE = `http://localhost:${srv.address().port}/`;
 
 // Telas: [nome, conta, hash, passos opcionais na página]
 const ir = (h) => async (pg) => { await pg.evaluate((x) => (location.hash = x), h); };
+// Abre o recorte da foto de perfil no Chromium de verdade: gera um JPEG (com EXIF de orientação, se pedido), escolhe no <input> e espera a tela.
+const abrirRecorte = (w, h, orient = 1, altura = 0) => async (pg) => {
+  if (altura) await pg.setViewportSize({ width: pg.viewportSize().width, height: altura });
+  await pg.click("#editar"); await pg.waitForSelector("#fotoArq", { state: "attached" });
+  await pg.evaluate(async ([w, h, o]) => {
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const x = c.getContext("2d"), g = x.createLinearGradient(0, 0, w, h); g.addColorStop(0, "#e53935"); g.addColorStop(0.5, "#fdd835"); g.addColorStop(1, "#1e88e5");
+    x.fillStyle = g; x.fillRect(0, 0, w, h); x.fillStyle = "#000"; x.font = `${h / 5}px sans-serif`; x.fillText("F", w / 10, h / 2); // um "F" mostra se a foto está deitada
+    let bytes = new Uint8Array(await (await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.9))).arrayBuffer());
+    if (o !== 1) { // insere o APP1 EXIF com a orientação logo depois do SOI
+      const t = [0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, o, 0, 0, 0, 0, 0, 0, 0];
+      const corpo = [...new TextEncoder().encode("Exif\0\0"), ...t], n = corpo.length + 2;
+      bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe1, n >> 8, n & 255, ...corpo, ...bytes.subarray(2)]);
+    }
+    const dt = new DataTransfer(); dt.items.add(new File([bytes], "foto.jpg", { type: "image/jpeg" }));
+    const i = document.getElementById("fotoArq"); i.files = dt.files; i.dispatchEvent(new Event("change", { bubbles: true }));
+  }, [w, h, orient]);
+  await pg.waitForSelector(".recorte");
+  await pg.waitForTimeout(300);
+  // A foto tem de aparecer na orientação certa (retrato quando o EXIF manda girar 90°), com o decodificador real do Chromium.
+  const d = await pg.evaluate(() => ({ ...document.querySelector(".recorte").dataset }));
+  const [L, A] = orient >= 5 ? [h, w] : [w, h];
+  if (+d.largura !== L || +d.altura !== A) { console.error(`recorte: foto ${d.largura}x${d.altura}, esperado ${L}x${A} (EXIF ${orient})`); process.exit(1); }
+};
 const TELAS = [
   ["login", null, ""], ["cadastro", null, "", async (pg) => pg.click('[data-mode="criar"]')], ["esqueci", null, "", async (pg) => pg.click("text=Esqueci a senha")],
   ["politica", null, "#/privacidade"],
   ["inicio", ana, "#/"], ["treinos", ana, "#/treinos"], ["treino-aberto", ana, "#/treino/A"], ["ranking", ana, "#/ranking"], ["perfil", ana, "#/perfil"],
   ["perfil-editar", ana, "#/perfil", async (pg) => pg.click("#editar")], ["perfil-senha", ana, "#/perfil", async (pg) => pg.click("#trocarSenha")],
   ["termo", ana, "#/termo"], ["suporte", ana, "#/suporte"], ["perfil-novo", bia, "#/perfil"], ["pagamento", bia, "#/pagamento/PEX1"],
+  ["perfil-recorte", ana, "#/perfil", abrirRecorte(1200, 800)], ["perfil-recorte-retrato-exif", ana, "#/perfil", abrirRecorte(4000, 3000, 6)],
+  ["perfil-recorte-teclado", ana, "#/perfil", abrirRecorte(1200, 800, 1, 360)], // altura de 360 px: o teclado do celular tomou o resto da tela
   ["admin-usuarios", adm, "#/admin"], ["admin-usuario", adm, "#/admin/ana%40exemplo.com"], ["admin-pedidos", adm, "#/admin/pedidos"],
   ["admin-suporte", adm, "#/admin/suporte"],
 ];
@@ -86,7 +112,10 @@ const medir = () => {
     if (e.matches("button, a")) { if (!tem && !e.textContent.trim()) semNome.push(`${e.tagName.toLowerCase()}#${e.id || e.className}`); }
     else if (!tem && !(e.labels && [...e.labels].some((l) => l.textContent.trim()))) semNome.push(`${e.tagName.toLowerCase()}#${e.id || e.name}`);
   }
-  const out = { semNome, contraste, rolagemH: document.documentElement.scrollWidth > innerWidth ? document.documentElement.scrollWidth : 0, alvos: [], transborda: [], atrasDaBarra: [] };
+  // Com o recorte da foto aberto, os botões têm de estar inteiros na parte visível da tela (sem rolar): vale para o teclado do celular aberto.
+  const cortados = [];
+  for (const e of document.querySelectorAll(".recorte button, .recorte-palco")) { const r = e.getBoundingClientRect(); if (r.bottom > innerHeight + 0.5 || r.top < -0.5 || r.right > innerWidth + 0.5 || r.left < -0.5) cortados.push(`${e.id} (${Math.round(r.top)}-${Math.round(r.bottom)} de ${innerHeight})`); }
+  const out = { semNome, cortados, contraste, rolagemH: document.documentElement.scrollWidth > innerWidth ? document.documentElement.scrollWidth : 0, alvos: [], transborda: [], atrasDaBarra: [] };
   const nome = (e) => (e.getAttribute("aria-label") || e.textContent || e.id || e.tagName).trim().replace(/\s+/g, " ").slice(0, 40);
   const nav = document.querySelector("nav.tabbar, .tabbar, nav");
   const topoNav = nav && getComputedStyle(nav).position === "fixed" ? nav.getBoundingClientRect().top : Infinity;
@@ -176,7 +205,7 @@ console.log("prints em", SAIDA, "telas:", Object.keys(relatorio).length);
 if (process.env.PRINTS_ASSERT) {
   const falhas = [];
   for (const [tela, ls] of Object.entries(relatorio)) for (const [l, d] of Object.entries(ls)) {
-    for (const k of ["alvos", "contraste", "focoInvisivel", "semNome"]) for (const x of d[k] || []) falhas.push(`${tela}@${l} ${k}: ${x}`);
+    for (const k of ["alvos", "contraste", "focoInvisivel", "semNome", "cortados"]) for (const x of d[k] || []) falhas.push(`${tela}@${l} ${k}: ${x}`);
     if (d.rolagemH) falhas.push(`${tela}@${l} rolagem horizontal: ${d.rolagemH}px`);
     for (const x of d.erros.filter((e) => !/401/.test(e))) falhas.push(`${tela}@${l} console: ${x}`);
   }
