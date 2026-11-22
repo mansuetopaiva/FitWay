@@ -17,6 +17,7 @@ import { ERRO_SENHA, alterarSenha, avisarTroca, confere, pedirLink, senhaHash, s
 import { emailDisponivel, mensagemIndisponivel, transporteGmail } from "./_email.js";
 import { lerPdf } from "./_treino.js";
 import { ipDe } from "./_ip.js";
+import { limparFotoPerfil } from "./_foto.js";
 import { MSG_LOGIN, bloqueado, registrarErro, zerar } from "./_login.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
@@ -39,7 +40,7 @@ async function aplicarSchema() {
     expira timestamptz not null
   )`;
   await sql`alter table usuarios add column if not exists grupo text`; // código do grupo do ranking
-  await sql`alter table usuarios add column if not exists foto text`; // foto de perfil, JPEG 160x160 em data URL
+  await sql`alter table usuarios add column if not exists foto text`; // foto de perfil: JPEG quadrado em data URL (160 px nas antigas, 512 px nas novas; api/_foto.js)
   // Data de cadastro: contas antigas ficam null (o banco não guardou a data real) e só as novas ganham now().
   // O dia desta migração vai no comentário da coluna, para o painel mostrar "Antes de DD/MM/AAAA".
   await sql`do $$ begin
@@ -188,7 +189,7 @@ async function abrirSessao(res, email) {
 async function usuarioDaSessao(req) {
   const t = req.cookies && req.cookies.mt;
   if (!texto(t, 64, 64)) return null;
-  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo, u.foto, u.acesso_ate from sessoes s join usuarios u on u.email = s.email
+  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo, u.acesso_ate from sessoes s join usuarios u on u.email = s.email
     where s.token = ${sha(t)} and s.expira > now()`;
   return u || null;
 }
@@ -275,7 +276,10 @@ export default async function handler(req, res) {
     // O cookie é do navegador inteiro: se alguém entrou em outra conta em outra aba, esta aba ainda acha que é
     // a conta antiga. Sem esta checagem, ela gravaria check-ins, cargas e o PDF na conta errada.
     if (b.conta !== undefined && b.conta !== u.email) return res.status(409).json({ erro: "Outra conta entrou neste navegador. Recarregando…", trocaConta: true });
-    if (b.acao === "eu") return res.json({ ...publico(u), suporteNaoLido: await naoLido(sql, u.email) });
+    if (b.acao === "eu") { // a foto (até ~110 KB) não vem em toda requisição: só aqui e no login
+      const [f] = await sql`select foto from usuarios where email = ${u.email}`;
+      return res.json({ ...publico({ ...u, foto: f && f.foto }), suporteNaoLido: await naoLido(sql, u.email) });
+    }
     if (b.acao === "admin") { const r = await acaoAdmin(sql, u, b, { gerar }); return res.status(r.status).json(r.corpo); }
     if (b.acao === "salvar") {
       const dados = juntar(limpar(u.dados), limpar(b.dados));
@@ -299,11 +303,12 @@ export default async function handler(req, res) {
       return res.json({ nome });
     }
     if (b.acao === "foto") {
-      // Só aceita a imagem já reduzida pelo app; "" remove a foto.
-      if (b.foto !== "" && !(texto(b.foto, 30, 60000) && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(b.foto)))
-        return res.status(400).json({ erro: "Imagem inválida. Tente outra foto." });
-      await sql`update usuarios set foto = ${b.foto || null} where email = ${u.email}`;
-      return res.json({ foto: b.foto });
+      // "" remove. Senão: JPEG quadrado já recortado pelo app; o servidor confere de novo e grava a versão sem metadados.
+      if (b.foto === "") { await sql`update usuarios set foto = null where email = ${u.email}`; return res.json({ foto: "" }); }
+      const r = limparFotoPerfil(b.foto);
+      if (r.erro) return res.status(400).json({ erro: r.erro });
+      await sql`update usuarios set foto = ${r.foto} where email = ${u.email}`;
+      return res.json({ foto: r.foto });
     }
     if (b.acao === "treino") {
       // Junta o que o aparelho mandou: um check-in feito sem conexão ainda não chegou ao banco.
