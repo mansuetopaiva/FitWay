@@ -69,5 +69,181 @@
     return { matriz: m, largura: o > 4 ? h : w, altura: o > 4 ? w : h };
   }
 
-  window.FitWayRecorte = { ZOOM_MAX, novo, mover, zoomar, recorte, escala, janela, dimensoesJpeg, orientacao, transformacao };
+
+  // ---------- tela do recorte ----------
+  const LADO = 512, QUALIDADE = 0.85, MAX_CHARS = 140000; // o servidor aceita até 150000 (api/_foto.js)
+  const MAX_ARQUIVO = 12 * 1024 * 1024, LADO_MIN_FOTO = 128;
+  const TIPOS = /^image\/(jpeg|png|webp|gif|heic|heif)$/i;
+  const $ = (s, r = document) => r.querySelector(s);
+
+  // Lê o arquivo, valida e devolve { fonte (bitmap ou canvas já na orientação certa), iw, ih }.
+  // Erros viram Error com mensagem pronta para a pessoa.
+  async function ler(arquivo) {
+    if (!TIPOS.test(arquivo.type || "")) throw new Error("Escolha uma foto em JPEG, PNG ou WebP.");
+    if (arquivo.size > MAX_ARQUIVO) throw new Error("A foto é grande demais (máximo 12 MB). Tente outra.");
+    const aberta = new Error("Não consegui abrir esta imagem. Tente outra foto.");
+    let bmp, cabeca = new Uint8Array(0);
+    try { cabeca = new Uint8Array(await arquivo.slice(0, 65536).arrayBuffer()); } catch (e) { /* sem cabeçalho: segue sem EXIF */ }
+    try { bmp = await createImageBitmap(arquivo, { imageOrientation: "from-image" }); }
+    catch (e) { try { bmp = await createImageBitmap(arquivo); } catch (e2) { throw aberta; } }
+    if (!bmp.width || !bmp.height) throw aberta;
+    // Os navegadores de hoje já giram a foto pelo EXIF. Se não giraram (bitmap com o tamanho cru e orientação de 90°), giro aqui.
+    const o = orientacao(cabeca), cru = dimensoesJpeg(cabeca);
+    let fonte = bmp, iw = bmp.width, ih = bmp.height;
+    if (o >= 5 && cru && bmp.width === cru.w && bmp.height === cru.h) {
+      const t = transformacao(o, cru.w, cru.h), c = document.createElement("canvas");
+      c.width = t.largura; c.height = t.altura;
+      const x = c.getContext("2d"); x.transform(...t.matriz); x.drawImage(bmp, 0, 0);
+      fonte = c; iw = t.largura; ih = t.altura;
+    }
+    if (Math.min(iw, ih) < LADO_MIN_FOTO) throw new Error("A foto é pequena demais (mínimo de 128 px de lado). Tente outra.");
+    if (iw * ih > 1.5e8) throw new Error("A foto é grande demais. Tente outra.");
+    return { fonte, iw, ih };
+  }
+
+  // Desenha o recorte em 512x512 (canvas) e devolve o JPEG como data URL: os metadados da foto original (local, câmera) não vêm junto.
+  function gerar(fonte, e) {
+    const c = document.createElement("canvas"); c.width = c.height = LADO;
+    const x = c.getContext("2d"), r = recorte(e);
+    x.fillStyle = "#fff"; x.fillRect(0, 0, LADO, LADO); // JPEG não tem transparência
+    x.imageSmoothingQuality = "high";
+    x.drawImage(fonte, r.sx, r.sy, r.lado, r.lado, 0, 0, LADO, LADO);
+    for (const q of [QUALIDADE, 0.75, 0.65, 0.55]) {
+      const url = c.toDataURL("image/jpeg", q);
+      if (!url.startsWith("data:image/jpeg")) break;
+      if (url.length <= MAX_CHARS) return url;
+    }
+    throw new Error("Não consegui preparar a foto. Tente outra.");
+  }
+
+  // Abre o recorte. opc: { salvar(dataUrl) -> Promise (rejeita com Error [+ status] se falhar), voltarFoco (elemento), aviso(texto) }.
+  // Resolve true se a foto foi salva, false se cancelou ou nem abriu. Nada é gravado antes de "Salvar".
+  async function abrir(arquivo, opc) {
+    let img;
+    try { img = await ler(arquivo); } catch (e) { opc.aviso(e.message); return false; }
+    return new Promise((fim) => {
+      const app = $("#app"), raiz = document.createElement("div");
+      raiz.className = "recorte"; raiz.setAttribute("role", "dialog"); raiz.setAttribute("aria-modal", "true");
+      raiz.setAttribute("aria-labelledby", "recTit"); raiz.setAttribute("aria-describedby", "recAjuda");
+      raiz.innerHTML = `<div class="recorte-caixa">
+        <h2 id="recTit" tabindex="-1">Ajustar foto de perfil</h2>
+        <div class="recorte-palco" id="recPalco" tabindex="0" role="group" aria-label="Área de recorte. Setas movem a foto, mais e menos mudam o zoom, Enter salva, Esc cancela.">
+          <canvas id="recTela"></canvas><div class="recorte-moldura" aria-hidden="true"></div>
+        </div>
+        <p class="muted recorte-dica" id="recAjuda">Arraste a foto para mover. Para o zoom: barra, botões, pinça com dois dedos ou roda do mouse. A moldura redonda mostra como a foto vai aparecer.</p>
+        <div class="recorte-zoom"><label class="sr" for="recZoom">Zoom</label>
+          <button type="button" id="recMenos" aria-label="Diminuir zoom">−</button>
+          <input type="range" id="recZoom" min="100" max="${ZOOM_MAX * 100}" step="1" value="100" aria-valuetext="100%">
+          <button type="button" id="recMais" aria-label="Aumentar zoom">+</button></div>
+        <p class="sr" id="recVivo" role="status" aria-live="polite"></p>
+        <p class="err" role="alert" id="recErr"></p>
+        <div class="recorte-acoes"><button type="button" class="btn-sec" id="recCancelar">Cancelar</button><button type="button" class="btn" id="recSalvar">Salvar</button></div>
+      </div>`;
+      document.body.appendChild(raiz);
+      app.inert = true; app.setAttribute("aria-hidden", "true"); // o resto da tela não é lido nem focado enquanto o recorte está aberto
+      const palco = $("#recPalco", raiz), tela = $("#recTela", raiz), zoom = $("#recZoom", raiz), erroEl = $("#recErr", raiz), vivo = $("#recVivo", raiz);
+      const lado = () => palco.clientWidth || 300;
+      const e = novo(img.iw, img.ih, lado());
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      let ocupado = false, quadro = 0, falar = 0;
+      raiz.dataset.largura = img.iw; raiz.dataset.altura = img.ih; // a foto já na orientação certa (conferido nos testes)
+
+      function pintar() {
+        quadro = 0;
+        const L = lado(); if (e.lado !== L) { e.lado = L; ajustar(e); }
+        tela.width = tela.height = Math.round(L * dpr);
+        const x = tela.getContext("2d"), r = recorte(e);
+        x.imageSmoothingQuality = "high";
+        x.drawImage(img.fonte, r.sx, r.sy, r.lado, r.lado, 0, 0, tela.width, tela.height);
+        const pct = Math.round(e.zoom * 100);
+        zoom.value = pct; zoom.setAttribute("aria-valuetext", pct + "%");
+        $("#recMenos", raiz).disabled = e.zoom <= 1; $("#recMais", raiz).disabled = e.zoom >= ZOOM_MAX;
+        raiz.dataset.zoom = pct; raiz.dataset.cx = Math.round(e.cx); raiz.dataset.cy = Math.round(e.cy);
+      }
+      const agendar = () => { if (!quadro) quadro = requestAnimationFrame(pintar); };
+      // Anuncia o zoom depois de parar de mexer (a roda e a pinça mudam dezenas de vezes por segundo).
+      const anunciar = () => { clearTimeout(falar); falar = setTimeout(() => { vivo.textContent = `Zoom ${Math.round(e.zoom * 100)}%`; }, 300); };
+      const mudarZoom = (z, ax, ay) => { zoomar(e, z, ax, ay); agendar(); anunciar(); };
+      const arrastar = (dx, dy) => { mover(e, dx, dy); agendar(); };
+
+      // ponteiros: um dedo/mouse arrasta, dois dedos fazem pinça (zoom e movimento do ponto médio)
+      const pt = new Map(); let base = null;
+      const rel = (ev) => { const b = palco.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
+      const dois = () => { const [a, b] = [...pt.values()]; return { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, mx: (a[0] + b[0]) / 2, my: (a[1] + b[1]) / 2 }; };
+      palco.addEventListener("pointerdown", (ev) => {
+        palco.setPointerCapture && palco.setPointerCapture(ev.pointerId);
+        pt.set(ev.pointerId, rel(ev));
+        base = pt.size === 2 ? { ...dois(), zoom: e.zoom } : null;
+        palco.focus();
+      });
+      palco.addEventListener("pointermove", (ev) => {
+        if (!pt.has(ev.pointerId)) return;
+        const antes = pt.get(ev.pointerId), agora = rel(ev);
+        pt.set(ev.pointerId, agora);
+        if (pt.size === 1) arrastar(agora[0] - antes[0], agora[1] - antes[1]);
+        else if (pt.size === 2 && base) {
+          const n = dois();
+          arrastar(n.mx - base.mx, n.my - base.my); base.mx = n.mx; base.my = n.my;
+          mudarZoom(base.zoom * (n.d / base.d), n.mx, n.my);
+        }
+      });
+      const soltar = (ev) => { pt.delete(ev.pointerId); base = pt.size === 2 ? { ...dois(), zoom: e.zoom } : null; };
+      palco.addEventListener("pointerup", soltar); palco.addEventListener("pointercancel", soltar);
+      palco.addEventListener("wheel", (ev) => {
+        ev.preventDefault(); // a página não rola enquanto a roda dá zoom
+        const [ax, ay] = rel(ev), px = ev.deltaMode === 1 ? 16 : 1;
+        mudarZoom(e.zoom * Math.exp(-ev.deltaY * px * 0.002), ax, ay);
+      }, { passive: false });
+      zoom.addEventListener("input", () => mudarZoom(+zoom.value / 100));
+      $("#recMenos", raiz).onclick = () => mudarZoom(e.zoom - 0.25);
+      $("#recMais", raiz).onclick = () => mudarZoom(e.zoom + 0.25);
+
+      function fechar(salvou) {
+        clearTimeout(falar); if (quadro) cancelAnimationFrame(quadro);
+        document.removeEventListener("focusin", prender, true); window.removeEventListener("resize", agendar);
+        raiz.remove(); app.inert = false; app.removeAttribute("aria-hidden");
+        if (opc.voltarFoco && opc.voltarFoco.isConnected) opc.voltarFoco.focus();
+        fim(salvou);
+      }
+      function liberar(onde) { ocupado = false; $("#recSalvar", raiz).disabled = false; $("#recCancelar", raiz).disabled = false; $("#recSalvar", raiz).textContent = "Salvar"; if (onde) onde.focus(); }
+      async function salvar() {
+        if (ocupado) return;
+        ocupado = true; erroEl.textContent = "";
+        $("#recSalvar", raiz).disabled = true; $("#recCancelar", raiz).disabled = true; $("#recSalvar", raiz).textContent = "Salvando…";
+        let url;
+        try { url = gerar(img.fonte, e); } catch (x) { erroEl.textContent = x.message; return liberar($("#recSalvar", raiz)); }
+        try { await opc.salvar(url); }
+        catch (x) { erroEl.textContent = x.status ? x.message : "Sem conexão com o servidor. Tente de novo."; return liberar($("#recSalvar", raiz)); } // o recorte continua aberto
+        fechar(true);
+      }
+      $("#recSalvar", raiz).onclick = salvar;
+      $("#recCancelar", raiz).onclick = () => { if (!ocupado) fechar(false); };
+
+      // Teclado: setas movem, + e − dão zoom, Enter salva, Esc cancela, Tab fica dentro do recorte.
+      const focaveis = () => [...raiz.querySelectorAll("button, input, [tabindex='0']")].filter((x) => !x.disabled);
+      const passo = () => lado() * 0.05;
+      raiz.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") { ev.preventDefault(); if (!ocupado) fechar(false); return; }
+        if (ev.key === "Tab") {
+          const f = focaveis(), i = f.indexOf(document.activeElement);
+          if (ev.shiftKey && (i <= 0)) { ev.preventDefault(); f[f.length - 1].focus(); }
+          else if (!ev.shiftKey && i === f.length - 1) { ev.preventDefault(); f[0].focus(); }
+          return;
+        }
+        if (ev.key === "Enter" && ev.target.tagName !== "BUTTON") { ev.preventDefault(); return salvar(); }
+        if (ev.key === "+" || ev.key === "=") { ev.preventDefault(); return mudarZoom(e.zoom + 0.25); }
+        if (ev.key === "-" || ev.key === "_") { ev.preventDefault(); return mudarZoom(e.zoom - 0.25); }
+        const seta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
+        if (seta && ev.target === palco) { ev.preventDefault(); arrastar(seta[0] * passo(), seta[1] * passo()); } // a foto anda no sentido da seta
+      });
+      // Se o foco escapar (leitor de tela, clique fora), volta para dentro.
+      function prender(ev) { if (!raiz.contains(ev.target)) palco.focus(); }
+      document.addEventListener("focusin", prender, true);
+      window.addEventListener("resize", agendar);
+      pintar();
+      palco.focus();
+    });
+  }
+
+  window.FitWayRecorte = { ZOOM_MAX, novo, mover, zoomar, recorte, escala, janela, dimensoesJpeg, orientacao, transformacao, abrir };
 })();

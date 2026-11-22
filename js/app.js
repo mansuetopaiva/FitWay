@@ -869,28 +869,32 @@
       }
       return;
     }
-    const salvarFoto = async (foto) => {
-      try { fotoUser = (await api("foto", { foto })).foto; }
-      catch (e) { return toast(e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }
-      toast(foto ? "Foto atualizada." : "Foto removida.");
+    // Depois de mudar a foto: avisa e redesenha o Perfil mantendo o nome que estava sendo digitado.
+    const fotoMudou = (msg) => {
+      toast(msg);
       if (location.hash.split("/")[1] !== "perfil" || !editandoPerfil) return;
-      const nome = $("#nome").value; // mantém o nome que estava sendo digitado
+      const nome = $("#nome").value;
       viewPerfil(true); $("#nome").value = nome; $("#trocarFoto").focus();
     };
+    const removerFoto = async () => {
+      try { fotoUser = (await api("foto", { foto: "" })).foto; }
+      catch (e) { return toast(e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }
+      fotoMudou("Foto removida.");
+    };
     $("#trocarFoto").onclick = () => $("#fotoArq").click();
+    // A foto escolhida abre o recorte (js/recorte.js, baixado agora): nada é enviado antes de "Salvar".
     $("#fotoArq").onchange = async (ev) => {
       const f = ev.target.files[0];
       ev.target.value = "";
       if (!f) return;
-      // Recorta o centro em quadrado e reduz para 160x160 no aparelho: a foto fica com ~10 KB no banco.
-      let img;
-      try { img = await createImageBitmap(f); } catch (e) { return toast("Não consegui abrir esta imagem."); }
-      const c = document.createElement("canvas"), lado = Math.min(img.width, img.height);
-      c.width = c.height = 160;
-      c.getContext("2d").drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, 160, 160);
-      salvarFoto(c.toDataURL("image/jpeg", 0.85));
+      try { await carregar("js/recorte.js"); } catch (e) { return toast("Não consegui abrir o editor de foto. Verifique a conexão e tente de novo."); }
+      const salvou = await window.FitWayRecorte.abrir(f, {
+        voltarFoco: $("#trocarFoto"), aviso: toast,
+        salvar: async (foto) => { fotoUser = (await api("foto", { foto })).foto; },
+      });
+      if (salvou) fotoMudou("Foto atualizada.");
     };
-    if (fotoUser) $("#tirarFoto").onclick = () => { if (confirm("Remover sua foto de perfil?")) salvarFoto(""); };
+    if (fotoUser) $("#tirarFoto").onclick = () => { if (confirm("Remover sua foto de perfil?")) removerFoto(); };
     const fechar = () => { editandoPerfil = false; viewPerfil(true); $("#editar").focus(); };
     $("#cancelar").onclick = fechar;
     $("form").onsubmit = async (ev) => {
