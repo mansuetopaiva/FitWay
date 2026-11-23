@@ -23,6 +23,14 @@ test("EXIF/GPS (APP1), XMP e comentário são removidos; perfil de cor (APP2) e 
   assert.equal(limparFotoPerfil(r.foto).foto, r.foto, "limpar de novo não muda nada");
 });
 
+test("metadados escondidos depois da primeira varredura também saem; bytes depois do EOI são recusados", () => {
+  const r = limparFotoPerfil(urlDe(jpeg({ meio: "Exif\0\0GPS-ESCONDIDO" })));
+  assert.equal(r.erro, undefined);
+  assert.ok(!bytes(r).toString("latin1").includes("GPS-ESCONDIDO"));
+  assert.deepEqual([...bytes(r).subarray(-2)], [0xff, 0xd9]);
+  assert.ok(limparFotoPerfil(urlDe(jpeg({ lixo: "PAYLOAD-QUALQUER" }))).erro, "dados depois do EOI");
+});
+
 test("a foto antiga de 160 px continua válida", () => assert.equal(limparFotoPerfil(urlDe(jpeg({ w: 160, h: 160 }))).erro, undefined));
 
 test("recusa o que não é JPEG quadrado de 64 a 1024 px, bem formado, com tamanho dentro do limite", () => {

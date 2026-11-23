@@ -1,5 +1,5 @@
 // JPEG sintético para os testes (estrutura de marcadores válida, sem pixels reais): o servidor só lê marcadores e dimensões.
-export function jpeg({ w = 512, h = 512, app1 = null, xmp = null, icc = null, com = null, semEoi = false, entropia = 64, semSof = false } = {}) {
+export function jpeg({ w = 512, h = 512, app1 = null, xmp = null, icc = null, com = null, semEoi = false, entropia = 64, semSof = false, meio = null, lixo = null } = {}) {
   const seg = (m, corpo) => Buffer.concat([Buffer.from([0xff, m, (corpo.length + 2) >> 8, (corpo.length + 2) & 255]), corpo]);
   return Buffer.concat([
     Buffer.from([0xff, 0xd8]),
@@ -12,7 +12,9 @@ export function jpeg({ w = 512, h = 512, app1 = null, xmp = null, icc = null, co
     ...(semSof ? [] : [seg(0xc0, Buffer.from([8, h >> 8, h & 255, w >> 8, w & 255, 1, 1, 0x11, 0]))]),
     seg(0xda, Buffer.from([1, 1, 0, 0, 63, 0])),
     Buffer.alloc(entropia, 0x55),
+    ...(meio ? [seg(0xe1, Buffer.from(meio, "latin1")), Buffer.alloc(8, 0x66)] : []), // metadado escondido DEPOIS da primeira varredura
     ...(semEoi ? [] : [Buffer.from([0xff, 0xd9])]),
+    ...(lixo ? [Buffer.from(lixo, "latin1")] : []),
   ]);
 }
 export const urlDe = (b) => "data:image/jpeg;base64," + b.toString("base64");
