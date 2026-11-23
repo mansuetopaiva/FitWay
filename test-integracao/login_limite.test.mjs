@@ -76,6 +76,31 @@ test("conta de admin: 5 erros bloqueiam por 15 minutos (aluno: 1 minuto)", async
   for (let i = 0; i < 5; i++) await entrar("ana@x.com", "errada1", "10.5.2." + i);
   assert.ok(Math.abs(await minutosDeBloqueio() - 1) < 0.2, "aluno");
   await limpar();
-  await sql`update usuarios set nome = nome`; // nada
   assert.equal((await entrar("dono@x.com", "certa123", "10.5.3.1")).status, 200, "admin sem erros entra normalmente");
+});
+
+test("rajada em paralelo contra uma conta nova: só as 5 primeiras tentativas contam e chegam a conferir a senha; as outras são recusadas sem contar", async () => {
+  await limpar();
+  const rs = await Promise.all(Array.from({ length: 60 }, (_, i) => entrar("bia@x.com", "errada1", "10.9." + (i >> 8) + "." + (i & 255))));
+  assert.ok(rs.every((r) => r.status === 401));
+  const [c] = await sql`select falhas from login_tentativas where chave like 'c:%'`;
+  assert.equal(c.falhas, 5, "o contador parou no limite em vez de contar as 60 (as outras 55 nem conferiram a senha)");
+  assert.equal((await entrar("bia@x.com", "certa123", "10.9.9.9")).status, 401, "e a conta está bloqueada");
+});
+
+test("faixas do IP (30 erros: 5 min; 40: 15 min) e a janela de 1 hora zera a contagem; acertar não zera o IP", async () => {
+  await limpar();
+  const ipx = "10.8.0.1", minIp = async () => (await sql`select (extract(epoch from (bloqueado_ate - now())) / 60)::float as m from login_tentativas where chave like 'i:%'`)[0].m;
+  const errar = async (n) => { for (let i = 0; i < n; i++) { await sql`update login_tentativas set bloqueado_ate = null where chave like 'i:%'`; await entrar(`z${i}@x.com`, "errada1", ipx); } };
+  await errar(29); assert.ok(Math.abs(await minIp() - 1) < 0.2, "29: ainda 1 min");
+  await errar(1); assert.ok(Math.abs(await minIp() - 5) < 0.2, "30: 5 min");
+  await errar(10); assert.ok(Math.abs(await minIp() - 15) < 0.2, "40: 15 min");
+  await sql`update login_tentativas set atualizado = now() - interval '61 minutes', bloqueado_ate = null where chave like 'i:%'`; // passou uma hora
+  await entrar("z@x.com", "errada1", ipx);
+  assert.equal((await sql`select falhas from login_tentativas where chave like 'i:%'`)[0].falhas, 1, "recomeçou");
+  await limpar();
+  for (let i = 0; i < 18; i++) await entrar(`y${i}@x.com`, "errada1", "10.8.1.1");
+  assert.equal((await entrar("ana@x.com", "certa123", "10.8.1.1")).status, 200, "acertou");
+  await entrar("y@x.com", "errada1", "10.8.1.1");
+  assert.equal((await entrar("ana@x.com", "certa123", "10.8.1.1")).status, 401, "o acerto não zerou o contador do IP: 20 tentativas bloqueiam");
 });

@@ -18,7 +18,7 @@ import { emailDisponivel, mensagemIndisponivel, transporteGmail } from "./_email
 import { lerPdf } from "./_treino.js";
 import { ipDe } from "./_ip.js";
 import { limparFotoPerfil } from "./_foto.js";
-import { MSG_LOGIN, bloqueado, registrarErro, zerar } from "./_login.js";
+import { MSG_LOGIN, reservar, zerar } from "./_login.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
@@ -159,8 +159,10 @@ async function aplicarSchema() {
     chave text primary key,
     falhas int not null default 0,
     bloqueado_ate timestamptz,
-    atualizado timestamptz not null default now()
+    atualizado timestamptz not null default now(),
+    liberado boolean
   )`;
+  await sql`alter table login_tentativas add column if not exists liberado boolean`;
   await sql`create unique index if not exists admin_log_devolvido on admin_log ((detalhes->>'transaction_nsu')) where acao = 'devolvido'`;
 }
 const VERSAO_SCHEMA = createHash("sha256").update(aplicarSchema.toString()).digest("hex").slice(0, 16);
@@ -225,12 +227,12 @@ export default async function handler(req, res) {
           on conflict do nothing returning email, nome, dados`;
         if (!u) return res.status(400).json({ erro: ERRO_CADASTRO });
       } else {
-        const ip = ipDe(req.headers), admin = ehAdmin(email), preso = await bloqueado(sql, email, ip, admin);
+        const liberado = await reservar(sql, email, ipDe(req.headers), ehAdmin(email)); // antes de conferir a senha: a tentativa já conta
         [u] = await sql`select email, nome, senha, dados, foto, acesso_ate from usuarios where email = ${email}`;
         // Sem conta, confere contra um hash falso: o tempo é o mesmo do email com conta (e o do bloqueio, que também confere).
         const certa = confere(b.senha, u ? u.senha : HASH_FALSO()) && !!u;
         // Senha errada, conta inexistente e bloqueio: a mesma resposta, para não revelar quais contas existem nem qual está bloqueada.
-        if (preso || !certa) { if (!preso) await registrarErro(sql, email, ip, admin); return res.status(401).json({ erro: MSG_LOGIN }); }
+        if (!liberado || !certa) return res.status(401).json({ erro: MSG_LOGIN });
         await zerar(sql, email);
         await sql`delete from sessoes where expira < now()`;
       }
