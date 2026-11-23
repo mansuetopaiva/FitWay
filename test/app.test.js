@@ -11,7 +11,7 @@ const chamadas = [];
 const sql = async (partes, ...valores) => {
   const q = partes.join("?");
   chamadas.push({ q, valores });
-  if (q.includes("from sessoes s join usuarios u")) return usuario ? [usuario] : [];
+  if (q.includes("from sessoes s join usuarios u")) return usuario ? [{ dois_fatores: true, ...usuario }] : []; // dois_fatores: admin com o 2º fator ativado
   const r = responder(q, valores);
   // A consulta única do pedido_status (pedido aberto + últimas respostas + suporte) sempre devolve uma linha, mesmo sem pedido.
   if (q.includes("left join lateral") && !(r && r.length)) return [{ id: null, ultimas: null, suporte_nao_lido: false }];

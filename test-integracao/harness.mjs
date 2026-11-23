@@ -6,6 +6,9 @@ const REPO = fileURLToPath(new URL("../", import.meta.url)), R = REPO; // raiz d
 // Segredo de teste para o HMAC da exclusão de conta (o real fica só na Vercel).
 export const HASH_TESTE = "segredo-de-integracao-com-mais-de-32-caracteres";
 process.env.HASH_SEGREDO ||= HASH_TESTE;
+// Chave de teste do segundo fator do admin (a real fica só na Vercel).
+export const TOTP_TESTE = "chave-totp-de-integracao-com-mais-de-32-caracteres";
+process.env.TOTP_CHAVE ||= TOTP_TESTE;
 export async function abrir({ semSchema = false } = {}) {
   const db = new PGlite();
   let comandos = 0; // quantos comandos o backend mandou ao banco (para os testes de partida a frio)
@@ -22,4 +25,17 @@ export async function abrir({ semSchema = false } = {}) {
   const chamar = fazer(await instancia());
   if (!semSchema) await chamar({ acao: "eu" }); // roda o schema()
   return { db, sql, chamar, R, comandos: () => comandos, partidaAFrio: async () => fazer(await instancia()) };
+}
+
+// Login de admin nas duas etapas (senha, depois o código do autenticador). Lê o segredo do banco para calcular o código e zera
+// ultimo_passo antes (um teste que entra várias vezes na mesma janela de 30 s não esbarra na regra de não reusar o código).
+export async function entrarAdmin(chamar, sql, email, senha, hs = {}) {
+  const { codigo, passoDe, desbase32, decifrar } = await import(R + "api/_totp.js");
+  const r = await chamar({ acao: "entrar", email, senha }, null, hs);
+  if (!r.corpo || !r.corpo.precisa2fa) return r;
+  let seg;
+  if (r.corpo.chave) seg = desbase32(r.corpo.chave);
+  else { const [l] = await sql`select segredo_cifrado from admin_2fa where email = ${email}`; seg = decifrar(l.segredo_cifrado).segredo; }
+  await sql`update admin_2fa set ultimo_passo = 0 where email = ${email}`;
+  return chamar({ acao: "entrar_2fa", desafio: r.corpo.desafio, codigo: codigo(seg, passoDe(Date.now())) }, null, hs);
 }

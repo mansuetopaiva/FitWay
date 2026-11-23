@@ -7,6 +7,7 @@ const { sql, chamar } = await abrir();
 
 test("admin registra a devolução de um pedido pronto e marca um pagamento como devolvido", async () => {
   await sql`insert into usuarios (email, nome, senha) values ('dono@x.com', 'Dono', 'x')`;
+await sql`insert into admin_2fa (email, segredo_cifrado, ativado_em) values ('dono@x.com', 'x', now())`; // admin com o 2º fator ativado (a sessão de admin só vale assim)
   await sql`insert into usuarios (email, nome, senha, acesso_ate, dados) values ('al@x.com', 'Aluna', 'x', now() + interval '40 days', '{"plano":{"pedido":"P1","origem":"ia","treinos":[]}}')`;
   await sql`insert into pedidos (id, email, tipo, status, valor, pago_em) values ('P1', 'al@x.com', 'inicial', 'pronto', 999, now())`;
   await sql`insert into admin_log (admin_email, acao, alvo_email, detalhes) values ('infinitepay', 'cartao_sem_pedido', 'al@x.com', '{"transaction_nsu":"tx7","paid_amount":499,"motivo":"pedido_fechado"}')`;

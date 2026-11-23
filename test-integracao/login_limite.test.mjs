@@ -66,17 +66,14 @@ test("a resposta é idêntica para senha errada, conta inexistente e bloqueio", 
   assert.match(errada.corpo.erro, /15 minutos/);
 });
 
-test("conta de admin: 5 erros bloqueiam por 15 minutos (aluno: 1 minuto)", async () => {
+test("conta de admin: senha errada de IPs diferentes não bloqueia a conta (o bloqueio de 15 min fica no código do 2º fator e no teto; test-integracao/admin_2fa.test.mjs)", async () => {
   await limpar();
   for (let i = 0; i < 5; i++) await entrar("dono@x.com", "errada1", "10.5.0." + i);
-  const m = await minutosDeBloqueio();
-  assert.ok(Math.abs(m - 15) < 0.2, "admin: " + m);
-  assert.equal((await entrar("dono@x.com", "certa123", "10.5.1.1")).status, 401);
+  assert.equal((await sql`select count(*)::int as n from login_tentativas where bloqueado_ate > now()`)[0].n, 0);
+  assert.equal((await entrar("dono@x.com", "certa123", "10.5.1.1")).corpo.precisa2fa, true, "a senha certa segue chegando ao 2º fator");
   await limpar();
   for (let i = 0; i < 5; i++) await entrar("ana@x.com", "errada1", "10.5.2." + i);
-  assert.ok(Math.abs(await minutosDeBloqueio() - 1) < 0.2, "aluno");
-  await limpar();
-  assert.equal((await entrar("dono@x.com", "certa123", "10.5.3.1")).status, 200, "admin sem erros entra normalmente");
+  assert.ok(Math.abs(await minutosDeBloqueio() - 1) < 0.2, "aluno: 1 min, como antes");
 });
 
 test("rajada em paralelo contra uma conta nova: só as 5 primeiras tentativas contam e chegam a conferir a senha; as outras são recusadas sem contar", async () => {

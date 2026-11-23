@@ -1,7 +1,7 @@
 // Login e Sair pela tela: erro e sucesso, destino, e o que Sair apaga (rascunho de saúde no aparelho, sessão no servidor).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { abrir } from "./harness.mjs";
+import { abrir, entrarAdmin } from "./harness.mjs";
 import { navegador } from "./navegador.mjs";
 process.env.ADMIN_EMAILS = "dono@x.com";
 const { sql, chamar } = await abrir();
@@ -39,9 +39,8 @@ test("Sair apaga o rascunho do formulário (dados de saúde) do aparelho, encerr
 
 test("conta de admin entra pelo login e vê a aba Admin; sair esconde o painel", async () => {
   await sql`insert into usuarios (email, nome, senha) select 'dono@x.com', 'Dono', senha from usuarios where email = 'ana@x.com'`;
-  const n = await navegador(chamar);
-  await n.espera(() => n.$("#email"));
-  n.$("#email").value = "dono@x.com"; n.$("#senha").value = "senha123"; n.$("form .btn").click();
+  const token = (await entrarAdmin(chamar, sql, "dono@x.com", "senha123")).token; // as duas etapas: a tela delas está em admin_2fa_ui.test.mjs
+  const n = await navegador(chamar, { token, hash: "#/perfil" });
   await n.espera(() => n.$(".nav") && /Admin/.test(n.$(".nav").textContent));
   n.ir("#/perfil"); await n.espera(() => n.$("#sair"));
   n.clicar("#sair");

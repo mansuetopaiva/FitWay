@@ -27,7 +27,8 @@ export function ehAdmin(email) {
 // HMAC-SHA256 do email com HASH_SEGREDO (32+ caracteres): sem o segredo, ninguém confirma um email por dicionário.
 // Sem a variável, devolve "" e a exclusão de conta é recusada.
 const segredo = () => ((process.env.HASH_SEGREDO || "").length >= 32 ? process.env.HASH_SEGREDO : "");
-export const hmacEmail = (email) => (segredo() ? createHmac("sha256", segredo()).update(email).digest("hex") : "");
+export const hmacTexto = (t) => (segredo() ? createHmac("sha256", segredo()).update(t).digest("hex") : "");
+export const hmacEmail = hmacTexto;
 
 const ok = (corpo) => ({ status: 200, corpo });
 const falha = (status, erro) => ({ status, corpo: { erro } });

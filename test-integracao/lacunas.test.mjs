@@ -8,6 +8,7 @@ const { acaoAdmin } = await import(R + "api/_admin.js");
 const dono = { email: "dono@x.com" };
 const sha = (t) => createHash("sha256").update(t).digest("hex");
 await sql`insert into usuarios (email, nome, senha) values ('dono@x.com', 'Dono', 'x')`;
+await sql`insert into admin_2fa (email, segredo_cifrado, ativado_em) values ('dono@x.com', 'x', now())`; // admin com o 2º fator ativado (a sessão de admin só vale assim)
 const tDono = "d".repeat(64);
 await sql`insert into sessoes (token, email, expira) values (${sha(tDono)}, 'dono@x.com', now() + interval '1 day')`;
 const adm = (b) => chamar({ acao: "admin", ...b }, tDono);

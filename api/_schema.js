@@ -142,6 +142,30 @@ async function aplicarSchema(sql) {
     liberado boolean
   )`;
   await sql`alter table login_tentativas add column if not exists liberado boolean`;
+  // Segundo fator do admin (docs/admin-2fa.md): segredo cifrado (nunca em usuarios.dados), códigos de recuperação só como HMAC e
+  // desafios do login (só o hash; uso único, validade curta).
+  await sql`create table if not exists admin_2fa (
+    email text primary key references usuarios on delete cascade,
+    segredo_cifrado text not null,
+    criado timestamptz not null default now(),
+    ativado_em timestamptz,
+    ultimo_passo bigint not null default 0
+  )`;
+  await sql`create table if not exists admin_recuperacao (
+    email text not null references usuarios on delete cascade,
+    hash text not null,
+    usado_em timestamptz,
+    primary key (email, hash)
+  )`;
+  await sql`create table if not exists login_desafios (
+    hash text primary key,
+    email text not null references usuarios on delete cascade,
+    tipo text not null check (tipo in ('ativar', 'codigo')),
+    criado timestamptz not null default now(),
+    expira timestamptz not null,
+    tentativas int not null default 0,
+    usado_em timestamptz
+  )`;
   await sql`create unique index if not exists admin_log_devolvido on admin_log ((detalhes->>'transaction_nsu')) where acao = 'devolvido'`;
 }
 const VERSAO_SCHEMA = createHash("sha256").update(aplicarSchema.toString()).digest("hex").slice(0, 16);

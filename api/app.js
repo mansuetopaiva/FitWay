@@ -19,6 +19,7 @@ import { lerPdf } from "./_treino.js";
 import { ipDe } from "./_ip.js";
 import { limparFotoPerfil } from "./_foto.js";
 import { MSG_LOGIN, reservar, reservarCadastro, reservarGrupo, zerar, zerarGrupo } from "./_login.js";
+import { desafiar, entrar2fa, login2faCompleto, novosCodigos, restantes } from "./_2fa.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
@@ -43,9 +44,11 @@ async function abrirSessao(res, email) {
 async function usuarioDaSessao(req) {
   const t = req.cookies && req.cookies.mt;
   if (!texto(t, 64, 64)) return null;
-  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo, u.acesso_ate from sessoes s join usuarios u on u.email = s.email
-    where s.token = ${sha(t)} and s.expira > now()`;
-  return u || null;
+  const [u] = await sql`select u.email, u.nome, u.dados, u.grupo, u.acesso_ate,
+      exists (select 1 from admin_2fa a where a.email = u.email and a.ativado_em is not null) as dois_fatores
+    from sessoes s join usuarios u on u.email = s.email where s.token = ${sha(t)} and s.expira > now()`;
+  // Sessão de admin sem segundo fator ativado (aberta antes do 2FA) não vale: tem de entrar de novo e ativar.
+  return u && (!ehAdmin(u.email) || u.dois_fatores) ? u : null;
 }
 // O plano feito pela IA só sai do servidor com acesso ativo (continua guardado no banco).
 const visivel = (u, dados) => {
@@ -87,11 +90,23 @@ export default async function handler(req, res) {
         const certa = confere(b.senha, u ? u.senha : HASH_FALSO()) && !!u;
         // Senha errada, conta inexistente e bloqueio: a mesma resposta, para não revelar quais contas existem nem qual está bloqueada.
         if (!liberado || !certa) return res.status(401).json({ erro: MSG_LOGIN });
+        // Admin: a senha certa não abre sessão. Devolve o desafio do 2º fator (ou a ativação, no 1º login); a sessão nasce em entrar_2fa.
+        if (ehAdmin(email)) { const r = await desafiar(sql, email); return res.status(r.status).json(r.corpo); }
         await zerar(sql, email);
         await sql`delete from sessoes where expira < now()`;
       }
       await abrirSessao(res, u.email);
       return res.json({ ...publico(u), suporteNaoLido: await naoLido(sql, u.email) });
+    }
+
+    if (b.acao === "entrar_2fa") {
+      const r = await entrar2fa(sql, b);
+      if (!r.email) return res.status(r.status).json(r.corpo);
+      await login2faCompleto(sql, r.email, ipDe(req.headers));
+      await sql`delete from sessoes where expira < now()`;
+      await abrirSessao(res, r.email);
+      const [x] = await sql`select email, nome, dados, foto, acesso_ate from usuarios where email = ${r.email}`;
+      return res.json({ ...publico(x), suporteNaoLido: await naoLido(sql, r.email), ...(r.recuperacao ? { recuperacao: r.recuperacao } : {}), ...(r.restantes !== undefined ? { restantes: r.restantes } : {}) });
     }
 
     if (b.acao === "privacidade") return res.json(montarPrivacidade()); // pública: vale para o app inteiro
@@ -135,6 +150,11 @@ export default async function handler(req, res) {
     if (b.acao === "eu") { // a foto (até ~110 KB) não vem em toda requisição: só aqui e no login
       const [f] = await sql`select foto from usuarios where email = ${u.email}`;
       return res.json({ ...publico({ ...u, foto: f && f.foto }), suporteNaoLido: await naoLido(sql, u.email) });
+    }
+    if (b.acao === "admin_2fa_estado") return ehAdmin(u.email) ? res.json({ restantes: await restantes(sql, u.email) }) : res.status(403).json({ erro: "Acesso restrito." });
+    if (b.acao === "admin_2fa_codigos") {
+      if (!ehAdmin(u.email)) return res.status(403).json({ erro: "Acesso restrito." });
+      const r = await novosCodigos(sql, u, b); return res.status(r.status).json(r.corpo);
     }
     if (b.acao === "admin") { const r = await acaoAdmin(sql, u, b, { gerar }); return res.status(r.status).json(r.corpo); }
     if (b.acao === "salvar") {

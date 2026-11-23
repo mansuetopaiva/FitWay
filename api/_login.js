@@ -7,13 +7,18 @@ import { createHash } from "node:crypto";
 import { grupoIp } from "./_senha.js";
 
 // [a partir de quantos erros, minutos de espera], do maior para o menor
-const REGRA = { conta: [[10, 15], [8, 5], [5, 1]], admin: [[5, 15]], ip: [[40, 15], [30, 5], [20, 1]], cadastro: [[30, 15], [20, 5], [10, 1]] };
+const REGRA = { conta: [[10, 15], [8, 5], [5, 1]], admin: [[5, 15]], teto: [[50, 15]], ip: [[40, 15], [30, 5], [20, 1]], cadastro: [[30, 15], [20, 5], [10, 1]] };
 const espera = (erros, regra) => (REGRA[regra].find(([n]) => erros >= n) || [0, 0])[1];
 const chaveEmail = (prefixo, email) => prefixo + ":" + (hmacEmail(email) || createHash("sha256").update(email).digest("hex"));
 const chaveConta = (email) => chaveEmail("c", email);
 // Sem IP (não acontece na Vercel) não há como atribuir: só vale o limite por conta.
 const chaveIp = (ip) => (grupoIp(ip) ? "i:" + grupoIp(ip) : null);
-const chaves = (email, ip, admin) => [[chaveConta(email), admin ? "admin" : "conta"], ...(chaveIp(ip) ? [[chaveIp(ip), "ip"]] : [])];
+// Admin: a senha errada conta por (conta, IP) e por IP, não pela conta inteira (um terceiro não tranca o admin de fora); um teto por conta
+// (50 por hora, bloqueio de 15 min) cobre a tentativa vinda de IPs diferentes. O código do 2º fator tem a chave própria "a:" (5 erros = 15 min).
+const chaveContaIp = (email, ip) => chaveEmail("ci", email) + ":" + grupoIp(ip);
+const chaves = (email, ip, admin) => admin
+  ? [[chaveEmail("t", email), "teto"], ...(chaveIp(ip) ? [[chaveContaIp(email, ip), "conta"], [chaveIp(ip), "ip"]] : [])]
+  : [[chaveConta(email), "conta"], ...(chaveIp(ip) ? [[chaveIp(ip), "ip"]] : [])];
 
 export const MSG_LOGIN = "Email ou senha incorretos. Depois de várias tentativas erradas, o login espera até 15 minutos antes de aceitar de novo.";
 
@@ -50,3 +55,7 @@ export const zerarGrupo = (sql, email) => sql`delete from login_tentativas where
 
 // Login certo zera o contador da conta. O do IP não: senão um atacante intercalaria um login válido seu para zerá-lo.
 export const zerar = (sql, email) => sql`delete from login_tentativas where chave = ${chaveConta(email)}`;
+// Admin: o login completo (senha + código) zera só os contadores da conta (conta+IP, teto e código); o do IP fica.
+export const zerarAdmin = (sql, email, ip) => sql`delete from login_tentativas where chave = any(${[chaveEmail("t", email), chaveEmail("a", email), ...(chaveIp(ip) ? [chaveContaIp(email, ip)] : [])]})`;
+// Código do 2º fator: por conta (quem chegou aqui já sabe a senha, então o bloqueio não é provocado por estranhos).
+export const reservarCodigo = (sql, email) => reservarChaves(sql, [[chaveEmail("a", email), "admin"]]);
