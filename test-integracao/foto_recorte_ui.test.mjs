@@ -194,3 +194,20 @@ test("orientação EXIF: foto de celular deitada (EXIF 6 e o navegador não giro
   await p.escolher(jpeg({ w: 4000, h: 3000 })); await p.n.espera(() => p.dialogo());
   assert.deepEqual([p.dialogo().dataset.largura, p.dialogo().dataset.altura], ["4000", "3000"]);
 });
+
+test("foto QUADRADA com EXIF 6: não gira duas vezes quando o navegador já aplica o EXIF (antes girava sempre); gira quando o teste do navegador mostra que ele não aplica", async () => {
+  const exif = (o) => { const t = [0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, o, 0, 0, 0, 0, 0, 0, 0]; return "Exif\0\0" + Buffer.from(t).toString("latin1"); };
+  const quadrada = jpeg({ app1: exif(6), w: 1000, h: 1000 });
+  // o navegador aplica o EXIF (a sonda de 2x1 volta como 1x2): sem giro
+  let p = await perfil({ bitmap: { width: 1000, height: 1000 } });
+  p.n.w.HTMLCanvasElement.prototype.toBlob = (f) => f(new p.n.w.Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])]));
+  p.n.w.createImageBitmap = async (a) => (a.name ? { width: 1000, height: 1000 } : { width: 1, height: 2 });
+  await p.escolher(quadrada); await p.n.espera(() => p.dialogo());
+  assert.equal(p.log.transf.length, 0, "o navegador já girou: não gira de novo");
+  // o navegador NÃO aplica o EXIF (a sonda de 2x1 continua 2x1): gira
+  p = await perfil({ bitmap: { width: 1000, height: 1000 } });
+  p.n.w.HTMLCanvasElement.prototype.toBlob = (f) => f(new p.n.w.Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])]));
+  p.n.w.createImageBitmap = async (a) => (a.name ? { width: 1000, height: 1000 } : { width: 2, height: 1 });
+  await p.escolher(quadrada); await p.n.espera(() => p.dialogo());
+  assert.equal(p.log.transf.length, 1); assert.deepEqual(p.log.transf[0], [0, 1, -1, 0, 1000, 0]);
+});

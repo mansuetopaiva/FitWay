@@ -76,6 +76,20 @@
   const TIPOS = /^image\/(jpeg|png|webp|gif|heic|heif)$/i;
   const $ = (s, r = document) => r.querySelector(s);
 
+  // O navegador aplica a orientação EXIF ao decodificar? Descobre uma vez (JPEG de 2x1 com EXIF 6: aplicado vira 1x2). Sem como testar, assume que sim.
+  let giraExif;
+  async function navegadorGiraExif() {
+    if (giraExif !== undefined) return giraExif;
+    try {
+      const c = document.createElement("canvas"); c.width = 2; c.height = 1; c.getContext("2d").fillRect(0, 0, 2, 1);
+      const jpg = new Uint8Array(await (await new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no()), "image/jpeg"))).arrayBuffer());
+      const t = [0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0], corpo = [...new TextEncoder().encode("Exif\0\0"), ...t], n = corpo.length + 2;
+      const b = await createImageBitmap(new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe1, n >> 8, n & 255, ...corpo, ...jpg.subarray(2)])], { type: "image/jpeg" }), { imageOrientation: "from-image" });
+      giraExif = b.width === 1 && b.height === 2;
+    } catch (e) { giraExif = true; }
+    return giraExif;
+  }
+
   // Lê o arquivo, valida e devolve { fonte (bitmap ou canvas já na orientação certa), iw, ih }.
   // Erros viram Error com mensagem pronta para a pessoa.
   async function ler(arquivo) {
@@ -90,7 +104,11 @@
     // Os navegadores de hoje já giram a foto pelo EXIF. Se não giraram (bitmap com o tamanho cru e orientação de 90°), giro aqui.
     const o = orientacao(cabeca), cru = dimensoesJpeg(cabeca);
     let fonte = bmp, iw = bmp.width, ih = bmp.height;
-    if (o >= 5 && cru && bmp.width === cru.w && bmp.height === cru.h) {
+    // Foto retangular: o tamanho do bitmap diz se o navegador girou. Foto quadrada (e giros de 180° e espelhos) não têm essa pista:
+    // testa uma vez, com um JPEG de 2x1 e EXIF 6, se o navegador aplica o EXIF.
+    const girar = o >= 5 && cru && cru.w !== cru.h ? bmp.width === cru.w && bmp.height === cru.h
+      : o > 1 && cru && cru.w === cru.h && !(await navegadorGiraExif());
+    if (girar) {
       const t = transformacao(o, cru.w, cru.h), c = document.createElement("canvas");
       c.width = t.largura; c.height = t.altura;
       const x = c.getContext("2d"); x.transform(...t.matriz); x.drawImage(bmp, 0, 0);
