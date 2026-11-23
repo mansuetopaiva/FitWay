@@ -115,7 +115,7 @@
       fonte = c; iw = t.largura; ih = t.altura;
     }
     if (Math.min(iw, ih) < LADO_MIN_FOTO) throw new Error("A foto é pequena demais (mínimo de 128 px de lado). Tente outra.");
-    if (iw * ih > 1.5e8) throw new Error("A foto é grande demais. Tente outra.");
+    if (iw * ih > 6e7) throw new Error("A foto é grande demais. Tente outra.");
     return { fonte, iw, ih };
   }
 
@@ -169,7 +169,8 @@
       function pintar() {
         quadro = 0;
         const L = lado(); if (e.lado !== L) { e.lado = L; ajustar(e); }
-        tela.width = tela.height = Math.round(L * dpr);
+        const px = Math.round(L * dpr);
+        if (tela.width !== px) tela.width = tela.height = px; // reatribuir zera e realoca o canvas: só quando o tamanho muda
         const x = tela.getContext("2d"), r = recorte(e);
         x.imageSmoothingQuality = "high";
         x.drawImage(img.fonte, r.sx, r.sy, r.lado, r.lado, 0, 0, tela.width, tela.height);
@@ -206,7 +207,7 @@
         }
       });
       const soltar = (ev) => { pt.delete(ev.pointerId); base = pt.size === 2 ? { ...dois(), zoom: e.zoom } : null; };
-      palco.addEventListener("pointerup", soltar); palco.addEventListener("pointercancel", soltar);
+      palco.addEventListener("pointerup", soltar); palco.addEventListener("pointercancel", soltar); palco.addEventListener("lostpointercapture", soltar); // dedo que some sem pointerup não vira "dedo fantasma"
       palco.addEventListener("wheel", (ev) => {
         ev.preventDefault(); // a página não rola enquanto a roda dá zoom
         const [ax, ay] = rel(ev), px = ev.deltaMode === 1 ? 16 : 1;
@@ -220,6 +221,7 @@
         clearTimeout(falar); if (quadro) cancelAnimationFrame(quadro);
         document.removeEventListener("focusin", prender, true); window.removeEventListener("resize", agendar);
         raiz.remove(); app.inert = false; app.removeAttribute("aria-hidden");
+        if (img.fonte.close) img.fonte.close(); else img.fonte.width = 0; // solta a imagem decodificada (uma foto de 12 MP ocupa ~48 MB)
         if (opc.voltarFoco && opc.voltarFoco.isConnected) opc.voltarFoco.focus();
         fim(salvou);
       }

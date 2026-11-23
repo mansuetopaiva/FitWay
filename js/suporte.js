@@ -93,11 +93,11 @@
       if (!f) return;
       const tela = telaN; // a leitura é assíncrona: se a pessoa já foi para outra tela, a imagem não entra
       preparando = true; $("#supAnexo").innerHTML = `<p class="muted sup-preparando" role="status">Preparando imagem…</p>`;
-      let url = "", erro = null;
-      try { url = await reduzir(f); } catch (e) { erro = e; }
+      let url = "", falhou = null;
+      try { url = await reduzir(f); } catch (e) { falhou = e; }
       if (tela !== telaN) return; // render() já zerou anexo e preparando
       preparando = false;
-      if (erro) toast(erro.message === "grande" ? "Imagem grande demais. Tente um print menor." : "Não consegui abrir esta imagem.");
+      if (falhou) toast(falhou.message === "grande" ? "Imagem grande demais. Tente um print menor." : "Não consegui abrir esta imagem.");
       else anexo = url;
       if (!$("#supAnexo")) return;
       pintar(); (anexo ? $("#supTirar") : $("#supAnexar")).focus();

@@ -20,11 +20,11 @@ async function perfil({ falhas = [], bitmap = { width: 1200, height: 800 }, foto
     if (b.acao === "foto" && falhas.length) { const f = falhas.shift(); if (f instanceof Error) throw f; return f; }
     return chamar(b, t);
   }, { token, hash: "#/perfil" });
-  const log = { desenhos: [], transf: [], jpeg: [] };
+  const log = { desenhos: [], transf: [], jpeg: [], fechou: 0 };
   const proto = n.w.HTMLCanvasElement.prototype;
   proto.getContext = () => ({ fillRect() {}, drawImage: (...a) => log.desenhos.push(a), transform: (...m) => log.transf.push(m), set fillStyle(v) {}, set imageSmoothingQuality(v) {} });
   proto.toDataURL = (tipo, q) => { log.jpeg.push([tipo, q]); return urlDe(jpeg()); };
-  n.w.createImageBitmap = async () => { if (bitmap instanceof Error) throw bitmap; return { ...bitmap, close() {} }; };
+  n.w.createImageBitmap = async () => { if (bitmap instanceof Error) throw bitmap; return { ...bitmap, close() { log.fechou++; } }; };
   await n.espera(() => n.$("#editar"));
   n.clicar("#editar"); await n.espera(() => n.$("#trocarFoto"));
   const escolher = async (bytes = jpeg(), { nome = "a.jpg", tipo = "image/jpeg" } = {}) => {
@@ -210,4 +210,18 @@ test("foto QUADRADA com EXIF 6: não gira duas vezes quando o navegador já apli
   p.n.w.createImageBitmap = async (a) => (a.name ? { width: 1000, height: 1000 } : { width: 2, height: 1 });
   await p.escolher(quadrada); await p.n.espera(() => p.dialogo());
   assert.equal(p.log.transf.length, 1); assert.deepEqual(p.log.transf[0], [0, 1, -1, 0, 1000, 0]);
+});
+
+test("fechar o recorte solta a foto da memória (bitmap.close); ponteiro perdido não deixa um dedo fantasma que trava o arrastar", async () => {
+  const p = await perfil();
+  await p.escolher(); await p.n.espera(() => p.dialogo());
+  const palco = p.n.$("#recPalco");
+  p.ponteiro(palco, "pointerdown", 1, 100, 100); p.ponteiro(palco, "pointerdown", 2, 200, 100); // pinça começou
+  p.ponteiro(palco, "lostpointercapture", 2, 200, 100); // o segundo dedo saiu sem pointerup
+  const z = p.estado().zoom;
+  p.ponteiro(palco, "pointermove", 1, 140, 100);
+  await p.n.espera(() => p.estado().cx < 600);
+  assert.equal(p.estado().zoom, z, "voltou a ser arrasto de um dedo, sem zoom");
+  p.n.clicar("#recCancelar"); await p.n.espera(() => !p.dialogo());
+  assert.equal(p.log.fechou, 1, "a imagem decodificada foi liberada");
 });

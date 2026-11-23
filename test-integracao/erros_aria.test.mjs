@@ -30,6 +30,13 @@ test("login e cadastro: nome, email e senha", async () => {
   enviar();
   ligado(n, n.$("#senha"), /pelo menos 6/);
   assert.equal(n.$("#email").getAttribute("aria-invalid"), null, "só o campo com erro fica marcado");
+  // corrigido e enviado de novo: a ligação com a mensagem antiga é desfeita (nada de aria-describedby apontando para um <p> vazio)
+  const idErro = n.$(".err").id;
+  assert.ok(idErro && n.$("#senha").getAttribute("aria-describedby").includes(idErro));
+  n.$("#senha").value = "senha123"; enviar();
+  await n.espera(() => /Email ou senha incorretos/.test(n.$(".err").textContent));
+  assert.equal(n.$("#senha").getAttribute("aria-invalid"), null);
+  assert.ok(!(n.$("#senha").getAttribute("aria-describedby") || "").includes(idErro), "o campo não aponta mais para a mensagem de outro erro");
   n.clicar("[data-mode=criar]");
   n.$("#senha").value = "senha123"; n.$("#email").value = "novo@x.com"; enviar();
   ligado(n, n.$("#nome"), /Digite seu nome/);

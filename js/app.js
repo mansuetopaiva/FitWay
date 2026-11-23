@@ -41,8 +41,13 @@
   let nErr = 0;
   function erro(err, msg, campo) {
     if (!err) return msg && toast(msg);
-    (err.closest("form") || err.parentElement).querySelectorAll("[aria-invalid]").forEach((i) => i.removeAttribute("aria-invalid"));
+    const raiz = err.closest("form") || err.parentElement;
     err.id ||= "err" + (++nErr);
+    raiz.querySelectorAll("[aria-invalid]").forEach((i) => i.removeAttribute("aria-invalid"));
+    raiz.querySelectorAll("[aria-describedby]").forEach((i) => { // desliga os campos da mensagem anterior; só o campo deste erro volta a apontar para ela
+      const resto = i.getAttribute("aria-describedby").split(" ").filter((x) => x && x !== err.id).join(" ");
+      if (resto) i.setAttribute("aria-describedby", resto); else i.removeAttribute("aria-describedby");
+    });
     err.textContent = msg;
     if (campo && msg) {
       campo.setAttribute("aria-invalid", "true");

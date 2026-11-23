@@ -73,8 +73,9 @@ export default async function handler(req, res) {
         if (!nome) return res.status(400).json({ erro: "Digite seu nome." });
         // Email listado em ADMIN_EMAILS sem conta: quem cadastrasse primeiro viraria admin. A conta tem de existir antes.
         // A recusa é a mesma do email que já tem conta (mesmo status e texto): não revela quais emails são de admin.
+        const hash = senhaHash(b.senha); // sempre, antes de qualquer recusa: o tempo da resposta não separa email de admin de email comum
         if (ehAdmin(email)) return res.status(400).json({ erro: ERRO_CADASTRO });
-        [u] = await sql`insert into usuarios (email, nome, senha) values (${email}, ${nome}, ${senhaHash(b.senha)})
+        [u] = await sql`insert into usuarios (email, nome, senha) values (${email}, ${nome}, ${hash})
           on conflict do nothing returning email, nome, dados`;
         if (!u) return res.status(400).json({ erro: ERRO_CADASTRO });
       } else {
