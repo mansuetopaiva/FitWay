@@ -973,11 +973,23 @@
       atualizarIA();
     });
   }
-  // Consulta o pedido; enquanto ele está pago ou gerando, de novo a cada 4 s (só nesta tela).
-  async function atualizarIA(doCache = false) {
+  // Consulta o pedido; enquanto ele está pago ou gerando, de novo a cada 4 s (só nesta tela). Essas repetições são polls leves
+  // (só o status); a resposta completa, com o plano, vem na primeira consulta e uma vez quando o pedido deixa de esperar.
+  async function atualizarIA(doCache = false, poll = false) {
     clearTimeout(iaTimer);
-    if (document.hidden && ia) { iaTimer = setTimeout(atualizarIA, 4000); return; } // aba escondida: não consulta
-    if (!(doCache && ia)) { try { ia = await api("pedido_status"); } catch (e) { if (e.status === 401) return; } }
+    const outra = () => setTimeout(() => atualizarIA(false, true), 4000);
+    if (document.hidden && ia) { iaTimer = outra(); return; } // aba escondida: não consulta
+    if (!(doCache && ia)) {
+      let r;
+      try { r = await api("pedido_status", poll ? { poll: true } : undefined); } catch (e) { if (e.status === 401) return; }
+      if (r && r.poll) { // só o status: o resto da tela continua como está
+        if (location.hash.split("/")[1] !== "perfil" || !$("#ia") || !ia || !ia.pedido) return;
+        if (r.pedido.status !== ia.pedido.status) { ia.pedido.status = r.pedido.status; $("#ia").innerHTML = pintarIA(); ligarIA(); }
+        iaTimer = outra();
+        return;
+      }
+      if (r) ia = r; // sem conexão: segue com o que já havia
+    }
     if (ia && typeof ia.suporteNaoLido === "boolean" && ia.suporteNaoLido !== suporteAviso) avisoSuporte(ia.suporteNaoLido);
     if (location.hash.split("/")[1] !== "perfil" || !$("#ia")) return;
     if (ia && JSON.stringify(data.plano) !== JSON.stringify(ia.plano)) { // treino pronto, acesso renovado ou vencido
@@ -989,7 +1001,7 @@
     $("#ia").innerHTML = pintarIA();
     $("#ia").hidden = !ia.ativo && !ia.temPlanoIA && !ia.pedido; // função desligada (TREINO_IA_ATIVO) e nada de IA nesta conta
     ligarIA();
-    if (ia.pedido && (ia.pedido.status === "pago" || ia.pedido.status === "gerando")) iaTimer = setTimeout(atualizarIA, 4000);
+    if (ia.pedido && (ia.pedido.status === "pago" || ia.pedido.status === "gerando")) iaTimer = outra();
   }
 
   // ---------- política de privacidade (pública: abre também sem login) ----------

@@ -192,29 +192,40 @@ export default async function handler(req, res) {
       return res.status(r.status).json(r.corpo);
     }
     if (b.acao === "pedido_status") {
-      await limparPedidos(sql, u.email);
-      // O pedido aberto vem primeiro: o admin pode reabrir um pedido antigo com "Gerar de novo".
-      const ultimo = async () => (await sql`select id, tipo, status, metodo, valor, codigo, criado, pago_em, gerado_em from pedidos
-        where email = ${u.email} order by status = any(${ABERTOS}) desc, criado desc limit 1`)[0] || null;
-      let pedido = await ultimo(), x = u;
-      // O formulário só lê as perguntas: não segura a tela esperando uma geração.
-      if (b.form !== true && pedido && (pedido.status === "pago" || pedido.status === "gerando") && await gerar(pedido.id)) {
-        pedido = await ultimo();
+      // Poll de 4 s enquanto o pedido espera o treino: só o status (sem plano, sem listas). A resposta completa vem quando o pedido
+      // deixa de esperar (pronto, erro...), uma vez. Sem limpeza de prazos aqui (o cron e as outras chamadas cuidam).
+      if (b.poll === true) {
+        const [p] = await sql`select id, status from pedidos where email = ${u.email} order by status = any(${ABERTOS}) desc, criado desc limit 1`;
+        if (p && (p.status === "pago" || p.status === "gerando") && !(await gerar(p.id))) return res.json({ poll: true, pedido: { id: p.id, status: p.status } });
+      } else await limparPedidos(sql, u.email);
+      // Tudo numa consulta: o pedido aberto primeiro (o admin pode reabrir um antigo com "Gerar de novo"), as respostas do último pedido
+      // (para o "novo treino") e se há resposta nova no suporte.
+      const info = async () => {
+        const [i] = await sql`select p.id, p.tipo, p.status, p.metodo, p.valor, p.codigo, p.criado, p.pago_em, p.gerado_em,
+            (select respostas from pedidos where email = ${u.email} and respostas is not null order by criado desc limit 1) as ultimas,
+            exists (select 1 from chamados c join chamado_mensagens m on m.chamado_id = c.id
+              where c.email = ${u.email} and m.autor = 'admin' and m.criado > coalesce(c.lido_aluno_em, '-infinity'::timestamptz)) as suporte_nao_lido
+          from (select 1) d left join lateral (select * from pedidos where email = ${u.email} order by status = any(${ABERTOS}) desc, criado desc limit 1) p on true`;
+        const { ultimas, suporte_nao_lido, ...pedido } = i;
+        return { pedido: pedido.id ? pedido : null, ultimas, naoLido: suporte_nao_lido };
+      };
+      let { pedido, ultimas, naoLido: sn } = await info(), x = u;
+      // O formulário só lê as perguntas: não segura a tela esperando uma geração. (No poll, a geração já rodou acima.)
+      if (b.poll !== true && b.form !== true && pedido && (pedido.status === "pago" || pedido.status === "gerando") && await gerar(pedido.id)) {
+        ({ pedido, ultimas, naoLido: sn } = await info());
         [x] = await sql`select acesso_ate, dados from usuarios where email = ${u.email}`;
+      } else if (b.poll === true && pedido && !["pago", "gerando"].includes(pedido.status)) {
+        [x] = await sql`select acesso_ate, dados from usuarios where email = ${u.email}`; // o treino ficou pronto no poll: os dados mudaram
       }
       const agora = new Date(), aberto = !!pedido && ABERTOS.includes(pedido.status), plano = x.dados && x.dados.plano;
       // Função desligada (TREINO_IA_ATIVO): usuário comum não vê pedido inicial nem novo treino; renovar continua.
       const ativo = iaAtiva() || (ehAdmin(u.email) && !termoFaltando().length);
       const pode = Object.fromEntries(Object.keys(PRECOS).map((t) => [t, (ativo || t === "mensalidade") && !podePedir(t, x, agora, aberto).erro]));
       // novo_treino: o formulário vem com as últimas respostas; os consentimentos precisam ser marcados de novo.
-      let ultimas = null;
-      if (pode.novo_treino) {
-        const [r] = await sql`select respostas from pedidos where email = ${u.email} and respostas is not null order by criado desc limit 1`;
-        if (r) { ultimas = r.respostas; delete ultimas.consentimentos; }
-      }
+      if (!pode.novo_treino || !ultimas) ultimas = null; else delete ultimas.consentimentos;
       return res.json({
         pedido, ativo, acessoAte: x.acesso_ate, temPlanoIA: !!plano && plano.origem === "ia", planoCriado: (plano && plano.criado) || null,
-        pode, precos: PRECOS, termo: TERMO_VERSAO, ultimas, plano: visivel(x, x.dados).plano || null, suporteNaoLido: await naoLido(sql, u.email),
+        pode, precos: PRECOS, termo: TERMO_VERSAO, ultimas, plano: visivel(x, x.dados).plano || null, suporteNaoLido: !!sn,
         ...(b.form === true ? { form: { parq: PARQ, opcoes: OPCOES, textos: TEXTOS } } : {}),
       });
     }

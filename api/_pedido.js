@@ -92,14 +92,14 @@ export function limparFotos(f) {
 // - fotos (e o comprovante do Pix manual antigo) apagados 90 dias depois do pedido ficar pronto, cancelado ou com erro (as respostas ficam).
 //   aguardando_confirmacao (Pix manual antigo) não é cancelado aqui: a pessoa disse que pagou; só o admin cancela.
 export async function limparPedidos(sql, email) {
-  const [a] = await sql`with x as (update pedidos set status = 'cancelado', fotos = null, comprovante = null, pagador_nome = null, atualizado = now()
-    where (${email}::text is null or email = ${email}) and status = 'aguardando_pagamento' and greatest(criado, aviso_em) < now() - interval '30 days' returning 1)
-    select count(*)::int as n from x`;
+  // Os dois prazos numa instrução só (1 comando em vez de 2). Não se sobrepõem: o 1º cancela e atualiza `atualizado`, o 2º só pega o que já estava pronto/cancelado/erro há 90 dias.
   // A mensalidade vira pronto sem gerado_em: conta de pago_em.
-  const [f] = await sql`with x as (update pedidos set fotos = null, comprovante = null, pagador_nome = null where (${email}::text is null or email = ${email}) and (fotos is not null or comprovante is not null) and (
-    (status = 'pronto' and coalesce(gerado_em, pago_em) < now() - interval '90 days') or (status in ('cancelado', 'erro') and atualizado < now() - interval '90 days')) returning 1)
-    select count(*)::int as n from x`;
-  return { cancelados: (a && a.n) || 0, fotos: (f && f.n) || 0 }; // contagens, para o resumo da tarefa diária
+  const [r] = await sql`with c as (update pedidos set status = 'cancelado', fotos = null, comprovante = null, pagador_nome = null, atualizado = now()
+      where (${email}::text is null or email = ${email}) and status = 'aguardando_pagamento' and greatest(criado, aviso_em) < now() - interval '30 days' returning 1),
+    f as (update pedidos set fotos = null, comprovante = null, pagador_nome = null where (${email}::text is null or email = ${email}) and (fotos is not null or comprovante is not null) and (
+      (status = 'pronto' and coalesce(gerado_em, pago_em) < now() - interval '90 days') or (status in ('cancelado', 'erro') and atualizado < now() - interval '90 days')) returning 1)
+    select (select count(*) from c)::int as cancelados, (select count(*) from f)::int as fotos`;
+  return { cancelados: (r && r.cancelados) || 0, fotos: (r && r.fotos) || 0 }; // contagens, para o resumo da tarefa diária
 }
 
 // pedido_criar. Recebe sql e "agora" por parâmetro para o teste. u traz email, acesso_ate e dados do banco.

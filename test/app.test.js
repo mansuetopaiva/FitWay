@@ -12,7 +12,10 @@ const sql = async (partes, ...valores) => {
   const q = partes.join("?");
   chamadas.push({ q, valores });
   if (q.includes("from sessoes s join usuarios u")) return usuario ? [usuario] : [];
-  return responder(q, valores);
+  const r = responder(q, valores);
+  // A consulta única do pedido_status (pedido aberto + últimas respostas + suporte) sempre devolve uma linha, mesmo sem pedido.
+  if (q.includes("left join lateral") && !(r && r.length)) return [{ id: null, ultimas: null, suporte_nao_lido: false }];
+  return r;
 };
 mock.module(import.meta.resolve("@neondatabase/serverless"), { exports: { neon: () => sql } });
 const { default: handler } = await import("../api/app.js");
@@ -51,15 +54,15 @@ test("plano de IA vencido não sai do servidor: eu, salvar, treino remover e ped
 
 test("pedido_status: últimas respostas sem os consentimentos; geração não roda ao abrir o formulário", async () => {
   usuario = comPlano("ia", 5, 60);
-  responder = (q) => (q.startsWith("select respostas from pedidos") ? [{ respostas: { objetivo: "Definir", consentimentos: { dados: "x" } } }]
-    : q.startsWith("select id, tipo, status") ? [{ id: "p1", tipo: "inicial", status: "pago" }] : []);
+  const ultimas = { objetivo: "Definir", consentimentos: { dados: "x" } };
+  responder = (q) => (q.includes("left join lateral") ? [{ id: "p1", tipo: "inicial", status: "pago", ultimas, suporte_nao_lido: false }] : []);
   chamadas.length = 0;
   const r = await chamar({ acao: "pedido_status", form: true });
   assert.equal(r.status, 200);
   assert.deepEqual(r.corpo.ultimas, null, "com pedido aberto não há novo treino");
   assert.equal(chamadas.some((c) => c.q.includes("set status = 'gerando'")), false, "form: true não gera");
   assert.equal(r.corpo.form.parq.length, 7);
-  responder = (q) => (q.startsWith("select respostas from pedidos") ? [{ respostas: { objetivo: "Definir", consentimentos: { dados: "x" } } }] : []);
+  responder = (q) => (q.includes("left join lateral") ? [{ id: null, ultimas: { objetivo: "Definir", consentimentos: { dados: "x" } }, suporte_nao_lido: false }] : []);
   const s = await chamar({ acao: "pedido_status" });
   assert.equal(s.corpo.pode.novo_treino, true);
   assert.deepEqual(s.corpo.ultimas, { objetivo: "Definir" });
@@ -186,12 +189,12 @@ test("Pix manual removido: pedido_metodo e pix_avisei respondem Ação desconhec
 test("pedido_status: devolve meio e código do pedido (sem a mensagem do Pix manual), e os preços do Pix", async () => {
   usuario = comPlano("ia", 5, 10);
   const pedido = { id: "p1", tipo: "mensalidade", status: "aguardando_pagamento", metodo: "pix", valor: 999, codigo: "FWABCDEF" };
-  responder = (q) => (q.startsWith("select id, tipo, status, metodo, valor, codigo, criado") ? [pedido] : []);
+  responder = (q) => (q.includes("left join lateral") ? [{ ...pedido, ultimas: null, suporte_nao_lido: false }] : []);
   chamadas.length = 0;
   const r = (await chamar({ acao: "pedido_status" })).corpo;
   assert.deepEqual(r.pedido, pedido);
   assert.deepEqual(r.precos, { inicial: 999, mensalidade: 999, novo_treino: 499 });
-  assert.match(chamadas.find((c) => c.q.startsWith("select id, tipo, status, metodo")).q, /order by status = any\(\?\) desc/, "pedido aberto (inclui aguardando_confirmacao) vem primeiro");
+  assert.match(chamadas.find((c) => c.q.includes("left join lateral")).q, /order by status = any\(\?\) desc/, "pedido aberto (inclui aguardando_confirmacao) vem primeiro");
 });
 
 test("privacidade: pública (sem login e com a IA desligada), sem consultar sessão", async () => {

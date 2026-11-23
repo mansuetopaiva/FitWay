@@ -196,20 +196,20 @@ test("aceite do termo: recusado sem aceite, com versão antiga, com hash diferen
   assert.equal(registrarAceite(TERMO_VERSAO, hash, {}, AGORA).aceite.ip, "");
 });
 
-test("limparPedidos: fotos e comprovante de 90 dias e pedido aguardando pagamento há mais de 30 dias cancelado e sem fotos", async () => {
+test("limparPedidos: fotos e comprovante de 90 dias e pedido aguardando pagamento há mais de 30 dias cancelado e sem fotos (uma instrução só, com as contagens)", async () => {
   const chamadas = [];
-  const sql = async (partes, ...valores) => { chamadas.push({ q: partes.join("?"), valores }); return []; };
-  await limparPedidos(sql, "a@x.com");
-  assert.equal(chamadas.length, 2);
-  const [cancela, fotos] = chamadas;
-  assert.match(cancela.q, /update pedidos set status = 'cancelado', fotos = null, comprovante = null, pagador_nome = null, atualizado = now\(\)/, "termo 5.4: fotos e comprovante apagados no cancelamento");
-  assert.match(cancela.q, /status = 'aguardando_pagamento' and greatest\(criado, aviso_em\) < now\(\) - interval '30 days'/, "conta do último aviso do Pix");
-  assert.doesNotMatch(cancela.q, /aguardando_confirmacao/, "quem avisou o Pix nunca é cancelado pelo prazo");
-  assert.match(fotos.q, /set fotos = null, comprovante = null, pagador_nome = null/);
-  assert.match(fotos.q, /status = 'pronto' and coalesce\(gerado_em, pago_em\) < now\(\) - interval '90 days'/, "a mensalidade fica pronta sem gerado_em");
-  assert.match(fotos.q, /status in \('cancelado', 'erro'\) and atualizado < now\(\) - interval '90 days'/);
-  for (const c of chamadas) assert.deepEqual(c.valores, ["a@x.com", "a@x.com"], "só os pedidos deste usuário");
+  const sql = async (partes, ...valores) => { chamadas.push({ q: partes.join("?"), valores }); return [{ cancelados: 3, fotos: 4 }]; };
+  assert.deepEqual(await limparPedidos(sql, "a@x.com"), { cancelados: 3, fotos: 4 });
+  assert.equal(chamadas.length, 1, "um comando em vez de dois");
+  const { q, valores } = chamadas[0];
+  assert.match(q, /update pedidos set status = 'cancelado', fotos = null, comprovante = null, pagador_nome = null, atualizado = now\(\)/, "termo 5.4: fotos e comprovante apagados no cancelamento");
+  assert.match(q, /status = 'aguardando_pagamento' and greatest\(criado, aviso_em\) < now\(\) - interval '30 days'/, "conta do último aviso do Pix");
+  assert.doesNotMatch(q, /aguardando_confirmacao/, "quem avisou o Pix nunca é cancelado pelo prazo");
+  assert.match(q, /update pedidos set fotos = null, comprovante = null, pagador_nome = null/);
+  assert.match(q, /status = 'pronto' and coalesce\(gerado_em, pago_em\) < now\(\) - interval '90 days'/, "a mensalidade fica pronta sem gerado_em");
+  assert.match(q, /status in \('cancelado', 'erro'\) and atualizado < now\(\) - interval '90 days'/);
+  assert.deepEqual(valores, ["a@x.com", "a@x.com", "a@x.com", "a@x.com"], "só os pedidos deste usuário");
   chamadas.length = 0;
   await limparPedidos(sql, null);
-  for (const c of chamadas) assert.deepEqual(c.valores, [null, null], "admin: todos");
+  assert.deepEqual(chamadas[0].valores, [null, null, null, null], "admin: todos");
 });
