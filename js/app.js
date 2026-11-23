@@ -70,7 +70,7 @@
     const r = await fetch("/api/app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ acao, conta: email || undefined, ...corpo }) });
     const j = await r.json().catch(() => ({}));
     if (r.status === 409 && j.trocaConta) { toast(j.erro); setTimeout(() => location.reload(), 1200); } // só a troca de conta recarrega: nenhuma outra recusa usa trocaConta
-    if (!r.ok) throw Object.assign(new Error(j.erro || "Erro no servidor. Tente de novo."), { status: r.status, termoMudou: j.termoMudou === true });
+    if (!r.ok) throw Object.assign(new Error(j.erro || "Erro no servidor. Tente de novo."), { status: r.status, termoMudou: j.termoMudou === true, recomecar: j.recomecar === true });
     return j;
   }
   let email = null, nomeUser = "", fotoUser = "", adminUser = false, data = null, suporteAviso = false;
@@ -171,18 +171,85 @@
       const botao = $("form .btn");
       botao.disabled = true;
       erro(err, "");
-      try { await entrou(await api(criar ? "criar" : "entrar", { nome, email: em, senha: pw })); }
-      catch (e) {
+      try {
+        const u = await api(criar ? "criar" : "entrar", { nome, email: em, senha: pw });
+        if (u.precisa2fa) return viewDoisFatores(u); // admin: a senha certa não abre sessão; falta o código
+        await entrou(u);
+      } catch (e) {
         botao.disabled = false;
         return erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo.");
       }
-      restoreSessao();
-      // Quem chegou pela volta do checkout (ou por um pedido) sem sessão continua na tela de destino; os outros vão ao início
-      // (a conta nova começa enviando o PDF). Mudar o hash redesenha uma vez só (hashchange); sem mudança, redesenha aqui.
-      const destino = /^#\/(pagamento|pedido)\//.test(location.hash) ? location.hash : data.plano ? "#/inicio" : "#/perfil";
-      if (location.hash !== destino) location.hash = destino; else render();
+      depoisDoLogin();
     };
     $(criar ? "#nome" : "#email").focus();
+  }
+  function depoisDoLogin() {
+    restoreSessao();
+    // Quem chegou pela volta do checkout (ou por um pedido) sem sessão continua na tela de destino; os outros vão ao início
+    // (a conta nova começa enviando o PDF). Mudar o hash redesenha uma vez só (hashchange); sem mudança, redesenha aqui.
+    const destino = /^#\/(pagamento|pedido)\//.test(location.hash) ? location.hash : data.plano ? "#/inicio" : "#/perfil";
+    if (location.hash !== destino) location.hash = destino; else render();
+  }
+
+  // ---------- segundo fator do admin (docs/admin-2fa.md) ----------
+  let dfRestantes = null, dfNovos = null, dfGerando = false; // códigos de recuperação restantes; códigos recém-gerados (só na tela, uma vez)
+  const logoLogin = `<h1><img class="logo" src="img/fitway-logo.webp" alt="FitWay — seu caminho fitness" width="1029" height="528"></h1>`;
+  const htmlCodigos = (cs) => `<ul class="df-codigos" id="dfCodigos">${cs.map((c) => `<li><code>${esc(c.slice(0, 5) + " " + c.slice(5))}</code></li>`).join("")}</ul>`;
+  function viewDoisFatores(r) {
+    const ativar = r.etapa === "ativar";
+    app.innerHTML = `
+      <main class="login">
+        ${logoLogin}
+        <h2 class="esq-tit" id="dfTit" tabindex="-1">${ativar ? "Ative a verificação em duas etapas" : "Verificação em duas etapas"}</h2>
+        ${ativar ? `<ol class="df-passos">
+            <li>No celular, abra um app autenticador (Google Authenticator, Microsoft Authenticator, Aegis…).</li>
+            <li>Adicione uma conta com a chave abaixo ou toque no link.</li>
+            <li>Digite aqui o código de 6 dígitos que o app mostrar.</li></ol>
+          <p class="muted" id="dfChaveRot">Chave da conta, para digitar no app:</p>
+          <p class="df-chave" id="dfChave" aria-labelledby="dfChaveRot">${esc(r.chave)}</p>
+          <p><a class="df-link" href="${esc(r.otpauth)}">Abrir no app autenticador</a></p>`
+          : `<p class="sub">Digite o código do seu app autenticador. Sem o celular, use um código de recuperação.</p>`}
+        <form novalidate id="dfForm">
+          <div class="field"><label for="dfCodigo">${ativar ? "Código de 6 dígitos" : "Código do app ou de recuperação"}</label>
+            <input id="dfCodigo" autocomplete="one-time-code" inputmode="${ativar ? "numeric" : "text"}" maxlength="24" autocapitalize="characters" spellcheck="false" aria-describedby="dfDica" required></div>
+          <p class="muted" id="dfDica">${ativar ? "O código muda a cada 30 segundos. Se der incorreto, confira se a hora do celular está no automático." : "O código do app tem 6 dígitos e muda a cada 30 segundos. O de recuperação tem 10 letras e números e vale uma vez."}</p>
+          <p class="err" role="alert"></p>
+          <button class="btn" type="submit">${ativar ? "Ativar e entrar" : "Entrar"}</button>
+        </form>
+        <p class="login-links"><button type="button" class="link" id="dfVoltar">Voltar para Entrar</button></p>
+      </main>`;
+    $("#dfVoltar").onclick = () => { loginMode = "entrar"; viewLogin(); };
+    $("#dfTit").focus();
+    $("#dfForm").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const err = $("#dfForm .err"), cod = $("#dfCodigo").value.trim(), botao = $("#dfForm .btn");
+      if (!cod) return erro(err, "Digite o código.", $("#dfCodigo"));
+      botao.disabled = true; erro(err, "");
+      let u;
+      try { u = await api("entrar_2fa", { desafio: r.desafio, codigo: cod }); await entrou(u); }
+      catch (e) {
+        if (e.recomecar) { loginMode = "entrar"; viewLogin(); return erro($(".err"), e.message); } // desafio vencido ou gasto: recomeça pela senha
+        botao.disabled = false;
+        return erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo.", $("#dfCodigo"));
+      }
+      if (u.restantes !== undefined) dfRestantes = u.restantes;
+      if (u.recuperacao) { dfRestantes = u.recuperacao.length; return viewCodigosRecuperacao(u.recuperacao); }
+      depoisDoLogin();
+      if (u.restantes !== undefined) toast(`Código de recuperação usado. Restam ${u.restantes}.${u.restantes <= 2 ? " Gere novos no Perfil." : ""}`);
+    };
+  }
+  // Ativação concluída: os códigos aparecem só aqui, uma vez.
+  function viewCodigosRecuperacao(codigos) {
+    app.innerHTML = `
+      <main class="login">
+        ${logoLogin}
+        <h2 class="esq-tit" id="dfCodTit" tabindex="-1">Guarde seus códigos de recuperação</h2>
+        <p class="sub">Se você perder o celular, cada código entra uma vez no lugar do app. Eles não aparecem de novo: anote ou salve em um gerenciador de senhas.</p>
+        ${htmlCodigos(codigos)}
+        <button class="btn" id="dfOk" type="button">Guardei os códigos, continuar</button>
+      </main>`;
+    $("#dfCodTit").focus();
+    $("#dfOk").onclick = depoisDoLogin;
   }
 
   // ---------- esqueci a senha (docs/senha.md) ----------
@@ -763,7 +830,48 @@
   // ---------- perfil ----------
   let editandoPerfil = false, trocandoSenha = false, pararAviso = () => {};
   // repintura = true: Editar, Cancelar, Trocar senha... redesenham o Perfil com o pedido que já veio (nada de nova consulta).
+
+  // Cartão do Perfil do admin: códigos de recuperação restantes e geração de novos (senha atual + código do app).
+  function cartaoDoisFatores() {
+    const poucos = dfRestantes !== null && dfRestantes <= 2;
+    return `<section class="card" id="dfCard" aria-labelledby="dfCardTit">
+      <h2 id="dfCardTit">Verificação em duas etapas</h2>
+      <p class="muted" style="margin:6px 0 10px">Ativada. ${dfRestantes === null ? "Não consegui consultar os códigos de recuperação." : `Códigos de recuperação: <strong>Restam ${dfRestantes}</strong>.`}</p>
+      ${poucos ? `<p class="ia-status erro" role="status">Restam poucos códigos de recuperação. Gere novos.</p>` : ""}
+      ${dfNovos ? `<h3 id="dfCodTit" tabindex="-1" class="df-sub">Códigos novos (os antigos deixaram de valer)</h3><p class="muted">Guarde agora: eles não aparecem de novo.</p>${htmlCodigos(dfNovos)}` : ""}
+      ${dfGerando ? `<form id="dfNovosForm" novalidate aria-labelledby="dfNovosTit">
+          <h3 id="dfNovosTit" class="df-sub">Gerar novos códigos</h3>
+          ${campoUsuario(email)}
+          ${campoSenha("dfSenha", "Senha atual", "current-password")}
+          <div class="field"><label for="dfCodNovo">Código do app autenticador</label>
+            <input id="dfCodNovo" autocomplete="one-time-code" inputmode="numeric" maxlength="7" required aria-describedby="dfNovosDica"></div>
+          <p class="muted" id="dfNovosDica" style="margin:-6px 0 10px">Se o código acabou de ser usado no login, espere o próximo (30 segundos).</p>
+          <p class="err" role="alert"></p>
+          <button class="btn" type="submit">Gerar novos códigos</button>
+          <div class="tools"><button type="button" id="dfCancelar">Cancelar</button></div>
+        </form>` : ""}
+      <div class="tools"><button type="button" id="dfNovos" aria-expanded="${dfGerando}" aria-controls="dfNovosForm">${icon("shield")}Gerar novos códigos</button></div>
+    </section>`;
+  }
+  function ligarDoisFatores() {
+    $("#dfNovos").onclick = () => { dfGerando = !dfGerando; viewPerfil(true); (dfGerando ? $("#dfSenha") : $("#dfNovos")).focus(); };
+    const f = $("#dfNovosForm");
+    if (!f) return;
+    $("#dfCancelar").onclick = () => { dfGerando = false; viewPerfil(true); $("#dfNovos").focus(); };
+    f.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const err = f.querySelector(".err"), senha = $("#dfSenha").value, cod = $("#dfCodNovo").value.trim(), botao = f.querySelector(".btn");
+      if (!senha) return erro(err, "Digite a senha atual.", $("#dfSenha"));
+      if (!cod) return erro(err, "Digite o código do app autenticador.", $("#dfCodNovo"));
+      botao.disabled = true; erro(err, "");
+      try { const r = await api("admin_2fa_codigos", { senha, codigo: cod }); dfNovos = r.recuperacao; dfRestantes = r.restantes; }
+      catch (e) { botao.disabled = false; return erro(err, e.status ? e.message : "Sem conexão com o servidor. Tente de novo."); }
+      dfGerando = false; viewPerfil(true); $("#dfCodTit").focus();
+    };
+  }
   function viewPerfil(repintura = false) {
+    if (!repintura) { dfNovos = null; dfGerando = false; } // códigos novos só ficam na tela enquanto a pessoa não sai do Perfil
+    if (adminUser && dfRestantes === null && !repintura) api("admin_2fa_estado").then((r) => { dfRestantes = r.restantes; if (location.hash.split("/")[1] === "perfil" && !editandoPerfil) viewPerfil(true); }, () => {});
     const u = { nome: nomeUser };
     shell("Perfil", `
       <section class="card profile">
@@ -791,6 +899,7 @@
         <button class="btn" type="submit">Salvar nova senha</button>
         <div class="tools"><button type="button" id="senhaCancelar">Cancelar</button></div>
       </form>` : ""}
+      ${adminUser && !editandoPerfil ? cartaoDoisFatores() : ""}
       <section class="card">
         <div class="row"><span>Plano</span><span>${plano() ? esc(plano().nome) : "Nenhum"}</span></div>
         <div class="row"><span>Sessões feitas</span><span>${data.sessoes}</span></div>
@@ -852,6 +961,7 @@
       fr.readAsDataURL(f);
     };
     if (!editandoPerfil) {
+      if (adminUser) ligarDoisFatores();
       $("#editar").onclick = () => { editandoPerfil = true; trocandoSenha = false; viewPerfil(true); $("#nome").focus(); };
       $("#trocarSenha").onclick = () => { trocandoSenha = !trocandoSenha; viewPerfil(true); (trocandoSenha ? $("#senhaAtual") : $("#trocarSenha")).focus(); };
       const sf = $("#senhaForm");

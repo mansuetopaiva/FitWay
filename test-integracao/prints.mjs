@@ -5,8 +5,9 @@ import http from "node:http";
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { extname, join } from "node:path";
 import { chromium } from "playwright";
-import { abrir } from "./harness.mjs";
+import { abrir, entrarAdmin } from "./harness.mjs";
 import { planoIA, comTermo } from "../test/_fixtures.js";
+import { codigo, passoDe, desbase32, decifrar } from "../api/_totp.js";
 
 const ADMIN = "admin@exemplo.com";
 process.env.ADMIN_EMAILS = ADMIN; process.env.TREINO_IA_ATIVO = "1"; process.env.INFINITEPAY_HANDLE = "exemplo"; process.env.SITE_URL = "http://localhost";
@@ -27,7 +28,7 @@ await sql`update usuarios set dados = ${JSON.stringify({ plano, proximo: "A", ch
 await sql`insert into pedidos (id, email, tipo, status, valor) values ('PEX1', 'bia@exemplo.com', 'inicial', 'aguardando_pagamento', 999)`;
 await chamar({ acao: "chamado_abrir", assunto: "app", texto: "Não consigo ver meu treino na aba Treinos." }, ana);
 await sql`insert into usuarios (email, nome, senha) values (${ADMIN}, 'Admin', ${senhaHash("123456")})`;
-const adm = (await chamar({ acao: "entrar", email: ADMIN, senha: "123456" })).token;
+const adm = (await entrarAdmin(chamar, sql, ADMIN, "123456")).token; // senha + código do autenticador (2º fator obrigatório)
 
 // Servidor: arquivos estáticos + POST /api/app no handler real.
 const TIPOS = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".json": "application/json" };
@@ -73,6 +74,35 @@ const abrirRecorte = (w, h, orient = 1, altura = 0) => async (pg) => {
   const [L, A] = orient >= 5 ? [h, w] : [w, h];
   if (+d.largura !== L || +d.altura !== A) { console.error(`recorte: foto ${d.largura}x${d.altura}, esperado ${L}x${A} (EXIF ${orient})`); process.exit(1); }
 };
+
+// Telas do 2º fator do admin: cada passo usa um admin novo (a ativação só acontece uma vez por conta).
+let nAdm = 0;
+const novoAdmin = async (ativado) => {
+  const em = `df${++nAdm}@exemplo.com`;
+  process.env.ADMIN_EMAILS += "," + em;
+  await sql`insert into usuarios (email, nome, senha) values (${em}, 'Admin Novo', ${senhaHash("123456")})`;
+  if (ativado) await entrarAdmin(chamar, sql, em, "123456");
+  await sql`delete from login_tentativas`;
+  return em;
+};
+const senhaCerta = (ativado, depois) => async (pg) => {
+  const em = await novoAdmin(ativado);
+  await pg.fill("#email", em); await pg.fill("#senha", "123456"); await pg.click("form .btn");
+  await pg.waitForSelector("#dfCodigo");
+  if (depois) await depois(pg, em);
+};
+// O campo com erro está inválido, focado e apontado (aria-describedby) por uma mensagem role="alert" com o texto esperado.
+const erroLigado = async (pg, campo, re) => {
+  await pg.waitForFunction(([c, r]) => new RegExp(r).test(document.querySelector("form .err").textContent), [campo, re.source]);
+  const ruim = await pg.evaluate(([c, r]) => {
+    const e = document.getElementById(c), msg = [...(e.getAttribute("aria-describedby") || "").split(" ")].map((i) => document.getElementById(i)).find((x) => x && x.classList.contains("err"));
+    return [e.getAttribute("aria-invalid") !== "true" && "sem aria-invalid", !msg && "aria-describedby não aponta para a mensagem", msg && msg.getAttribute("role") !== "alert" && "mensagem sem role=alert",
+      document.activeElement !== e && "foco fora do campo"].filter(Boolean);
+  }, [campo, re.source]);
+  if (ruim.length) { console.error(`erro do campo #${campo}: ${ruim.join("; ")}`); process.exit(1); }
+};
+const codigoDe = async (em) => { const [l] = await sql`select segredo_cifrado from admin_2fa where email = ${em}`; await sql`update admin_2fa set ultimo_passo = 0 where email = ${em}`; return codigo(decifrar(l.segredo_cifrado).segredo, passoDe(Date.now())); };
+const ativarNaTela = async (pg) => { await pg.fill("#dfCodigo", codigo(desbase32(await pg.textContent("#dfChave")), passoDe(Date.now()))); await pg.click("#dfForm .btn"); await pg.waitForSelector("#dfCodigos"); };
 const TELAS = [
   ["login", null, ""], ["cadastro", null, "", async (pg) => pg.click('[data-mode="criar"]')], ["esqueci", null, "", async (pg) => pg.click("text=Esqueci a senha")],
   ["politica", null, "#/privacidade"],
@@ -83,6 +113,16 @@ const TELAS = [
   ["perfil-recorte-teclado", ana, "#/perfil", abrirRecorte(1200, 800, 1, 360)], // altura de 360 px: o teclado do celular tomou o resto da tela
   ["admin-usuarios", adm, "#/admin"], ["admin-usuario", adm, "#/admin/ana%40exemplo.com"], ["admin-pedidos", adm, "#/admin/pedidos"],
   ["admin-suporte", adm, "#/admin/suporte"],
+  ["2fa-ativar", null, "", senhaCerta(false)],
+  ["2fa-ativar-erro", null, "", senhaCerta(false, async (pg) => { await pg.click("#dfForm .btn"); await erroLigado(pg, "dfCodigo", /Digite o código/); })],
+  ["2fa-recuperacao", null, "", senhaCerta(false, ativarNaTela)],
+  ["2fa-codigo", null, "", senhaCerta(true)],
+  ["2fa-codigo-erro", null, "", senhaCerta(true, async (pg) => { await pg.fill("#dfCodigo", "000000"); await pg.click("#dfForm .btn"); await erroLigado(pg, "dfCodigo", /Código incorreto/); })],
+  ["perfil-admin", adm, "#/perfil", async (pg) => pg.waitForSelector("#dfCard")],
+  ["perfil-admin-gerar", adm, "#/perfil", async (pg) => { await pg.click("#dfNovos"); await pg.click("#dfNovosForm .btn"); await erroLigado(pg, "dfSenha", /senha atual/i); }],
+  ["perfil-admin-codigos", adm, "#/perfil", async (pg) => {
+    await pg.click("#dfNovos"); await pg.fill("#dfSenha", "123456"); await pg.fill("#dfCodNovo", await codigoDe(ADMIN)); await pg.click("#dfNovosForm .btn"); await pg.waitForSelector("#dfCodigos");
+  }],
 ];
 // Formulário do pedido em cada etapa (usuária nova sem pedido: precisa tirar o pedido de exemplo antes).
 const ETAPAS = [1, 2, 3, 4, 5, 6];
