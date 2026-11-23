@@ -29,8 +29,9 @@ const schema = () => pronto ||= garantirSchema(sql).catch((e) => { pronto = null
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
 const cookie = (t, idade) => `mt=${t}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${idade}`;
-let falso; // hash de uma senha aleatória, para o tempo do login sem conta ser o mesmo; o scrypt só roda na primeira vez que é preciso
-const HASH_FALSO = () => falso ||= senhaHash(randomBytes(16).toString("hex"));
+// Hash fixo (sal + resumo no formato de senhaHash) para o login sem conta: confere() faz o mesmo scrypt de uma conta de verdade e
+// nunca bate. Sem cálculo na partida, e a primeira tentativa de cada instância custa o mesmo que as outras.
+const HASH_FALSO = () => "6a1f0c9e5b7d4a328c91e0f4b6d2a753:" + "0".repeat(64);
 const texto = (v, min, max) => typeof v === "string" && v.length >= min && v.length <= max;
 
 // O banco guarda só o hash do token: um vazamento do banco não entrega sessões abertas.
