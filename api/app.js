@@ -18,7 +18,7 @@ import { emailDisponivel, mensagemIndisponivel, transporteGmail } from "./_email
 import { lerPdf } from "./_treino.js";
 import { ipDe } from "./_ip.js";
 import { limparFotoPerfil } from "./_foto.js";
-import { MSG_LOGIN, reservar, zerar } from "./_login.js";
+import { MSG_LOGIN, reservar, reservarCadastro, reservarGrupo, zerar, zerarGrupo } from "./_login.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const TRINTA_DIAS = 2592000;
@@ -74,6 +74,7 @@ export default async function handler(req, res) {
         if (!nome) return res.status(400).json({ erro: "Digite seu nome." });
         // Email listado em ADMIN_EMAILS sem conta: quem cadastrasse primeiro viraria admin. A conta tem de existir antes.
         // A recusa é a mesma do email que já tem conta (mesmo status e texto): não revela quais emails são de admin.
+        if (!(await reservarCadastro(sql, ipDe(req.headers)))) return res.status(400).json({ erro: ERRO_CADASTRO }); // limite por IP: a mesma recusa de qualquer outro motivo
         const hash = senhaHash(b.senha); // sempre, antes de qualquer recusa: o tempo da resposta não separa email de admin de email comum
         if (ehAdmin(email)) return res.status(400).json({ erro: ERRO_CADASTRO });
         [u] = await sql`insert into usuarios (email, nome, senha) values (${email}, ${nome}, ${hash})
@@ -241,10 +242,12 @@ export default async function handler(req, res) {
       if (b.op === "criar") grupo = Array.from(randomBytes(6), (x) => LETRAS[x % 32]).join("");
       else if (b.op === "sair") grupo = null;
       else if (b.op === "entrar") {
+        // Limite por conta e por IP (reservado antes de consultar). Código inexistente, grupo cheio e tentativa bloqueada: a mesma resposta.
+        const liberado = await reservarGrupo(sql, u.email, ipDe(req.headers));
         const codigo = texto(b.codigo, 6, 6) ? b.codigo.toUpperCase() : "";
         const [{ n }] = await sql`select count(*)::int as n from usuarios where grupo = ${codigo}`;
-        if (!n) return res.status(404).json({ erro: "Não encontrei um grupo com este código." });
-        if (n >= 50) return res.status(400).json({ erro: "Este grupo já está cheio." });
+        if (!liberado || !n || n >= 50) return res.status(400).json({ erro: "Não foi possível entrar neste grupo. Confira o código com quem criou o grupo." });
+        await zerarGrupo(sql, u.email);
         grupo = codigo;
       }
       if (grupo !== u.grupo) await sql`update usuarios set grupo = ${grupo} where email = ${u.email}`;

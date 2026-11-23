@@ -31,7 +31,7 @@ test("servidor: email repetido e grupo cheio respondem 400; só a troca de conta
   for (let i = 0; i < 49; i++) await sql`insert into usuarios (email, nome, senha, grupo) values (${"m" + i + "@x.com"}, 'M', 'x', ${corpo.codigo})`;
   const outro = (await chamar({ acao: "criar", nome: "Caio", email: "caio@x.com", senha: "senha123" })).token;
   const cheio = await chamar({ acao: "ranking", op: "entrar", codigo: corpo.codigo, semana: d(hoje), mes: d(hoje) }, outro);
-  assert.equal(cheio.status, 400); assert.match(cheio.corpo.erro, /cheio/);
+  assert.equal(cheio.status, 400); assert.match(cheio.corpo.erro, /Não foi possível entrar neste grupo/);
   const troca = await chamar({ acao: "eu", conta: "outra@x.com" }, dono);
   assert.equal(troca.status, 409); assert.equal(troca.corpo.trocaConta, true);
 });

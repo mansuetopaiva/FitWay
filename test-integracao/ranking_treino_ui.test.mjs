@@ -33,7 +33,7 @@ test("ranking: criar grupo, entrar com o código, ordem por check-ins, semana/m�
   b.$("#codigo").value = "AB"; b.$("form .btn").click();
   assert.match(b.$(".err").textContent, /6 letras ou números/);
   b.$("#codigo").value = "ZZZZZZ"; b.$("form .btn").click();
-  await b.espera(() => /Não encontrei um grupo/.test(b.texto()));
+  await b.espera(() => /Não foi possível entrar neste grupo/.test(b.texto()));
   b.$("#codigo").value = codigo.toLowerCase(); b.$("form .btn").click(); // minúsculas valem
   await b.espera(() => b.$("#cod"));
   const linhas = [...b.w.document.querySelectorAll(".card .row")].map((r) => r.textContent);
