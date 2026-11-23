@@ -38,7 +38,7 @@ Não há link por email para admin. Recuperação, na ordem:
 **B) Perdeu o celular e os códigos (ou quer trocar de aparelho):** pelo banco (Neon → SQL Editor), apague o segundo fator desse admin. No próximo login ele entra só com a senha, cai na ativação e cadastra um autenticador novo:
 
 ```sql
-delete from admin_2fa where email = 'admin@exemplo.com';          -- apaga o segredo (os códigos de recuperação também somem junto, abaixo)
+delete from admin_2fa where email = 'admin@exemplo.com';          -- apaga o segredo
 delete from admin_recuperacao where email = 'admin@exemplo.com';
 delete from sessoes where email = 'admin@exemplo.com';            -- opcional: derruba sessões abertas
 delete from login_tentativas;                                      -- opcional: tira bloqueios de 15 min
