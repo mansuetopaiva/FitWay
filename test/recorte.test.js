@@ -44,7 +44,7 @@ test("arrastar anda na proporção da escala: 100 px de tela = 100/escala px da 
 test("zoom limitado entre 1 e o máximo (nunca abaixo do mínimo que cobre); valores absurdos não quebram", () => {
   const e = R.novo(3000, 2000, 300);
   for (const z of [0, -5, 0.3, 1, 2.5, 4, 9, 1e9]) { R.zoomar(e, z); assert.ok(e.zoom >= 1 && e.zoom <= R.ZOOM_MAX, "zoom " + z + " -> " + e.zoom); assert.ok(dentro(e)); }
-  R.zoomar(e, NaN === NaN ? 1 : 1); R.zoomar(e, 1);
+  R.zoomar(e, 1);
   perto(R.recorte(e).lado, 2000, "de volta ao 1x");
 });
 

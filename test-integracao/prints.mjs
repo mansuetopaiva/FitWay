@@ -204,10 +204,13 @@ console.log("prints em", SAIDA, "telas:", Object.keys(relatorio).length);
 // PRINTS_ASSERT=1: vira teste de layout (npm run test:layout): alvo < 44 px, contraste abaixo do mínimo, rolagem horizontal, foco invisível, erro de console inesperado.
 if (process.env.PRINTS_ASSERT) {
   const falhas = [];
+  // Passar sem medir nada seria silêncio: toda tela da lista precisa ter sido medida em todas as larguras (e a medição ter rodado inteira).
+  for (const [nome] of TELAS) for (const l of LARGURAS) if (!relatorio[nome] || !relatorio[nome][l] || !Array.isArray(relatorio[nome][l].alvos)) falhas.push(`${nome}@${l}: não foi medida`);
+  for (const e of ETAPAS) for (const l of LARGURAS) if (!relatorio[`pedido-etapa${e}`] || !relatorio[`pedido-etapa${e}`][l]) falhas.push(`pedido-etapa${e}@${l}: não foi medida`);
   for (const [tela, ls] of Object.entries(relatorio)) for (const [l, d] of Object.entries(ls)) {
     for (const k of ["alvos", "contraste", "focoInvisivel", "semNome", "cortados"]) for (const x of d[k] || []) falhas.push(`${tela}@${l} ${k}: ${x}`);
     if (d.rolagemH) falhas.push(`${tela}@${l} rolagem horizontal: ${d.rolagemH}px`);
-    for (const x of d.erros.filter((e) => !/401/.test(e))) falhas.push(`${tela}@${l} console: ${x}`);
+    for (const x of d.erros.filter((e) => !/^Failed to load resource.*\b401\b/.test(e))) falhas.push(`${tela}@${l} console: ${x}`);
   }
   if (falhas.length) { console.error(falhas.join("\n")); console.error(falhas.length + " falha(s) de layout/acessibilidade"); process.exit(1); }
   console.log("layout: sem falhas");

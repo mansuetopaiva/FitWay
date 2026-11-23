@@ -167,12 +167,14 @@ test("foto que não serve (tipo, tamanho, ilegível, pequena demais): mensagem c
   const toast = () => p.n.$("#toast").textContent;
   await p.escolher(Buffer.from("texto"), { nome: "a.txt", tipo: "text/plain" });
   await p.n.espera(() => /JPEG, PNG ou WebP/.test(toast()));
+  assert.ok(!p.dialogo()); assert.equal(p.fotoChamadas().length, 0);
   await p.escolher(Buffer.alloc(13 * 1024 * 1024, 1));
   await p.n.espera(() => /grande demais \(máximo 12 MB\)/.test(toast()));
-  await p.escolher(jpeg()); // decodificador falha
+  assert.ok(!p.dialogo()); assert.equal(p.fotoChamadas().length, 0);
   p.n.w.createImageBitmap = async () => { throw new Error("corrompida"); };
   await p.escolher(jpeg());
   await p.n.espera(() => /Não consegui abrir esta imagem/.test(toast()));
+  assert.ok(!p.dialogo()); assert.equal(p.fotoChamadas().length, 0);
   p.n.w.createImageBitmap = async () => ({ width: 100, height: 100 });
   await p.escolher(jpeg());
   await p.n.espera(() => /pequena demais/.test(toast()));

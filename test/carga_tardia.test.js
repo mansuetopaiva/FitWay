@@ -17,7 +17,7 @@ Object.assign(process.env, { SMTP_USER: "f@exemplo.com", SMTP_SENHA_APP: "x" });
 const t = transporteGmail();
 saida.aposCriar = nm();
 t.sendMail({ from: "f@exemplo.com", to: "a@b.com", subject: "x", text: "x" }).catch(() => {});
-await new Promise((r) => setTimeout(r, 400));
+for (let i = 0; i < 100 && !nm(); i++) await new Promise((r) => setTimeout(r, 50)); // espera o import acontecer (até 5 s), sem apostar num tempo fixo
 saida.aposEnviar = nm();
 console.log(JSON.stringify(saida));
 process.exit(0);

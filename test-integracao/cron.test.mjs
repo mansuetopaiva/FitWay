@@ -11,13 +11,12 @@ const chamarCron = async (authorization, method = "GET") => {
   return { status: st, corpo };
 };
 const FOTOS = '{"frente":"data:image/jpeg;base64,/9j/AAAA"}';
-const ha = (d) => (d === null ? null : d);
 // Datas em "dias atrás" (null = vazio).
 const pedido = (id, status, { criado = 0, atualizado = 0, pago = null, gerado = null } = {}) => sql`insert into pedidos (id, email, tipo, status, valor, fotos, respostas, plano_gerado, criado, atualizado, pago_em, gerado_em)
   values (${id}, ${id + "@x.com"}, 'inicial', ${status}, 999, ${FOTOS}::jsonb, '{"objetivo":["x"]}'::jsonb, '{"nome":"Plano"}'::jsonb,
     now() - make_interval(days => ${criado}), now() - make_interval(days => ${atualizado}),
-    case when ${ha(pago)}::int is null then null else now() - make_interval(days => ${ha(pago)}::int) end,
-    case when ${ha(gerado)}::int is null then null else now() - make_interval(days => ${ha(gerado)}::int) end)`;
+    case when ${pago}::int is null then null else now() - make_interval(days => ${pago}::int) end,
+    case when ${gerado}::int is null then null else now() - make_interval(days => ${gerado}::int) end)`;
 const p = async (id) => (await sql`select status, fotos, respostas, plano_gerado, valor from pedidos where id = ${id}`)[0];
 const estado = async () => JSON.stringify([
   await sql`select id, status, fotos is null as sem from pedidos order by id`, await sql`select id, anexo is null as sem from chamado_mensagens order by id`,
@@ -54,6 +53,7 @@ test("com o token certo: prazos rodam, pedidos pagos e planos ficam intactos, re
   await sql`insert into chamados (id, email, assunto, status, fechado_em) values ('c91', 'chamado@x.com', 'app', 'fechado', now() - interval '91 days'), ('c10', 'chamado@x.com', 'app', 'fechado', now() - interval '10 days')`;
   await sql`insert into chamado_mensagens (chamado_id, autor, texto, anexo) values ('c91', 'aluno', 'oi', 'data:image/jpeg;base64,/9j/AAAA'), ('c10', 'aluno', 'oi', 'data:image/jpeg;base64,/9j/AAAA')`;
   await sql`insert into login_tentativas (chave, falhas, atualizado) values ('c:velha', 3, now() - interval '2 days'), ('c:nova', 3, now() - interval '1 hour')`;
+  await sql`insert into chamados (id, email, assunto, status, atualizado) values ('c8', 'chamado@x.com', 'app', 'respondido', now() - interval '8 days'), ('c3', 'chamado@x.com', 'app', 'respondido', now() - interval '3 days')`; // respondido há 8 dias: o prazo fecha; há 3: fica
 
   const r = await chamarCron("Bearer " + SEGREDO);
   assert.equal(r.status, 200, JSON.stringify(r.corpo));
@@ -76,7 +76,8 @@ test("com o token certo: prazos rodam, pedidos pagos e planos ficam intactos, re
 
   const [l] = await sql`select admin_email, alvo_email, detalhes from admin_log where acao = 'limpeza_diaria'`;
   assert.equal(l.admin_email, "cron"); assert.equal(l.alvo_email, null);
-  assert.deepEqual(l.detalhes, { pedidos_cancelados: 1, fotos_90_dias: 1, fotos_travados: 2, anexos_suporte: 1, chamados_fechados: 0, tentativas_login: 1 });
+  assert.deepEqual(l.detalhes, { pedidos_cancelados: 1, fotos_90_dias: 1, fotos_travados: 2, anexos_suporte: 1, chamados_fechados: 1, tentativas_login: 1 });
+  assert.equal((await sql`select status from chamados where id = 'c8'`)[0].status, "fechado"); assert.equal((await sql`select status from chamados where id = 'c3'`)[0].status, "respondido");
   assert.deepEqual(r.corpo, l.detalhes);
   assert.ok(!/@|data:image/.test(JSON.stringify(l.detalhes)), "sem dados pessoais");
 });
@@ -89,4 +90,13 @@ test("idempotente: rodar de novo dá o mesmo estado e um resumo zerado", async (
   assert.deepEqual(r.corpo, { pedidos_cancelados: 0, fotos_90_dias: 0, fotos_travados: 0, anexos_suporte: 0, chamados_fechados: 0, tentativas_login: 0 });
   assert.equal(await estado(), antes);
   assert.equal((await chamarCron("Bearer " + SEGREDO, "POST")).status, 405, "só GET (é o que o Vercel Cron manda)");
+});
+
+test("o vercel.json agenda uma vez por dia um caminho que existe em api/ (renomear um dos dois quebra o teste)", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const cfg = JSON.parse(readFileSync(R + "vercel.json", "utf8"));
+  assert.equal(cfg.crons.length, 1);
+  const [c] = cfg.crons;
+  assert.ok(existsSync(R + c.path.replace(/^\//, "") + ".js"), c.path + " sem arquivo");
+  assert.match(c.schedule, /^\d+ \d+ \* \* \*$/, "uma vez por dia (compatível com o plano gratuito)");
 });

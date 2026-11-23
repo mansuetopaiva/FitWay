@@ -6,6 +6,9 @@ import { abrir } from "./harness.mjs";
 const { sql, chamar, R } = await abrir();
 const { hojeBR, limpar, juntar } = await import(R + "api/_dados.js");
 const T = (iso) => new Date(iso);
+// Perto da meia-noite de Brasília o "hoje" do teste e o do servidor poderiam divergir: espera passar.
+const aguardaMeiaNoite = async () => { const h = new Date(Date.now() + 3 * 3600e3); if (h.getUTCHours() === 23 && h.getUTCMinutes() === 59 || h.getUTCHours() === 0 && h.getUTCMinutes() === 0) await new Promise((r) => setTimeout(r, 65000)); };
+await aguardaMeiaNoite();
 const soma = (dia, n) => new Date(Date.parse(dia + "T12:00:00Z") + n * 864e5).toISOString().slice(0, 10);
 
 test("virada da meia-noite de Brasília (UTC-3, sem horário de verão): 23:59 ainda é o dia anterior, 00:01 já é o novo", () => {
