@@ -7,6 +7,43 @@ Nenhum acesso ao banco de produção. `npm test` 174/174 e `npm run test:integra
 Gravidades: **crítico** (perde dinheiro/dados ou tira a conta de alguém), **alto** (quebra um fluxo principal ou abre ataque real),
 **médio** (erro de lógica com caminho plausível, prazo da LGPD, lentidão perceptível), **baixo** (raro, cosmético ou dívida).
 
+## Status em 22/11/2026 (depois das Fases 2 e 3 e da revisão por 4 agentes)
+
+Sem push ainda. `npm test` 196, `npm run test:integracao` e `npm run test:layout` verdes (números no fim da entrega). Revisão final por code-reviewer, security-auditor, test-engineer e web-performance-auditor sobre `6932460..HEAD`.
+
+**Corrigido**
+
+| # (tabela abaixo) | O que | Como |
+|---|---|---|
+| 1 | Login sem limite | Tabela `login_tentativas`; por conta (5/8/10 → 1/5/15 min), por IP (20/30/40) e admin (5 → 15 min); resposta única; a tentativa é **reservada atomicamente antes** de conferir a senha (a revisão achou a corrida: rajada de 60 em paralelo contava 60, agora conta 5) |
+| 2 | 409 recarregava o app | 409 só com `trocaConta`; email repetido e grupo cheio são 400; teste da troca real |
+| 3 | Objetivo não lido | já estava (`6932460`) |
+| 4 | Prazos da LGPD sem cron | `/api/cron` diário (06:00 UTC) com `CRON_SECRET`; fotos de pedidos travados >7 dias; limpeza de `login_tentativas`; resumo só com números no `admin_log`; o cron cria o schema se for o primeiro a falar com o banco |
+| 5 | `reps`/`semanas` derrubavam o plano pago | cortados como os outros textos |
+| 6 | Termo mudou com o formulário aberto | `termoMudou`: recarrega o termo e pede o aceite sem perder respostas |
+| 7 | Sessão de treino com plano trocado | `trocouPlano()`; mesma classe: Resumo (`irPara`), foto e anexo lidos devagar |
+| 8 | Check-in futuro | servidor descarta datas depois de hoje em Brasília; ranking, admin e contagem ignoram as já gravadas; o app reflete a resposta |
+| 9 | Cadastro revelava admin/conta | mesma recusa (400, mesmo texto) e hash calculado antes de qualquer recusa |
+| 10 | Partida a frio e desempenho | schema só quando a versão (hash de `aplicarSchema`) muda; nodemailer e hash falso sob demanda; logo WebP 55 KB; fotos dos exercícios próprias (miniatura 96 px); Perfil sem consulta repetida; consulta de 8 s do suporte sem gravar |
+| G | Testes do dinheiro | `dinheiro_sql.test.mjs` no PGlite (os dois defeitos plantados são pegos); teste instável do suporte corrigido; testes de UI de login/Sair, checkout, ranking, treino, PAR-Q e rascunho |
+| D/E | Layout e acessibilidade | alvos de 44 px (319 falhas → 0), admin em 320 px, erros ligados ao campo, foco visível e movido, contraste calculado (mín. 5,38:1), `npm run test:layout` |
+| — | Foto de perfil | recorte 512×512 JPEG 0,85 com EXIF, zoom/pinça/teclado; servidor valida o JPEG e remove metadados; a foto saiu do select de toda requisição |
+| B | IP do login | `x-vercel-forwarded-for` (o cliente não forja) |
+
+**Continua aberto (decisão ou custo maior), com o motivo**
+
+- **Bloqueio por conta pode ser provocado por terceiros** (5 erros no admin = 15 min; renovável a cada 15 min). É o desenho pedido; o admin não tem "Esqueci a senha". Saídas: chave (conta, IP), deixar a senha certa passar fora de IP bloqueado, ou 2º fator para o admin. *Decisão do dono.*
+- **IP compartilhado (CGNAT) bloqueia todos**, e só vale com a Vercel direta na frente (outro proxy faria todos compartilharem o IP).
+- **Cadastro sem limite por IP e sem confirmação de email**; enumeração de emails continua possível (só some a diferença do admin). Código do grupo sem limite de tentativas.
+- **Check-in por fuso**: quem está à frente de Brasília (Noronha, Europa) perde o check-in da última hora/noite; o servidor é estrito por pedido.
+- **Hash falso do login é calculado na primeira vez** (custo de partida × risco de tempo na 1ª tentativa de cada instância).
+- **`grupoIp` com `::` nos 4 primeiros blocos** agrupa errado o /64 IPv6 (raro).
+- **Chave da conta sem `HASH_SEGREDO`** cai para SHA-256 puro.
+- **Desempenho**: `pedido_status` ainda faz 5–6 consultas (e roda a limpeza) a cada chamada e o poll de 4 s devolve o plano inteiro; JS/CSS sem cache longo nem nome com hash (precisa de um passo de build); imports estáticos de `_admin`, `_treino`, etc. na partida; `eu` em 3 consultas em série; ranking varre o jsonb duas vezes e `usuarios(grupo)` sem índice; Perfil repinta a foto em data URL a cada repintura; sem service worker.
+- **Segurança menor**: `console.error(e)` pode registrar mensagem do driver; HSTS/Permissions-Policy não definidos no `vercel.json`; sem `no-store` em `/api/app`.
+- **Testes**: esperas de tempo real em dezenas de testes de UI; suíte de integração lenta (~3,5 min, um PGlite por arquivo); fixtures de conta/plano duplicadas; o recorte no jsdom simula canvas (o JPEG real do Chromium → servidor não é exercitado de ponta a ponta); gesto de arrastar só em jsdom; faltam testes de ordem de Tab e de erro vindo do servidor ligado ao campo.
+- **Itens de menor gravidade da tabela original** (código morto, `reais()` repetido, termo com preços escritos à mão, faixas numéricas duplicadas no cliente, etc.) não foram tratados.
+
 ## Os 10 mais importantes
 
 | # | Gravidade | Problema | Onde |
