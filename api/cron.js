@@ -3,6 +3,7 @@
 import { neon } from "@neondatabase/serverless";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { rodarLimpezas } from "./_cron.js";
+import { garantirSchema } from "./_schema.js";
 
 const sql = neon(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 const sha = (t) => createHash("sha256").update(t).digest();
@@ -16,6 +17,6 @@ function autorizado(authorization, segredo) {
 export default async function handler(req, res) {
   if (!autorizado(req.headers.authorization, process.env.CRON_SECRET)) return res.status(401).json({ erro: "Não autorizado." });
   if (req.method !== "GET") return res.status(405).json({ erro: "Requisição inválida." });
-  try { return res.status(200).json(await rodarLimpezas(sql)); }
+  try { await garantirSchema(sql); return res.status(200).json(await rodarLimpezas(sql)); } // o cron pode ser o primeiro a falar com um banco novo
   catch (e) { console.error(e); return res.status(500).json({ erro: "Erro no servidor." }); }
 }

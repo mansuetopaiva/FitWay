@@ -6,7 +6,7 @@ const REPO = fileURLToPath(new URL("../", import.meta.url)), R = REPO; // raiz d
 // Segredo de teste para o HMAC da exclusão de conta (o real fica só na Vercel).
 export const HASH_TESTE = "segredo-de-integracao-com-mais-de-32-caracteres";
 process.env.HASH_SEGREDO ||= HASH_TESTE;
-export async function abrir() {
+export async function abrir({ semSchema = false } = {}) {
   const db = new PGlite();
   let comandos = 0; // quantos comandos o backend mandou ao banco (para os testes de partida a frio)
   const sql = async (partes, ...v) => { comandos++; return (await db.query(partes.reduce((a, s, i) => a + "$" + i + s), v)).rows; };
@@ -20,6 +20,6 @@ export async function abrir() {
     return { status: st, corpo, token: cookie && /mt=([^;]*)/.exec(cookie)[1] };
   };
   const chamar = fazer(await instancia());
-  await chamar({ acao: "eu" }); // roda o schema()
+  if (!semSchema) await chamar({ acao: "eu" }); // roda o schema()
   return { db, sql, chamar, R, comandos: () => comandos, partidaAFrio: async () => fazer(await instancia()) };
 }
